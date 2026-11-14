@@ -52,6 +52,11 @@ function seed(game: PreviewSeed): DetectedGame {
     metadataSynced: true,
     customOverride: false,
     titleProvisional: false,
+    appType: null,
+    isHidden: false,
+    metadataAttemptedAt: 1700000000000,
+    lastPlayedAt: null,
+    playCount: 0,
     updatedAt: 1700000000000,
     ...rest,
   };
@@ -70,6 +75,8 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
       "Colleziona fantastici mostri da usare in battaglie a turni in questo GDR open-world. Combina due forme di mostri qualsiasi usando il Sistema di Fusione per crearne di nuove e potenti!",
     colors: ["#7c5cd6", "#3a2a7a"],
     isFavorite: true,
+    lastPlayedAt: Date.now() - 2 * 60 * 60 * 1000,
+    playCount: 12,
   }),
   seed({
     id: "steam:1091500",
@@ -97,6 +104,46 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
       "Sfida il dio dei morti e fatti strada con la forza fuori dagli Inferi in questo dungeon crawler roguelike.",
     colors: ["#c2372c", "#4a0f1c"],
     isFavorite: true,
+    lastPlayedAt: Date.now() - 3 * 24 * 60 * 60 * 1000,
+    playCount: 40,
+  }),
+  seed({
+    id: "steam:1145361",
+    title: "Hades Original Soundtrack",
+    platform: "steam",
+    platformAppId: "1145361",
+    installDir: "D:\\SteamLibrary\\steamapps\\music\\Hades OST",
+    launchUri: "steam://rungameid/1145361",
+    genres: [],
+    shortDescription: "La colonna sonora originale di Hades.",
+    appType: "music",
+    isHidden: true,
+  }),
+  seed({
+    id: "gog:1207658924",
+    title: "The Witcher 3: Wild Hunt",
+    platform: "gog",
+    platformAppId: "1207658924",
+    installDir: "E:\\GOG Games\\The Witcher 3 Wild Hunt",
+    executablePath:
+      "E:\\GOG Games\\The Witcher 3 Wild Hunt\\bin\\x64\\witcher3.exe",
+    genres: ["GDR", "Avventura"],
+    shortDescription:
+      "Sei Geralt di Rivia, cacciatore di mostri, in un mondo aperto devastato dalla guerra.",
+    colors: ["#6b1f1f", "#1a0c0c"],
+  }),
+  seed({
+    id: "xbox:Microsoft.624F8B84B80",
+    title: "Forza Horizon 5",
+    platform: "xbox",
+    platformAppId: "Microsoft.624F8B84B80",
+    installDir: "C:\\XboxGames\\Forza Horizon 5",
+    executablePath:
+      "C:\\XboxGames\\Forza Horizon 5\\Content\\gamelaunchhelper.exe",
+    genres: ["Corse", "Sport"],
+    shortDescription:
+      "Esplora i vivaci paesaggi open world del Messico al volante di centinaia di auto.",
+    colors: ["#d6338a", "#3a1466"],
   }),
   seed({
     id: "steam:413150",

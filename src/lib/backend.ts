@@ -1,7 +1,6 @@
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import Database from "@tauri-apps/plugin-sql";
 import type {
   AppConfig,
   DetectedGame,
@@ -52,47 +51,6 @@ export function resolveCoverUrl(
   return `${assetUrl}${sep}v=${updatedAt || 1}`;
 }
 
-async function mirrorGamesToSqlite(games: DetectedGame[]): Promise<void> {
-  if (!isTauri()) return;
-  try {
-    const db = await Database.load("sqlite:kanso.db");
-    for (const g of games) {
-      await db.execute(
-        `INSERT INTO games (
-          id, title, clean_title, platform, platform_app_id, install_dir,
-          executable_path, launch_uri, cover_path, short_description, genres, is_favorite, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
-        ON CONFLICT(id) DO UPDATE SET
-          title = excluded.title,
-          clean_title = excluded.clean_title,
-          platform = excluded.platform,
-          executable_path = excluded.executable_path,
-          cover_path = excluded.cover_path,
-          short_description = excluded.short_description,
-          genres = excluded.genres,
-          is_favorite = excluded.is_favorite,
-          updated_at = CURRENT_TIMESTAMP`,
-        [
-          g.id,
-          g.title,
-          g.cleanTitle,
-          g.platform,
-          g.platformAppId,
-          g.installDir,
-          g.executablePath,
-          g.launchUri,
-          g.coverPath,
-          g.shortDescription,
-          JSON.stringify(g.genres),
-          g.isFavorite ? 1 : 0,
-        ]
-      );
-    }
-  } catch {
-    // Non-fatal: primary JSON store in AppData remains intact
-  }
-}
-
 export async function getSettings(): Promise<AppConfig> {
   if (isTauri()) {
     return invoke<AppConfig>("get_settings");
@@ -124,21 +82,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
   };
 
   if (isTauri()) {
-    const saved = await invoke<AppConfig>("save_settings", {
-      config: sanitized,
-    });
-    try {
-      const db = await Database.load("sqlite:kanso.db");
-      await db.execute(
-        `INSERT INTO settings (key, value, updated_at)
-         VALUES ('has_sgdb_key', $1, CURRENT_TIMESTAMP)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-        [saved.steamgriddbApiKey ? "true" : "false"]
-      );
-    } catch {
-      // Non-fatal
-    }
-    return saved;
+    return invoke<AppConfig>("save_settings", { config: sanitized });
   }
 
   localStorage.setItem(BROWSER_STORAGE_KEY, JSON.stringify(sanitized));
@@ -147,34 +91,22 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
 
 export async function scanGames(): Promise<ScanReport> {
   if (isTauri()) {
-    const report = await invoke<ScanReport>("scan_games");
-    void mirrorGamesToSqlite(report.games);
-    return report;
+    return invoke<ScanReport>("scan_games");
   }
 
-  return {
-    games: [...previewGamesState],
-    steamCount: previewGamesState.filter((g) => g.platform === "steam").length,
-    epicCount: previewGamesState.filter((g) => g.platform === "epic").length,
-    battlenetCount: previewGamesState.filter(
-      (g) => g.platform === "Battle.net"
-    ).length,
-    standaloneCount: previewGamesState.filter(
-      (g) => g.platform === "standalone"
-    ).length,
-    warnings: [],
-  };
+  return { games: [...previewGamesState], warnings: [] };
 }
 
+/**
+ * Fills in missing covers, descriptions and names. Games still incomplete after an attempt are
+ * retried once a day at most, unless `retryNow` (the user explicitly asked for a scan, or just
+ * configured an API key).
+ */
 export async function syncLibraryMetadata(
-  forceRefresh = false
+  retryNow = false
 ): Promise<ScanReport> {
   if (isTauri()) {
-    const report = await invoke<ScanReport>("sync_library_metadata", {
-      forceRefresh,
-    });
-    void mirrorGamesToSqlite(report.games);
-    return report;
+    return invoke<ScanReport>("sync_library_metadata", { retryNow });
   }
 
   return scanGames();
@@ -188,7 +120,6 @@ export async function subscribeToGameUpdates(
   }
   const unlisten = await listen<DetectedGame>("library:game-updated", (ev) => {
     onUpdate(ev.payload);
-    void mirrorGamesToSqlite([ev.payload]);
   });
   return unlisten;
 }
@@ -226,13 +157,11 @@ export async function applySteamGridDbMatch(
   matchedName: string
 ): Promise<DetectedGame> {
   if (isTauri()) {
-    const updated = await invoke<DetectedGame>("apply_steamgriddb_match", {
+    return invoke<DetectedGame>("apply_steamgriddb_match", {
       gameId,
       sgdbGameId,
       matchedName,
     });
-    void mirrorGamesToSqlite([updated]);
-    return updated;
   }
 
   const idx = previewGamesState.findIndex((g) => g.id === gameId);
@@ -256,11 +185,9 @@ export async function updateGameDetails(
   payload: GameManualUpdate
 ): Promise<DetectedGame> {
   if (isTauri()) {
-    const updated = await invoke<DetectedGame>("update_game_details", {
+    return invoke<DetectedGame>("update_game_details", {
       payload,
     });
-    void mirrorGamesToSqlite([updated]);
-    return updated;
   }
 
   const idx = previewGamesState.findIndex((g) => g.id === payload.id);
@@ -285,12 +212,10 @@ export async function setGameLocalCover(
   imagePath: string
 ): Promise<DetectedGame> {
   if (isTauri()) {
-    const updated = await invoke<DetectedGame>("set_game_local_cover", {
+    return invoke<DetectedGame>("set_game_local_cover", {
       gameId,
       imagePath,
     });
-    void mirrorGamesToSqlite([updated]);
-    return updated;
   }
   throw new Error("Selezione file locale disponibile nell'app Windows.");
 }
@@ -300,17 +225,30 @@ export async function setGameFavorite(
   isFavorite: boolean
 ): Promise<DetectedGame> {
   if (isTauri()) {
-    const updated = await invoke<DetectedGame>("set_game_favorite", {
+    return invoke<DetectedGame>("set_game_favorite", {
       gameId,
       isFavorite,
     });
-    void mirrorGamesToSqlite([updated]);
-    return updated;
   }
 
   const idx = previewGamesState.findIndex((g) => g.id === gameId);
   if (idx === -1) throw new Error("Gioco non trovato.");
   const updated: DetectedGame = { ...previewGamesState[idx], isFavorite };
+  previewGamesState[idx] = updated;
+  return updated;
+}
+
+export async function setGameHidden(
+  gameId: string,
+  isHidden: boolean
+): Promise<DetectedGame> {
+  if (isTauri()) {
+    return invoke<DetectedGame>("set_game_hidden", { gameId, isHidden });
+  }
+
+  const idx = previewGamesState.findIndex((g) => g.id === gameId);
+  if (idx === -1) throw new Error("Gioco non trovato.");
+  const updated: DetectedGame = { ...previewGamesState[idx], isHidden };
   previewGamesState[idx] = updated;
   return updated;
 }

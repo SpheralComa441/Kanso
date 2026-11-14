@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
-import { Pencil, Play, Star, X } from "lucide-react";
+import { Eye, EyeOff, Pencil, Play, Star, X } from "lucide-react";
 import { resolveCoverUrl } from "../lib/backend";
-import { genreKey } from "../lib/library";
+import { formatRelativePast, genreKey } from "../lib/library";
 import { PLATFORM_META } from "../lib/platforms";
 import type { DetectedGame } from "../types/game";
 
@@ -13,6 +13,7 @@ interface GameDetailProps {
   onClose: () => void;
   onLaunch: (game: DetectedGame) => void;
   onToggleFavorite: (game: DetectedGame) => void;
+  onToggleHidden: (game: DetectedGame) => void;
   onEdit: (game: DetectedGame) => void;
   onSelectGenre: (genreKey: string) => void;
 }
@@ -34,6 +35,7 @@ export function GameDetail({
   onClose,
   onLaunch,
   onToggleFavorite,
+  onToggleHidden,
   onEdit,
   onSelectGenre,
 }: GameDetailProps) {
@@ -177,6 +179,15 @@ export function GameDetail({
                 {launchTarget(game)}
               </dd>
             </div>
+            {game.lastPlayedAt !== null && (
+              <div className="flex gap-3">
+                <dt className="w-16 shrink-0 text-zinc-600">Giocato</dt>
+                <dd className="min-w-0 truncate text-zinc-400">
+                  {formatRelativePast(game.lastPlayedAt)}
+                  {game.playCount > 1 ? ` · ${game.playCount} avvii` : ""}
+                </dd>
+              </div>
+            )}
           </dl>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -217,6 +228,29 @@ export function GameDetail({
             >
               <Pencil className="h-3.5 w-3.5" />
               <span>Modifica</span>
+            </button>
+
+            <button
+              id="detail-hide-button"
+              type="button"
+              onClick={() => onToggleHidden(game)}
+              title={
+                game.isHidden
+                  ? "Mostra di nuovo in libreria"
+                  : "Nascondi dalla libreria (resta in Nascosti)"
+              }
+              aria-label={
+                game.isHidden
+                  ? "Mostra di nuovo in libreria"
+                  : "Nascondi dalla libreria"
+              }
+              className="ml-auto rounded-lg p-2 text-zinc-500 transition-colors hover:bg-oled-bg/60 hover:text-zinc-200"
+            >
+              {game.isHidden ? (
+                <Eye className="h-4 w-4" />
+              ) : (
+                <EyeOff className="h-4 w-4" />
+              )}
             </button>
           </div>
         </div>

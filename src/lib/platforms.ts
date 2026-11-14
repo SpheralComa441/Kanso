@@ -4,6 +4,10 @@ import type { GamePlatform } from "../types/game";
 export const PLATFORM_ORDER: GamePlatform[] = [
   "steam",
   "epic",
+  "gog",
+  "ea",
+  "ubisoft",
+  "xbox",
   "Battle.net",
   "standalone",
 ];
@@ -19,6 +23,22 @@ export const PLATFORM_META: Record<
   epic: {
     label: "Epic Games",
     badgeClass: "border-zinc-500/30 bg-zinc-500/20 text-zinc-200",
+  },
+  gog: {
+    label: "GOG",
+    badgeClass: "border-fuchsia-500/30 bg-fuchsia-500/15 text-fuchsia-300",
+  },
+  ea: {
+    label: "EA app",
+    badgeClass: "border-rose-500/30 bg-rose-500/15 text-rose-300",
+  },
+  ubisoft: {
+    label: "Ubisoft",
+    badgeClass: "border-indigo-400/35 bg-indigo-400/15 text-indigo-300",
+  },
+  xbox: {
+    label: "Xbox",
+    badgeClass: "border-green-500/30 bg-green-500/15 text-green-300",
   },
   "Battle.net": {
     label: "Battle.net",

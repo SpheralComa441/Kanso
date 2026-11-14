@@ -8,6 +8,14 @@ pub enum GamePlatform {
     Steam,
     #[serde(rename = "epic", alias = "Epic")]
     Epic,
+    #[serde(rename = "gog", alias = "GOG")]
+    Gog,
+    #[serde(rename = "ea", alias = "EA")]
+    Ea,
+    #[serde(rename = "ubisoft", alias = "Ubisoft")]
+    Ubisoft,
+    #[serde(rename = "xbox", alias = "Xbox")]
+    Xbox,
     #[serde(
         rename = "Battle.net",
         alias = "battlenet",
@@ -24,9 +32,29 @@ impl GamePlatform {
         match self {
             GamePlatform::Steam => "steam",
             GamePlatform::Epic => "epic",
+            GamePlatform::Gog => "gog",
+            GamePlatform::Ea => "ea",
+            GamePlatform::Ubisoft => "ubisoft",
+            GamePlatform::Xbox => "xbox",
             GamePlatform::BattleNet => "Battle.net",
             GamePlatform::Standalone => "standalone",
         }
+    }
+
+    /// Inverse of [`Self::as_str`], used when reading the platform column back from the database.
+    pub fn parse(raw: &str) -> Option<Self> {
+        [
+            GamePlatform::Steam,
+            GamePlatform::Epic,
+            GamePlatform::Gog,
+            GamePlatform::Ea,
+            GamePlatform::Ubisoft,
+            GamePlatform::Xbox,
+            GamePlatform::BattleNet,
+            GamePlatform::Standalone,
+        ]
+        .into_iter()
+        .find(|platform| platform.as_str().eq_ignore_ascii_case(raw.trim()))
     }
 }
 
@@ -49,7 +77,7 @@ pub struct DetectedGame {
     pub title: String,
     /// Normalized title stripped of edition suffixes and trademark symbols for metadata APIs.
     pub clean_title: String,
-    /// Platform source (`steam`, `epic`, `Battle.net`, or `standalone`).
+    /// Platform source (`steam`, `epic`, `gog`, `ea`, `ubisoft`, `xbox`, `Battle.net`, or `standalone`).
     pub platform: GamePlatform,
     /// Platform-specific identifier (`appid` for Steam, `AppName` for Epic, registry key for Battle.net).
     pub platform_app_id: Option<String>,
@@ -86,6 +114,22 @@ pub struct DetectedGame {
     /// the official name and clears the flag.
     #[serde(default)]
     pub title_provisional: bool,
+    /// Store classification of a Steam app (`game`, `music`, `dlc`, `application`, ...), or
+    /// `unlisted` when the store has no page for it. `None` until first looked up.
+    #[serde(default)]
+    pub app_type: Option<String>,
+    /// Hidden from every library view except "Nascosti" (soundtracks, tools, unwanted entries).
+    #[serde(default)]
+    pub is_hidden: bool,
+    /// When automatic metadata lookup was last attempted (ms); `0` = never. Drives retry back-off.
+    #[serde(default)]
+    pub metadata_attempted_at: u64,
+    /// When the game was last launched from Kanso (ms).
+    #[serde(default)]
+    pub last_played_at: Option<u64>,
+    /// How many times the game was launched from Kanso.
+    #[serde(default)]
+    pub play_count: u32,
     /// Last metadata/cover update timestamp in ms (also used for UI image cache busting).
     #[serde(default)]
     pub updated_at: u64,
@@ -121,6 +165,11 @@ impl DetectedGame {
             metadata_synced: false,
             custom_override: false,
             title_provisional: false,
+            app_type: None,
+            is_hidden: false,
+            metadata_attempted_at: 0,
+            last_played_at: None,
+            play_count: 0,
             updated_at: now_timestamp_ms(),
         }
     }
@@ -149,15 +198,12 @@ pub struct GameManualUpdate {
     pub is_favorite: Option<bool>,
 }
 
-/// Aggregated result of a full library scan across Steam, Epic Games, Battle.net, and custom folders.
+/// Aggregated result of a full library scan across every supported store and the custom folders.
+/// Per-platform counts are derived from `games` by whoever needs them.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScanReport {
     pub games: Vec<DetectedGame>,
-    pub steam_count: usize,
-    pub epic_count: usize,
-    pub battlenet_count: usize,
-    pub standalone_count: usize,
     pub warnings: Vec<String>,
 }
 

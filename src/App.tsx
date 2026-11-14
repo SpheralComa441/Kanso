@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Star, X } from "lucide-react";
+import { EyeOff, History, Star, X } from "lucide-react";
 import { ApiKeyBanner } from "./components/ApiKeyBanner";
 import { EditGameModal } from "./components/EditGameModal";
 import { GameDetail } from "./components/GameDetail";
@@ -14,13 +14,16 @@ import {
   saveSettings,
   scanGames,
   setGameFavorite,
+  setGameHidden,
   subscribeToGameUpdates,
   syncLibraryMetadata,
 } from "./lib/backend";
 import {
+  COLLECTION_LABELS,
   EMPTY_FILTERS,
+  activeFilterCount,
   applyLibraryFilters,
-  countByPlatform,
+  countLibrary,
   hasActiveFilters,
   readUiPreference,
   sortGamesByTitle,
@@ -65,10 +68,6 @@ export function App() {
   const [config, setConfig] = useState<AppConfig>(INITIAL_CONFIG);
   const [report, setReport] = useState<ScanReport>({
     games: [],
-    steamCount: 0,
-    epicCount: 0,
-    battlenetCount: 0,
-    standaloneCount: 0,
     warnings: [],
   });
   const [isScanning, setIsScanning] = useState(true);
@@ -98,11 +97,11 @@ export function App() {
     });
   }, []);
 
-  const runMetadataSync = useCallback(async (forceRefresh = false) => {
+  const runMetadataSync = useCallback(async (retryNow: boolean) => {
     if (!isRunningInTauri()) return;
     setIsSyncingMetadata(true);
     try {
-      const syncedReport = await syncLibraryMetadata(forceRefresh);
+      const syncedReport = await syncLibraryMetadata(retryNow);
       setReport((prev) => ({
         ...syncedReport,
         warnings: prev.warnings,
@@ -114,13 +113,17 @@ export function App() {
     }
   }, []);
 
-  const performScan = useCallback(async () => {
+  /**
+   * `userRequested`: the user asked for this scan, so games whose metadata lookup already
+   * failed today are retried too. The automatic scan at startup stays quiet about them.
+   */
+  const performScan = useCallback(async (userRequested: boolean) => {
     setIsScanning(true);
     setStatusMessage(null);
     try {
       const res = await scanGames();
       setReport(res);
-      void runMetadataSync(false);
+      void runMetadataSync(userRequested);
     } catch (err) {
       setStatusMessage(
         err instanceof Error
@@ -151,7 +154,7 @@ export function App() {
       }
 
       if (mounted) {
-        await performScan();
+        await performScan(false);
       }
     })();
 
@@ -165,17 +168,18 @@ export function App() {
     const foldersChanged =
       JSON.stringify(updated.customFolders) !==
       JSON.stringify(config.customFolders);
-    const apiKeyNewlyAdded =
-      !config.steamgriddbApiKey.trim() &&
-      Boolean(updated.steamgriddbApiKey.trim());
+    const apiKeyChanged =
+      Boolean(updated.steamgriddbApiKey.trim()) &&
+      updated.steamgriddbApiKey.trim() !== config.steamgriddbApiKey.trim();
 
     const saved = await saveSettings(updated);
     setConfig(saved);
 
     if (foldersChanged) {
-      await performScan();
-    } else if (apiKeyNewlyAdded) {
-      void runMetadataSync(false);
+      await performScan(true);
+    } else if (apiKeyChanged) {
+      // A new key can find covers that earlier attempts could not
+      void runMetadataSync(true);
     }
   };
 
@@ -213,6 +217,23 @@ export function App() {
     }
   };
 
+  const handleToggleHidden = async (game: DetectedGame) => {
+    const nextValue = !game.isHidden;
+    upsertSingleGameInState({ ...game, isHidden: nextValue });
+    // The game leaves the view it was opened from
+    setDetailGameId(null);
+    try {
+      upsertSingleGameInState(await setGameHidden(game.id, nextValue));
+    } catch (err) {
+      upsertSingleGameInState(game);
+      setStatusMessage(
+        typeof err === "string"
+          ? err
+          : "Impossibile aggiornare la visibilità del gioco. Riprova."
+      );
+    }
+  };
+
   const toggleSidebar = () => {
     setIsSidebarOpen((open) => {
       writeUiPreference(SIDEBAR_PREF_KEY, open ? "closed" : "open");
@@ -230,11 +251,7 @@ export function App() {
 
   const games = report.games;
   const genres = useMemo(() => summarizeGenres(games), [games]);
-  const platformCounts = useMemo(() => countByPlatform(games), [games]);
-  const favoriteCount = useMemo(
-    () => games.filter((g) => g.isFavorite).length,
-    [games]
-  );
+  const counts = useMemo(() => countLibrary(games), [games]);
   const filteredGames = useMemo(
     () => applyLibraryFilters(games, filters, searchQuery),
     [games, filters, searchQuery]
@@ -258,28 +275,35 @@ export function App() {
   );
 
   const hasApiKey = config.steamgriddbApiKey.trim().length > 0;
-  const filtersActive = hasActiveFilters(filters);
-  const activeFilterCount =
-    Number(filters.favoritesOnly) +
-    Number(filters.platform !== null) +
-    Number(filters.genre !== null);
-  const isNarrowed = filtersActive || searchQuery.trim().length > 0;
+  const filterCount = activeFilterCount(filters);
+  const isNarrowed =
+    hasActiveFilters(filters) || searchQuery.trim().length > 0;
+  // What "N di M" is measured against: the hidden pool or the visible library
+  const poolSize =
+    filters.collection === "hidden" ? counts.hidden : counts.visible;
+
+  // Leaving the last hidden game visible again empties the pool: go back to the library
+  useEffect(() => {
+    if (filters.collection === "hidden" && counts.hidden === 0) {
+      setFilters(EMPTY_FILTERS);
+    }
+  }, [filters.collection, counts.hidden]);
 
   return (
     <div className="flex h-full flex-col bg-oled-bg text-zinc-100">
       <Header
-        totalGames={games.length}
+        totalGames={counts.visible}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         isSidebarOpen={isSidebarOpen}
         onToggleSidebar={toggleSidebar}
-        activeFilterCount={activeFilterCount}
+        activeFilterCount={filterCount}
         viewMode={viewMode}
         onViewModeChange={changeViewMode}
         isScanning={isScanning}
         isSyncingMetadata={isSyncingMetadata}
         hasApiKey={hasApiKey}
-        onScan={performScan}
+        onScan={() => void performScan(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
@@ -295,9 +319,7 @@ export function App() {
           isOpen={isSidebarOpen}
           filters={filters}
           onFiltersChange={setFilters}
-          totalGames={games.length}
-          favoriteCount={favoriteCount}
-          platformCounts={platformCounts}
+          counts={counts}
           genres={genres}
         />
 
@@ -315,12 +337,20 @@ export function App() {
           {/* Active filters: always visible, even with the sidebar collapsed */}
           {isNarrowed && games.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-              {filters.favoritesOnly && (
+              {filters.collection !== "all" && (
                 <FilterChip
-                  label="Preferiti"
-                  icon={<Star className="h-3 w-3 fill-accent text-accent" />}
+                  label={COLLECTION_LABELS[filters.collection]}
+                  icon={
+                    filters.collection === "favorites" ? (
+                      <Star className="h-3 w-3 fill-accent text-accent" />
+                    ) : filters.collection === "recent" ? (
+                      <History className="h-3 w-3 text-zinc-400" />
+                    ) : (
+                      <EyeOff className="h-3 w-3 text-zinc-400" />
+                    )
+                  }
                   onRemove={() =>
-                    setFilters((f) => ({ ...f, favoritesOnly: false }))
+                    setFilters((f) => ({ ...f, collection: "all" }))
                   }
                 />
               )}
@@ -337,9 +367,9 @@ export function App() {
                 />
               )}
               <span className="tabular-nums">
-                {filteredGames.length} di {games.length}
+                {filteredGames.length} di {poolSize}
               </span>
-              {activeFilterCount > 1 && (
+              {filterCount > 1 && (
                 <button
                   type="button"
                   onClick={() => setFilters(EMPTY_FILTERS)}
@@ -373,6 +403,7 @@ export function App() {
         onClose={closeDetail}
         onLaunch={handleLaunchGame}
         onToggleFavorite={handleToggleFavorite}
+        onToggleHidden={handleToggleHidden}
         onEdit={(game) => setEditingGameId(game.id)}
         onSelectGenre={(key) => {
           setFilters({ ...EMPTY_FILTERS, genre: key });

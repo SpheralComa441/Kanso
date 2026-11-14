@@ -1,18 +1,31 @@
 import type { DetectedGame, GamePlatform } from "../types/game";
 import { PLATFORM_ORDER } from "./platforms";
 
-/** Quick filters combined with AND; `null` / `false` means "no constraint". */
+/**
+ * Which slice of the library is shown. Hidden games appear in `hidden` only; every other
+ * collection, count and filter ignores them.
+ */
+export type LibraryCollection = "all" | "favorites" | "recent" | "hidden";
+
+/** Quick filters combined with AND; `"all"` / `null` means "no constraint". */
 export interface LibraryFilters {
+  collection: LibraryCollection;
   platform: GamePlatform | null;
   /** Normalized genre key, see {@link genreKey}. */
   genre: string | null;
-  favoritesOnly: boolean;
 }
 
 export const EMPTY_FILTERS: LibraryFilters = {
+  collection: "all",
   platform: null,
   genre: null,
-  favoritesOnly: false,
+};
+
+export const COLLECTION_LABELS: Record<LibraryCollection, string> = {
+  all: "Tutti i giochi",
+  favorites: "Preferiti",
+  recent: "Giocati di recente",
+  hidden: "Nascosti",
 };
 
 export interface GenreSummary {
@@ -21,9 +34,28 @@ export interface GenreSummary {
   count: number;
 }
 
+export interface LibraryCounts {
+  /** Games shown in the library (hidden ones excluded). */
+  visible: number;
+  favorites: number;
+  recent: number;
+  hidden: number;
+  byPlatform: Record<GamePlatform, number>;
+}
+
 export function hasActiveFilters(filters: LibraryFilters): boolean {
   return (
-    filters.platform !== null || filters.genre !== null || filters.favoritesOnly
+    filters.collection !== "all" ||
+    filters.platform !== null ||
+    filters.genre !== null
+  );
+}
+
+export function activeFilterCount(filters: LibraryFilters): number {
+  return (
+    Number(filters.collection !== "all") +
+    Number(filters.platform !== null) +
+    Number(filters.genre !== null)
   );
 }
 
@@ -33,12 +65,13 @@ export function genreKey(genre: string): string {
 }
 
 /**
- * Genres found in the library's metadata, most common first. A genre typed with
+ * Genres found in the visible library's metadata, most common first. A genre typed with
  * different casing on different games is counted once, under its first spelling.
  */
 export function summarizeGenres(games: DetectedGame[]): GenreSummary[] {
   const byKey = new Map<string, GenreSummary>();
   for (const game of games) {
+    if (game.isHidden) continue;
     const seenInGame = new Set<string>();
     for (const raw of game.genres) {
       const key = genreKey(raw);
@@ -57,14 +90,26 @@ export function summarizeGenres(games: DetectedGame[]): GenreSummary[] {
   );
 }
 
-export function countByPlatform(
-  games: DetectedGame[]
-): Record<GamePlatform, number> {
-  const counts = Object.fromEntries(
+export function countLibrary(games: DetectedGame[]): LibraryCounts {
+  const byPlatform = Object.fromEntries(
     PLATFORM_ORDER.map((p) => [p, 0])
   ) as Record<GamePlatform, number>;
+  const counts: LibraryCounts = {
+    visible: 0,
+    favorites: 0,
+    recent: 0,
+    hidden: 0,
+    byPlatform,
+  };
   for (const game of games) {
-    counts[game.platform] = (counts[game.platform] ?? 0) + 1;
+    if (game.isHidden) {
+      counts.hidden += 1;
+      continue;
+    }
+    counts.visible += 1;
+    if (game.isFavorite) counts.favorites += 1;
+    if (game.lastPlayedAt !== null) counts.recent += 1;
+    byPlatform[game.platform] = (byPlatform[game.platform] ?? 0) + 1;
   }
   return counts;
 }
@@ -75,8 +120,12 @@ export function applyLibraryFilters(
   searchQuery: string
 ): DetectedGame[] {
   const q = searchQuery.trim().toLowerCase();
-  return games.filter((g) => {
-    if (filters.favoritesOnly && !g.isFavorite) return false;
+  const wantHidden = filters.collection === "hidden";
+
+  const matching = games.filter((g) => {
+    if (g.isHidden !== wantHidden) return false;
+    if (filters.collection === "favorites" && !g.isFavorite) return false;
+    if (filters.collection === "recent" && g.lastPlayedAt === null) return false;
     if (filters.platform && g.platform !== filters.platform) return false;
     if (
       filters.genre &&
@@ -91,6 +140,12 @@ export function applyLibraryFilters(
       g.genres.some((genre) => genre.toLowerCase().includes(q))
     );
   });
+
+  if (filters.collection === "recent") {
+    // Most recently launched first
+    matching.sort((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0));
+  }
+  return matching;
 }
 
 export function sortGamesByTitle(games: DetectedGame[]): DetectedGame[] {
@@ -99,6 +154,27 @@ export function sortGamesByTitle(games: DetectedGame[]): DetectedGame[] {
       a.title.toLowerCase().localeCompare(b.title.toLowerCase()) ||
       a.id.localeCompare(b.id)
   );
+}
+
+const RELATIVE_TIME = new Intl.RelativeTimeFormat("it", { numeric: "auto" });
+const RELATIVE_STEPS: [limitSeconds: number, unit: Intl.RelativeTimeFormatUnit, seconds: number][] = [
+  [3600, "minute", 60],
+  [86400, "hour", 3600],
+  [86400 * 30, "day", 86400],
+  [86400 * 365, "month", 86400 * 30],
+  [Infinity, "year", 86400 * 365],
+];
+
+/** "poco fa", "3 ore fa", "ieri", "2 mesi fa"... for a past timestamp in milliseconds. */
+export function formatRelativePast(timestampMs: number, nowMs = Date.now()): string {
+  const elapsed = Math.max(0, Math.round((nowMs - timestampMs) / 1000));
+  if (elapsed < 60) return "poco fa";
+  for (const [limit, unit, size] of RELATIVE_STEPS) {
+    if (elapsed < limit) {
+      return RELATIVE_TIME.format(-Math.floor(elapsed / size), unit);
+    }
+  }
+  return "";
 }
 
 /** Reads a small per-device UI preference; never throws (private mode, blocked storage). */

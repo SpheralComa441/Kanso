@@ -1,17 +1,21 @@
-import { Library, Star } from "lucide-react";
+import { EyeOff, History, Library, Star } from "lucide-react";
 import type { ReactNode } from "react";
-import type { GenreSummary, LibraryFilters } from "../lib/library";
-import { hasActiveFilters } from "../lib/library";
+import {
+  COLLECTION_LABELS,
+  EMPTY_FILTERS,
+  hasActiveFilters,
+  type GenreSummary,
+  type LibraryCollection,
+  type LibraryCounts,
+  type LibraryFilters,
+} from "../lib/library";
 import { PLATFORM_META, PLATFORM_ORDER } from "../lib/platforms";
-import type { GamePlatform } from "../types/game";
 
 interface SidebarProps {
   isOpen: boolean;
   filters: LibraryFilters;
   onFiltersChange: (next: LibraryFilters) => void;
-  totalGames: number;
-  favoriteCount: number;
-  platformCounts: Record<GamePlatform, number>;
+  counts: LibraryCounts;
   genres: GenreSummary[];
 }
 
@@ -73,19 +77,42 @@ function SectionTitle({ children }: { children: ReactNode }) {
 }
 
 /**
- * Collapsible quick-filter panel: favorites, platform and the genres found in the
- * library's metadata. Filters combine; clicking an active one switches it off.
+ * Collapsible quick-filter panel: collections (favorites, recently played, hidden), platform
+ * and the genres found in the library's metadata. Filters combine; clicking an active one
+ * switches it off.
  */
 export function Sidebar({
   isOpen,
   filters,
   onFiltersChange,
-  totalGames,
-  favoriteCount,
-  platformCounts,
+  counts,
   genres,
 }: SidebarProps) {
   const nothingFiltered = !hasActiveFilters(filters);
+  const viewingHidden = filters.collection === "hidden";
+
+  /** Toggles a collection. Hidden games form a separate pool, so entering it drops the rest. */
+  const toggleCollection = (collection: LibraryCollection) => {
+    if (filters.collection === collection) {
+      onFiltersChange({ ...filters, collection: "all" });
+    } else if (collection === "hidden") {
+      onFiltersChange({ ...EMPTY_FILTERS, collection });
+    } else {
+      onFiltersChange({ ...filters, collection });
+    }
+  };
+
+  /** Platform and genre describe visible games: picking one leaves the hidden pool. */
+  const withVisiblePool = (next: Partial<LibraryFilters>): LibraryFilters => ({
+    ...filters,
+    collection: viewingHidden ? "all" : filters.collection,
+    ...next,
+  });
+
+  const platformsWithGames = PLATFORM_ORDER.filter(
+    (platform) =>
+      counts.byPlatform[platform] > 0 || filters.platform === platform
+  );
 
   return (
     <aside
@@ -101,65 +128,73 @@ export function Sidebar({
           <div className="space-y-0.5">
             <FilterRow
               id="filter-all"
-              label="Tutti i giochi"
-              count={totalGames}
+              label={COLLECTION_LABELS.all}
+              count={counts.visible}
               active={nothingFiltered}
               icon={<Library className="h-3.5 w-3.5 shrink-0" />}
-              onClick={() =>
-                onFiltersChange({
-                  platform: null,
-                  genre: null,
-                  favoritesOnly: false,
-                })
-              }
+              onClick={() => onFiltersChange(EMPTY_FILTERS)}
             />
             <FilterRow
               id="filter-favorites"
-              label="Preferiti"
-              count={favoriteCount}
-              active={filters.favoritesOnly}
+              label={COLLECTION_LABELS.favorites}
+              count={counts.favorites}
+              active={filters.collection === "favorites"}
               icon={
                 <Star
                   className={`h-3.5 w-3.5 shrink-0 ${
-                    filters.favoritesOnly ? "fill-accent text-accent" : ""
+                    filters.collection === "favorites"
+                      ? "fill-accent text-accent"
+                      : ""
                   }`}
                 />
               }
-              onClick={() =>
-                onFiltersChange({
-                  ...filters,
-                  favoritesOnly: !filters.favoritesOnly,
-                })
-              }
+              onClick={() => toggleCollection("favorites")}
             />
+            <FilterRow
+              id="filter-recent"
+              label={COLLECTION_LABELS.recent}
+              count={counts.recent}
+              active={filters.collection === "recent"}
+              icon={<History className="h-3.5 w-3.5 shrink-0" />}
+              onClick={() => toggleCollection("recent")}
+            />
+            {(counts.hidden > 0 || viewingHidden) && (
+              <FilterRow
+                id="filter-hidden"
+                label={COLLECTION_LABELS.hidden}
+                count={counts.hidden}
+                active={viewingHidden}
+                icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
+                onClick={() => toggleCollection("hidden")}
+              />
+            )}
           </div>
         </section>
 
-        <section>
-          <SectionTitle>Piattaforma</SectionTitle>
-          <div className="space-y-0.5">
-            {PLATFORM_ORDER.map((platform) => {
-              const active = filters.platform === platform;
-              const count = platformCounts[platform] ?? 0;
-              return (
-                <FilterRow
-                  key={platform}
-                  id={`filter-platform-${platform}`}
-                  label={PLATFORM_META[platform].label}
-                  count={count}
-                  active={active}
-                  disabled={count === 0 && !active}
-                  onClick={() =>
-                    onFiltersChange({
-                      ...filters,
-                      platform: active ? null : platform,
-                    })
-                  }
-                />
-              );
-            })}
-          </div>
-        </section>
+        {platformsWithGames.length > 0 && (
+          <section>
+            <SectionTitle>Piattaforma</SectionTitle>
+            <div className="space-y-0.5">
+              {platformsWithGames.map((platform) => {
+                const active = filters.platform === platform;
+                return (
+                  <FilterRow
+                    key={platform}
+                    id={`filter-platform-${platform}`}
+                    label={PLATFORM_META[platform].label}
+                    count={counts.byPlatform[platform]}
+                    active={active}
+                    onClick={() =>
+                      onFiltersChange(
+                        withVisiblePool({ platform: active ? null : platform })
+                      )
+                    }
+                  />
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <section className="min-h-0">
           <SectionTitle>Genere</SectionTitle>
@@ -180,10 +215,9 @@ export function Sidebar({
                     count={genre.count}
                     active={active}
                     onClick={() =>
-                      onFiltersChange({
-                        ...filters,
-                        genre: active ? null : genre.key,
-                      })
+                      onFiltersChange(
+                        withVisiblePool({ genre: active ? null : genre.key })
+                      )
                     }
                   />
                 );
