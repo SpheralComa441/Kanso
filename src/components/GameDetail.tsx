@@ -3,6 +3,7 @@ import { Eye, EyeOff, Pencil, Play, Star, X } from "lucide-react";
 import { resolveCoverUrl } from "../lib/backend";
 import { formatRelativePast, genreKey } from "../lib/library";
 import { PLATFORM_META } from "../lib/platforms";
+import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame } from "../types/game";
 
 interface GameDetailProps {
@@ -40,6 +41,7 @@ export function GameDetail({
   onSelectGenre,
 }: GameDetailProps) {
   const playButtonRef = useRef<HTMLButtonElement>(null);
+  const { usableCover, markBroken } = useBrokenCovers();
   const gameId = game?.id ?? null;
 
   useEffect(() => {
@@ -59,7 +61,9 @@ export function GameDetail({
   if (!game) return null;
 
   const platformMeta = PLATFORM_META[game.platform];
-  const coverUrl = resolveCoverUrl(game.coverPath, game.updatedAt);
+  const coverUrl = usableCover(
+    resolveCoverUrl(game.coverPath, game.updatedAt)
+  );
   const canLaunch = Boolean(game.launchUri || game.executablePath);
 
   return (
@@ -103,6 +107,7 @@ export function GameDetail({
                 src={coverUrl}
                 alt={`Copertina di ${game.title}`}
                 draggable={false}
+                onError={() => markBroken(coverUrl)}
                 className="h-full w-full object-cover"
               />
             ) : (

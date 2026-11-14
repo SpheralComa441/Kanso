@@ -1,6 +1,7 @@
 import { AlertTriangle, FolderOpen, Gamepad2, Play, Star } from "lucide-react";
 import { resolveCoverUrl } from "../lib/backend";
 import { PLATFORM_META } from "../lib/platforms";
+import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame } from "../types/game";
 import type { ViewMode } from "./Header";
 
@@ -57,6 +58,8 @@ export function GameList({
   onToggleFavorite,
   onOpenSettings,
 }: GameListProps) {
+  const { usableCover, markBroken } = useBrokenCovers();
+
   if (isScanning && totalDetected === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -125,7 +128,9 @@ export function GameList({
           {games.map((game) => {
             const platformMeta = PLATFORM_META[game.platform];
             const isLaunching = launchingId === game.id;
-            const coverUrl = resolveCoverUrl(game.coverPath, game.updatedAt);
+            const coverUrl = usableCover(
+              resolveCoverUrl(game.coverPath, game.updatedAt)
+            );
 
             return (
               <article
@@ -140,6 +145,7 @@ export function GameList({
                       alt=""
                       loading="lazy"
                       draggable={false}
+                      onError={() => markBroken(coverUrl)}
                       className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                     />
                   ) : (
@@ -213,7 +219,9 @@ export function GameList({
             {games.map((game) => {
               const platformMeta = PLATFORM_META[game.platform];
               const isLaunching = launchingId === game.id;
-              const coverUrl = resolveCoverUrl(game.coverPath, game.updatedAt);
+              const coverUrl = usableCover(
+                resolveCoverUrl(game.coverPath, game.updatedAt)
+              );
 
               return (
                 <li
@@ -234,6 +242,7 @@ export function GameList({
                           alt=""
                           loading="lazy"
                           draggable={false}
+                          onError={() => markBroken(coverUrl)}
                           className="h-full w-full object-cover"
                         />
                       )}
