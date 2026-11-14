@@ -42,10 +42,12 @@ Un gioco compare una sola volta: se uno store successivo segnala una cartella gi
    - Interroga `https://store.steampowered.com/api/appdetails?appids={appid}&l={lingua}` (nella lingua dell'interfaccia) per estrarre `name`, `type`, `short_description` e `genres` (es. Azione, GDR, Indie).
 4. **Modifica Manuale:** Permetti all'utente di modificare titolo, genere, percorso `.exe` o sostituire la copertina con un file immagine locale.
 5. **Cadenza della sync:** un gioco a cui manca ancora qualcosa (copertina, descrizione, nome ufficiale, tipo) viene riprovato in automatico al massimo una volta ogni 24 ore; subito solo se l'utente preme *Scansiona* o inserisce una nuova API key. Un tentativo che non trova nulla non riscrive il gioco né notifica la UI.
-6. **Voci che non sono giochi:** le app Steam che lo store classifica come `music`, `dlc`, `video` e simili vengono nascoste automaticamente la prima volta che vengono classificate; l'utente può sempre riportarle in libreria.
+6. **Tag della community di Steam:** i generi dello store sono pochi e generici (Azione, GDR, Indie); etichette come *Souls-like*, *Party Game* o *Co-op online* sono tag assegnati dagli utenti. Per ogni gioco si salvano i 15 tag più rilevanti chiedendoli a `IStoreBrowseService/GetItems` (`include_tag_count`) e traducendo gli id con `https://store.steampowered.com/tagdata/populartags/{lingua}` (entrambi pubblici, senza chiave). I giochi degli altri store usano i tag della pagina Steam trovata per titolo. I tag seguono la lingua dell'interfaccia.
+7. **Voci che non sono giochi:** le app Steam che lo store classifica come `music`, `dlc`, `video` e simili vengono nascoste automaticamente la prima volta che vengono classificate; l'utente può sempre riportarle in libreria.
 
 ### C. Organizzazione e Avvio
-- Filtri rapidi combinabili per **Genere** (generati automaticamente dai metadata), **Piattaforma** (solo quelle con giochi installati), **Preferiti**, **Giocati di recente** (ultimo avvio da Kanso, più recenti prima) e **Nascosti**.
+- Filtri rapidi combinabili per **Genere** e **Tag** (generati automaticamente dai metadata; i tag che ripetono un genere restano solo tra i generi, e nel pannello laterale se ne mostrano i dieci più comuni con "Mostra tutti"), **Piattaforma** (solo quelle con giochi installati), **Preferiti**, **Giocati di recente** (negli ultimi 30 giorni, più recenti prima) e **Nascosti**. La ricerca trova anche per genere e per tag.
+- **Ore di gioco senza login:** per i giochi Steam il tempo di gioco totale e la data dell'ultima sessione vengono letti dai file locali del client (`userdata/<account>/config/localconfig.vdf`, chiavi `Playtime` in minuti e `LastPlayed`), per l'account usato più di recente. Comprendono quindi anche le ore giocate fuori da Kanso. "Ultima volta giocato" è il più recente tra questo dato e l'ultimo avvio da Kanso.
 - Qualsiasi gioco può essere nascosto o rimostrato dalla vista dettaglio; i giochi nascosti non compaiono in nessun'altra vista né nei conteggi.
 - Avvio tramite `steam://rungameid/{appid}` per Steam, URI Epic/Ubisoft o esecuzione diretta dell'`.exe` per gli altri, con opzione di nascondere l'app nella system tray all'avvio di un gioco. Riavviare Kanso mentre è nella tray riporta in primo piano la finestra esistente (istanza singola). Ogni avvio riuscito aggiorna "giocato di recente".
 
@@ -59,7 +61,10 @@ Un gioco compare una sola volta: se uno store successivo segnala una cartella gi
 - Tradotti anche i messaggi del backend e il menu della system tray. Descrizioni e generi vengono riscaricati nella nuova lingua quando la si cambia; i testi modificati a mano non vengono toccati.
 - Ogni lingua è un dizionario in `src/i18n/`: il compilatore rifiuta un dizionario a cui manca una chiave.
 
-### F. Sicurezza
+### F. Accessibilità
+Impostazioni che valgono con qualsiasi tema e prevalgono su di esso: dimensione di testo e controlli (90–150%), contrasto elevato (testi e bordi più marcati), riduzione delle animazioni (rispetta già l'impostazione di Windows), font ad alta leggibilità al posto di quelli del tema (Atkinson Hyperlegible per l'ipovisione, OpenDyslexic per la dislessia), barre di scorrimento sempre visibili, contorno evidente sull'elemento selezionato da tastiera. Ogni scelta si vede subito e viene salvata solo con *Salva*.
+
+### G. Sicurezza
 - Il comando di avvio riceve solo l'id del gioco: percorso ed URI vengono letti dal database, mai dalla webview.
 - **CSP** restrittiva (`default-src 'self'`, immagini solo da app/asset/data, nessuno script remoto).
 - Il protocollo asset può leggere **solo** la cartella `covers/`.
@@ -93,6 +98,9 @@ Gli Step 1–3 sono il piano originale. Gli Step 4–8 sono stati aggiunti dopo 
 - [x] **Step 13 — Cornice e continuità:** barra del titolo disegnata dall'app al posto di quella di Windows, via le linee divisorie, barre di scorrimento a comparsa, contenuto che sfuma sotto la barra.
 - [x] **Step 14 — Temi, formato 2:** forme di card e controlli, icone, tipografia, disposizione, sfondo sfumato e font incorporati per i temi importati; due temi dimostrativi integrati (Arcade, Aurora).
 - [x] **Step 15 — Editor essenziale:** l'editor nell'app modifica solo colori e font; 14 font inclusi nell'app e selettore dei font per testo e titoli.
+- [x] **Step 16 — Tag di Steam:** categorie fini (Souls-like, Party Game, Co-op...) come filtro nel pannello laterale, nella scheda del gioco e nella ricerca.
+- [x] **Step 17 — Ore di gioco di Steam:** tempo di gioco e ultima sessione letti dai file locali di Steam, senza login; "Giocati di recente" limitato agli ultimi 30 giorni.
+- [x] **Step 18 — Accessibilità:** dimensione del testo, contrasto elevato, meno animazioni, font ad alta leggibilità, barre di scorrimento sempre visibili, fuoco da tastiera evidente.
 
 ### Da verificare su un PC Windows reale
 Non verificabile dall'ambiente cloud, quindi da controllare alla prima prova dell'installer:
@@ -103,4 +111,6 @@ Non verificabile dall'ambiente cloud, quindi da controllare alla prima prova del
 - immagini delle offerte nella Home (arrivano dai CDN dei negozi, ammessi dalla CSP solo come immagini) e apertura della pagina del negozio nel browser;
 - finestre di sistema per importare/esportare un tema e apertura della cartella temi;
 - finestra senza cornice di sistema: ridimensionamento dai bordi, trascinamento dalla barra, doppio clic sulla barra per ingrandire, aggancio ai bordi dello schermo, ombra e angoli della finestra (il menu dei layout di Windows 11 sul pulsante ingrandisci non è disponibile con pulsanti disegnati dall'app);
-- barre di scorrimento a comparsa e dissolvenza del contenuto sotto la barra in WebView2.
+- barre di scorrimento a comparsa e dissolvenza del contenuto sotto la barra in WebView2;
+- tag di Steam dopo la prima sincronizzazione (compaiono nel pannello laterale e nella scheda);
+- ore di gioco lette dal vero `localconfig.vdf` di Steam: il formato è noto e coperto da test su un file di esempio, non verificato su un'installazione reale.
