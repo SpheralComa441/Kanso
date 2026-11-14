@@ -114,13 +114,7 @@ export function GameList({
           <p className="text-sm text-zinc-400">{t("list.noMatch")}</p>
         </div>
       ) : viewMode === "grid" ? (
-        <div
-          className="grid gap-4"
-          style={{
-            gridTemplateColumns:
-              "repeat(auto-fill, minmax(var(--card-min-width), 1fr))",
-          }}
-        >
+        <div className="game-grid">
           {games.map((game) => {
             const isLaunching = launchingId === game.id;
             const label = platformLabel(game.platform, t);
@@ -131,10 +125,10 @@ export function GameList({
             return (
               <article
                 key={game.id}
-                className="group relative flex flex-col overflow-hidden rounded-card border border-oled-border bg-oled-surface transition-all duration-200 focus-within:border-zinc-600/80 hover:-translate-y-0.5 hover:border-zinc-600/80"
+                className={`game-card group ${coverUrl ? "" : "game-card-no-art"}`}
               >
                 {/* 2:3 vertical cover */}
-                <div className="relative aspect-[2/3] w-full overflow-hidden bg-oled-bg">
+                <div className="game-card-cover relative w-full overflow-hidden bg-oled-bg">
                   {coverUrl ? (
                     <Cover
                       url={coverUrl}
@@ -150,7 +144,7 @@ export function GameList({
                   )}
 
                   {/* Over artwork of any color: fixed dark chip, independent of the theme */}
-                  <span className="absolute left-2.5 top-2.5 rounded-md border border-white/15 bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-md">
+                  <span className="absolute left-2.5 top-2.5 rounded-md border border-white/15 bg-black/60 px-2 py-0.5 text-3xs font-medium text-white backdrop-blur-md">
                     {label}
                   </span>
 
@@ -190,14 +184,14 @@ export function GameList({
                 </div>
 
                 {/* Card caption */}
-                <div className="space-y-1 px-3 py-2.5">
+                <div className="game-card-caption space-y-1 px-3 py-2.5">
                   <h3
                     className="truncate text-xs font-medium text-zinc-100"
                     title={game.title}
                   >
                     {game.title}
                   </h3>
-                  <p className="truncate text-[11px] text-zinc-500">
+                  <p className="truncate text-2xs text-zinc-500">
                     {game.genres.length > 0
                       ? game.genres.slice(0, 2).join(", ")
                       : label}
@@ -241,12 +235,12 @@ export function GameList({
                           {game.title}
                         </span>
                         <span
-                          className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-medium ${platformMeta.badgeClass}`}
+                          className={`shrink-0 rounded-md border px-2 py-0.5 text-3xs font-medium ${platformMeta.badgeClass}`}
                         >
                           {platformLabel(game.platform, t)}
                         </span>
                       </div>
-                      <p className="truncate text-[11px] text-zinc-500">
+                      <p className="truncate text-2xs text-zinc-500">
                         {game.genres.length > 0
                           ? game.genres.slice(0, 4).join(" · ")
                           : (game.executablePath ?? game.installDir)}

@@ -198,7 +198,7 @@ export function EditGameModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+      className="below-header fixed inset-x-0 bottom-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -207,7 +207,7 @@ export function EditGameModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-game-modal-title"
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
+        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-oled-border px-6 py-4">
@@ -237,7 +237,7 @@ export function EditGameModal({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
+        <div className="flex-1 scroll-area overflow-y-auto px-6 py-5 space-y-6">
           {feedbackMsg && (
             <div
               className={`rounded-lg border px-3.5 py-2.5 text-xs ${
@@ -266,7 +266,7 @@ export function EditGameModal({
                     <span className="text-xs font-medium text-zinc-400 line-clamp-3">
                       {game.title}
                     </span>
-                    <span className="mt-1 text-[10px] text-zinc-500">
+                    <span className="mt-1 text-3xs text-zinc-500">
                       {t("detail.noCover")}
                     </span>
                   </div>
@@ -283,7 +283,7 @@ export function EditGameModal({
                   id="pick-local-cover-button"
                   type="button"
                   onClick={handlePickLocalCover}
-                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-oled-border bg-oled-elevated px-2.5 py-1.5 text-[11px] font-medium text-zinc-200 transition-colors hover:border-zinc-600"
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-oled-border bg-oled-elevated px-2.5 py-1.5 text-2xs font-medium text-zinc-200 transition-colors hover:border-zinc-600"
                 >
                   <ImagePlus className="h-3.5 w-3.5 text-accent" />
                   <span>{t("edit.localFile")}</span>
@@ -302,7 +302,7 @@ export function EditGameModal({
                   <span>{t("edit.sgdbSearch")}</span>
                 </label>
                 {game.steamgriddbId && (
-                  <span className="font-mono text-[11px] text-zinc-500">
+                  <span className="font-mono text-2xs text-zinc-500">
                     SGDB #{game.steamgriddbId}
                   </span>
                 )}
@@ -358,12 +358,12 @@ export function EditGameModal({
                     </button>
                   </div>
 
-                  <p className="text-[11px] text-zinc-500">
+                  <p className="text-2xs text-zinc-500">
                     {t("edit.sgdbHint")}
                   </p>
 
                   {sgdbResults.length > 0 ? (
-                    <ul className="max-h-44 divide-y divide-oled-border overflow-y-auto rounded-lg border border-oled-border bg-oled-bg">
+                    <ul className="max-h-44 divide-y divide-oled-border scroll-area overflow-y-auto rounded-lg border border-oled-border bg-oled-bg">
                       {sgdbResults.map((item) => {
                         const isApplyingThis = applyingSgdbId === item.id;
                         const isCurrent = game.steamgriddbId === item.id;
@@ -383,7 +383,7 @@ export function EditGameModal({
                                     {item.name}
                                   </span>
                                   {item.releaseYear && (
-                                    <span className="shrink-0 text-[11px] text-zinc-500">
+                                    <span className="shrink-0 text-2xs text-zinc-500">
                                       ({item.releaseYear})
                                     </span>
                                   )}
@@ -396,12 +396,12 @@ export function EditGameModal({
                                     </span>
                                   )}
                                 </div>
-                                <span className="font-mono text-[10px] text-zinc-500">
+                                <span className="font-mono text-3xs text-zinc-500">
                                   ID: {item.id}
                                 </span>
                               </div>
 
-                              <span className="shrink-0 rounded-md border border-oled-border bg-oled-surface px-2 py-1 text-[11px] font-medium text-accent">
+                              <span className="shrink-0 rounded-md border border-oled-border bg-oled-surface px-2 py-1 text-2xs font-medium text-accent">
                                 {isApplyingThis
                                   ? t("edit.sgdbDownloading")
                                   : isCurrent

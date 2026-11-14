@@ -11,6 +11,8 @@
   --bg-elevated: #1e1e24;
   --border-subtle: #272730;
   --border-strong: #52525b;
+  /* Window background: the plain color, or a theme's gradient */
+  --app-background: var(--bg-primary);
 
   /* Text */
   --text-primary: #f4f4f5;
@@ -23,13 +25,43 @@
   --accent-hover: #f0bc59;
   --accent-contrast: #09090b;
 
-  /* Layout & card geometry */
+  /* Typography */
+  --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-heading: var(--font-sans);
+  --heading-weight: 600;
+  --heading-spacing: 0em;
+  --ui-scale: 1;
+
+  /* Layout */
   --card-min-width: 185px;
   --card-radius: 10px;
   --sidebar-width: 208px;
   --header-height: 52px;
+  --grid-gap: 16px;
+  --content-padding: 24px;
+  --divider-width: 0px;
+  --scrollbar-size: 10px;
 
-  --font-sans: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  /* Cards */
+  --cover-aspect: 2 / 3;
+  --card-border-width: 1px;
+  --card-shadow: none;
+  --card-hover-shadow: none;
+  --card-hover-lift: -2px;
+  --card-hover-zoom: 1.03;
+  --card-hover-border: color-mix(in srgb, var(--border-strong) 80%, transparent);
+
+  /* Corner radii: buttons and fields, dialogs and panels, badges and tags */
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-chip: 6px;
+
+  /* Icons */
+  --icon-stroke: 2;
+  --icon-cap: round;
+  --icon-join: round;
+  --icon-scale: 1;
+  --icon-fill: 0;
 }
 
 /*

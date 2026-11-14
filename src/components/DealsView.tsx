@@ -57,7 +57,7 @@ function DealCard({
         type="button"
         onClick={() => onOpen(deal)}
         aria-label={t("deals.openStore", { title: deal.title, store })}
-        className="group flex h-full w-full flex-col overflow-hidden rounded-card border border-oled-border bg-oled-surface text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-600/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="game-card group h-full w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <div className="relative aspect-[460/215] w-full overflow-hidden bg-oled-bg">
           {deal.imageUrl && !imageFailed ? (
@@ -67,7 +67,7 @@ function DealCard({
               loading="lazy"
               draggable={false}
               onError={() => setImageFailed(true)}
-              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+              className="game-card-art h-full w-full object-cover"
             />
           ) : (
             <div className="flex h-full w-full items-end bg-gradient-to-b from-oled-elevated/50 to-oled-bg p-3">
@@ -78,12 +78,12 @@ function DealCard({
           )}
 
           {!deal.upcoming && (
-            <span className="absolute left-2 top-2 rounded-md bg-accent px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-zinc-950 shadow">
+            <span className="absolute left-2 top-2 rounded-md bg-accent px-1.5 py-0.5 text-2xs font-bold tabular-nums text-zinc-950 shadow">
               {isFree ? t("deals.free") : `-${deal.discountPercent}%`}
             </span>
           )}
           {owned && (
-            <span className="absolute right-2 top-2 rounded-md border border-white/15 bg-black/65 px-1.5 py-0.5 text-[10px] font-medium text-white backdrop-blur-md">
+            <span className="absolute right-2 top-2 rounded-md border border-white/15 bg-black/65 px-1.5 py-0.5 text-3xs font-medium text-white backdrop-blur-md">
               {t("deals.owned")}
             </span>
           )}
@@ -103,12 +103,12 @@ function DealCard({
           <div className="mt-auto flex items-end justify-between gap-2">
             <div className="min-w-0">
               <span
-                className={`inline-block rounded border px-1.5 py-px text-[10px] font-medium ${STORE_BADGE[deal.store]}`}
+                className={`inline-block rounded border px-1.5 py-px text-3xs font-medium ${STORE_BADGE[deal.store]}`}
               >
                 {store}
               </span>
               {timing && (
-                <p className="mt-1 truncate text-[10px] text-zinc-500">{timing}</p>
+                <p className="mt-1 truncate text-3xs text-zinc-500">{timing}</p>
               )}
             </div>
             <div className="shrink-0 text-right tabular-nums">
@@ -116,7 +116,7 @@ function DealCard({
               {!deal.upcoming &&
                 deal.originalPrice !== null &&
                 deal.originalPrice > deal.finalPrice && (
-                  <p className="text-[10px] text-zinc-500 line-through">
+                  <p className="text-3xs text-zinc-500 line-through">
                     {money(deal.originalPrice, deal.currency)}
                   </p>
                 )}
@@ -196,7 +196,7 @@ export function DealsView({ ownedSteamAppIds, onError }: DealsViewProps) {
         </div>
         <div className="flex items-center gap-3">
           {report && !isLoading && report.deals.length > 0 && (
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-2xs text-zinc-500">
               {t("deals.updated", { time: relativePast(report.fetchedAt) })}
             </span>
           )}
@@ -218,7 +218,7 @@ export function DealsView({ ownedSteamAppIds, onError }: DealsViewProps) {
       </div>
 
       {report && report.failedStores.length > 0 && report.deals.length > 0 && (
-        <p role="status" className="text-[11px] text-amber-200">
+        <p role="status" className="text-2xs text-amber-200">
           {t("deals.failedStores", {
             stores: report.failedStores.map((store) => STORE_NAMES[store]).join(", "),
           })}
@@ -240,12 +240,15 @@ export function DealsView({ ownedSteamAppIds, onError }: DealsViewProps) {
       ) : (
         bySection.map((section) => (
           <section key={section.store} className="space-y-3">
-            <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+            <h3 className="text-3xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
               {t(section.titleKey)}
             </h3>
             <ul
-              className="grid gap-4"
-              style={{ gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))" }}
+              className="grid"
+              style={{
+                gap: "var(--grid-gap)",
+                gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))",
+              }}
             >
               {section.deals.map((deal) => (
                 <DealCard

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 interface CoverProps {
   url: string;
   alt?: string;
-  /** Slight zoom when the surrounding `group` is hovered (grid cards). */
+  /** Zooms with the hovered card around it, as much as the theme says (grid cards). */
   zoomOnHover?: boolean;
   onError: () => void;
 }
@@ -47,11 +47,7 @@ export function Cover({ url, alt = "", zoomOnHover = false, onError }: CoverProp
         className={
           isLandscape
             ? "relative h-full w-full object-contain"
-            : `h-full w-full object-cover ${
-                zoomOnHover
-                  ? "transition-transform duration-300 group-hover:scale-[1.03]"
-                  : ""
-              }`
+            : `h-full w-full object-cover ${zoomOnHover ? "game-card-art" : ""}`
         }
       />
     </>

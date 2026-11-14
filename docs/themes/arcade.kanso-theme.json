@@ -1,0 +1,53 @@
+{
+  "kansoTheme": 2,
+  "name": "Arcade",
+  "author": "Kanso",
+  "description": "Neon cabinet: cut corners, pixel titles, sharp icons.",
+  "colorScheme": "dark",
+  "colors": {
+    "background": "#0b0b1a",
+    "surface": "#13132b",
+    "elevated": "#1d1d40",
+    "border": "#2c2c5e",
+    "borderStrong": "#5a5ab0",
+    "text": "#f5f3ff",
+    "textSecondary": "#d6d3f5",
+    "textMuted": "#a29fd0",
+    "textFaint": "#7673a8",
+    "accent": "#ff3d9a",
+    "accentHover": "#ff6fb5",
+    "onAccent": "#14021f"
+  },
+  "fontFamily": "Tektur",
+  "typography": {
+    "headingFont": "Pixelify Sans",
+    "headingWeight": 600,
+    "headingUppercase": true,
+    "headingSpacing": 0.06,
+    "scale": 1
+  },
+  "layout": {
+    "cardMinWidth": 180,
+    "cardRadius": 14,
+    "sidebarWidth": 216,
+    "gridGap": 18,
+    "headerHeight": 56,
+    "contentPadding": 24,
+    "sidebarSide": "left",
+    "dividers": true,
+    "scrollbars": "auto",
+    "windowControls": "bars"
+  },
+  "cards": {
+    "shape": "cut",
+    "aspect": "2:3",
+    "borderWidth": 2,
+    "shadow": "none",
+    "hover": "glow",
+    "caption": "below"
+  },
+  "shapes": { "controlRadius": 2, "panelRadius": 4, "chipRadius": 0 },
+  "icons": { "strokeWidth": 2.25, "corners": "sharp", "scale": 1.05, "fill": 0 },
+  "effects": { "backgroundGradient": [], "backgroundAngle": 180 },
+  "fontFiles": []
+}

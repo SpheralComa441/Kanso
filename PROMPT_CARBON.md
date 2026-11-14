@@ -67,8 +67,13 @@ Un gioco compare una sola volta: se uno store successivo segnala una cartella gi
 ## 4. Design & UI/UX
 - **Estetica:** Tema scuro profondo (`#0f0f11`) ottimizzato per schermi OLED, zero menu superflui, tipografia pulita.
 - **Layout:** Griglia di copertine verticali (aspect ratio `2:3`), barra di ricerca istantanea in alto, sidebar minimalista a scomparsa per i filtri, vista dettaglio del gioco.
-- **Personalizzazione:** Esponi colori, raggio bordi e dimensione minima delle card in `src/theme.css` tramite variabili CSS (`--bg-primary`, `--accent-color`, `--card-min-width`), inclusi i colori del testo, così che un tema possa essere anche chiaro.
-- **Temi della community:** un tema è un file `.json` (formato in `docs/THEMES.md`) con 12 colori, 3 misure e un font. Si crea dall'editor integrato con anteprima dal vivo, si esporta e si importa da file o copiandolo nella cartella `themes/`. Ogni valore viene validato dal backend: un tema non può contenere CSS, script o risorse remote.
+- **Cornice della finestra:** niente barra del titolo di Windows. La barra superiore dell'app fa da barra del titolo: trascina la finestra, il doppio clic la ingrandisce, e a destra ha i pulsanti riduci / ingrandisci / chiudi nello stile dell'app, utilizzabili anche con una finestra di dialogo aperta (le finestre di dialogo stanno sotto la barra, che viene velata come il resto).
+- **Continuità:** nessuna linea divisoria tra barra, pannello laterale e contenuto (un tema può riattivarle): il contenuto sfuma scorrendo sotto la barra. Barre di scorrimento sottili, senza traccia, visibili solo quando il puntatore è sull'area che scorre; lo spazio è sempre riservato, quindi la griglia non si sposta.
+- **Personalizzazione:** ogni scelta visiva è una variabile CSS in `src/theme.css` (`--bg-primary`, `--accent-color`, `--card-min-width`, `--radius-control`, `--icon-stroke`, ...), inclusi i colori del testo, così che un tema possa essere anche chiaro.
+- **Temi della community:** un tema è un file `.json` (formato 2, descritto in `docs/THEMES.md`; i file del formato 1 restano validi) che può definire: 12 colori; font del testo e dei titoli, peso, maiuscolo, spaziatura e scala dell'interfaccia; forma delle card (arrotondate o con angoli tagliati), proporzioni, bordo, ombra, effetto al passaggio e posizione della didascalia; raggi di controlli, pannelli e badge; tratto, estremità, dimensione e riempimento delle icone; disposizione (lato e larghezza del pannello laterale, altezza della barra, spazi, linee divisorie, barre di scorrimento, stile dei pulsanti finestra); sfondo sfumato; font incorporati nel file.
+  - **L'editor integrato modifica solo colori e font**, con anteprima dal vivo; conserva tutto il resto del tema di partenza. I font si scelgono tra 14 inclusi nell'app (con cirillico), quelli incorporati nel tema o un font installato.
+  - Forme, misure, icone e sfondo si definiscono **solo nel file**, che si importa dalle Impostazioni o si copia nella cartella `themes/`. *Esporta* scrive un file completo di ogni valore, usabile come modello. Un font si incorpora indicando un file accanto al tema: all'importazione viene letto e inserito nel tema.
+  - Ogni valore viene validato dal backend (colori esadecimali, numeri in un intervallo, nomi da un elenco fisso, font come nomi semplici, file di font verificati e solo dalla cartella del tema): un tema non può contenere CSS, script, percorsi o risorse remote.
 
 ## 5. Piano di Esecuzione a Step
 Gli Step 1–3 sono il piano originale. Gli Step 4–8 sono stati aggiunti dopo la revisione del progetto a fine Step 3 e approvati in blocco, quindi vengono eseguiti di seguito senza fermarsi tra uno e l'altro.
@@ -85,6 +90,9 @@ Gli Step 1–3 sono il piano originale. Gli Step 4–8 sono stati aggiunti dopo 
 - [x] **Step 10 — Lingue:** italiano, inglese, spagnolo e russo per interfaccia, messaggi del backend, tray e metadata.
 - [x] **Step 11 — Temi della community:** temi completi in `.json`, editor con anteprima dal vivo, importazione ed esportazione, temi integrati (OLED, Grafite, Nord, Carta).
 - [x] **Step 12 — Home con le offerte:** sconti e giochi gratis da Steam, Epic Games e GOG.
+- [x] **Step 13 — Cornice e continuità:** barra del titolo disegnata dall'app al posto di quella di Windows, via le linee divisorie, barre di scorrimento a comparsa, contenuto che sfuma sotto la barra.
+- [x] **Step 14 — Temi, formato 2:** forme di card e controlli, icone, tipografia, disposizione, sfondo sfumato e font incorporati per i temi importati; due temi dimostrativi integrati (Arcade, Aurora).
+- [x] **Step 15 — Editor essenziale:** l'editor nell'app modifica solo colori e font; 14 font inclusi nell'app e selettore dei font per testo e titoli.
 
 ### Da verificare su un PC Windows reale
 Non verificabile dall'ambiente cloud, quindi da controllare alla prima prova dell'installer:
@@ -93,4 +101,6 @@ Non verificabile dall'ambiente cloud, quindi da controllare alla prima prova del
 - rilevamento reale di GOG, Ubisoft Connect, EA app e Xbox app: gli scanner sono testati solo su dati simulati;
 - nome ufficiale dei giochi `appid_<id>` dallo Steam Store e occultamento automatico delle colonne sonore;
 - immagini delle offerte nella Home (arrivano dai CDN dei negozi, ammessi dalla CSP solo come immagini) e apertura della pagina del negozio nel browser;
-- finestre di sistema per importare/esportare un tema e apertura della cartella temi.
+- finestre di sistema per importare/esportare un tema e apertura della cartella temi;
+- finestra senza cornice di sistema: ridimensionamento dai bordi, trascinamento dalla barra, doppio clic sulla barra per ingrandire, aggancio ai bordi dello schermo, ombra e angoli della finestra (il menu dei layout di Windows 11 sul pulsante ingrandisci non è disponibile con pulsanti disegnati dall'app);
+- barre di scorrimento a comparsa e dissolvenza del contenuto sotto la barra in WebView2.

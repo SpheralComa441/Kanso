@@ -1,19 +1,31 @@
-//! Community themes: small JSON files that restyle the whole interface.
+//! Community themes: JSON files that restyle the whole interface.
 //!
-//! A theme can only set a fixed list of colors, a few layout sizes and a font stack, and every
-//! value is validated here before it reaches the UI. A theme file therefore cannot carry
-//! arbitrary CSS, scripts or remote resources: importing one from a stranger is safe.
+//! A theme sets colors, typography, the geometry of cards, controls and icons, a few layout
+//! choices and, optionally, the font files it needs. Every value is one of a fixed list of
+//! fields and is validated here before it reaches the UI — a color must be a hex value, a size
+//! a number in range, a shape one of the known names, a font file a real font. A theme file
+//! therefore cannot carry arbitrary CSS, scripts or remote resources: importing one from a
+//! stranger is safe.
 
 use crate::i18n::T;
 use crate::scanner::exe_pick::slugify;
+use base64::engine::general_purpose::{STANDARD, STANDARD_NO_PAD};
+use base64::Engine as _;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Value of the `kansoTheme` marker written into exported files.
-pub const THEME_FORMAT_VERSION: u32 = 1;
-/// Extension-less marker in file names is not required; themes are plain `.json` files.
-const MAX_THEME_FILE_BYTES: u64 = 256 * 1024;
+/// Value of the `kansoTheme` marker written into exported files. Version 1 files (colors,
+/// three sizes and a font) are still read: everything they do not mention keeps its default.
+pub const THEME_FORMAT_VERSION: u32 = 2;
+/// Themes are small unless they embed fonts; this bounds the whole file.
+const MAX_THEME_FILE_BYTES: u64 = 12 * 1024 * 1024;
+const MAX_FONT_FILES: usize = 6;
+/// Size limit of one embedded font, decoded.
+const MAX_FONT_BYTES: usize = 2 * 1024 * 1024;
+const FONT_FILE_EXTENSIONS: [&str; 4] = ["woff2", "woff", "ttf", "otf"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -52,18 +64,209 @@ pub struct ThemeColors {
     pub on_accent: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SidebarSide {
+    #[default]
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Scrollbars {
+    /// Thin, shown while the pointer is over the scrolling area.
+    #[default]
+    Auto,
+    Always,
+    Hidden,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WindowControls {
+    /// Full-height minimize / maximize / close buttons.
+    #[default]
+    Bars,
+    /// Small colored dots.
+    Dots,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct ThemeLayout {
     /// Minimum width of a cover card in the grid, in pixels.
     pub card_min_width: u32,
-    /// Corner radius of cards, in pixels.
+    /// Corner radius of cards (or the size of the cut, for cut shapes), in pixels.
     pub card_radius: u32,
     /// Width of the filter sidebar, in pixels.
     pub sidebar_width: u32,
+    /// Space between cards, in pixels.
+    pub grid_gap: u32,
+    /// Height of the top bar, in pixels.
+    pub header_height: u32,
+    /// Padding around the main content, in pixels.
+    pub content_padding: u32,
+    pub sidebar_side: SidebarSide,
+    /// Hairlines under the top bar and beside the sidebar.
+    pub dividers: bool,
+    pub scrollbars: Scrollbars,
+    pub window_controls: WindowControls,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeTypography {
+    /// Font stack of titles; `None` uses the body font.
+    pub heading_font: Option<String>,
+    /// Weight of titles (100–900); `None` keeps the weight each title has by design.
+    pub heading_weight: Option<u32>,
+    pub heading_uppercase: bool,
+    /// Letter spacing of titles, in em.
+    pub heading_spacing: f64,
+    /// Size of the whole interface relative to the default.
+    pub scale: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CardShape {
+    #[default]
+    Rounded,
+    /// All four corners cut at 45°.
+    Cut,
+    /// Top-right and bottom-left corners cut.
+    Slant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CardAspect {
+    #[default]
+    #[serde(rename = "2:3")]
+    Portrait,
+    #[serde(rename = "3:4")]
+    Tall,
+    #[serde(rename = "4:5")]
+    Short,
+    #[serde(rename = "1:1")]
+    Square,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CardShadow {
+    #[default]
+    #[serde(rename = "none")]
+    Off,
+    Soft,
+    Strong,
+    /// A halo in the accent color.
+    Glow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CardHover {
+    /// The card rises slightly and its cover zooms a little.
+    #[default]
+    Lift,
+    /// The cover zooms inside a still card.
+    Zoom,
+    /// Accent border and halo.
+    Glow,
+    #[serde(rename = "none")]
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CardCaption {
+    /// Title and genres under the cover.
+    #[default]
+    Below,
+    /// Title over the bottom of the cover.
+    Overlay,
+    /// Cover only.
+    #[serde(rename = "none")]
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeCards {
+    pub shape: CardShape,
+    pub aspect: CardAspect,
+    /// Border thickness, in pixels.
+    pub border_width: u32,
+    pub shadow: CardShadow,
+    pub hover: CardHover,
+    pub caption: CardCaption,
+}
+
+/// Corner radii of everything that is not a card, in pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeShapes {
+    /// Buttons, fields, rows of lists.
+    pub control_radius: u32,
+    /// Dialogs and large panels.
+    pub panel_radius: u32,
+    /// Badges, tags and sidebar entries.
+    pub chip_radius: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum IconCorners {
+    #[default]
+    Round,
+    /// Square line ends and mitred joins.
+    Sharp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeIcons {
+    /// Line thickness (icons are drawn on a 24-unit grid).
+    pub stroke_width: f64,
+    pub corners: IconCorners,
+    /// Size relative to the default.
+    pub scale: f64,
+    /// Opacity of a fill in the icon's own color (0 leaves icons as outlines).
+    pub fill: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeEffects {
+    /// Two or three colors for a gradient window background; empty for the plain color.
+    pub background_gradient: Vec<String>,
+    /// Direction of the gradient in degrees (180 = top to bottom).
+    pub background_angle: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FontStyle {
+    #[default]
+    Normal,
+    Italic,
+}
+
+/// A font shipped inside the theme, so it works on PCs where it is not installed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeFontFile {
+    /// Name the theme's font stacks refer to.
+    pub family: String,
+    /// One weight (`"400"`) or, for variable fonts, a range (`"100 900"`).
+    pub weight: String,
+    pub style: FontStyle,
+    /// The font file (woff2, woff, ttf or otf), base64-encoded.
+    pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Theme {
     /// File name without extension inside the themes folder; assigned by Kanso, never read
@@ -77,9 +280,22 @@ pub struct Theme {
     pub description: String,
     pub color_scheme: ColorScheme,
     pub colors: ThemeColors,
-    pub layout: ThemeLayout,
-    /// CSS font stack of installed fonts; `None` keeps Kanso's default.
+    /// CSS font stack of the interface; `None` keeps Kanso's default.
     pub font_family: Option<String>,
+    #[serde(default)]
+    pub typography: ThemeTypography,
+    #[serde(default)]
+    pub layout: ThemeLayout,
+    #[serde(default)]
+    pub cards: ThemeCards,
+    #[serde(default)]
+    pub shapes: ThemeShapes,
+    #[serde(default)]
+    pub icons: ThemeIcons,
+    #[serde(default)]
+    pub effects: ThemeEffects,
+    #[serde(default)]
+    pub font_files: Vec<ThemeFontFile>,
 }
 
 impl ThemeColors {
@@ -120,47 +336,70 @@ impl Default for ThemeLayout {
             card_min_width: 185,
             card_radius: 10,
             sidebar_width: 208,
+            grid_gap: 16,
+            header_height: 52,
+            content_padding: 24,
+            sidebar_side: SidebarSide::Left,
+            dividers: false,
+            scrollbars: Scrollbars::Auto,
+            window_controls: WindowControls::Bars,
         }
     }
 }
 
-/// A theme file as an author may write it: everything but the name is optional.
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-struct RawTheme {
-    kanso_theme: Option<u32>,
-    name: String,
-    author: String,
-    description: String,
-    color_scheme: Option<String>,
-    colors: Option<RawColors>,
-    layout: Option<RawLayout>,
-    font_family: Option<String>,
+impl Default for ThemeTypography {
+    fn default() -> Self {
+        Self {
+            heading_font: None,
+            heading_weight: None,
+            heading_uppercase: false,
+            heading_spacing: 0.0,
+            scale: 1.0,
+        }
+    }
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-struct RawColors {
-    background: Option<String>,
-    surface: Option<String>,
-    elevated: Option<String>,
-    border: Option<String>,
-    border_strong: Option<String>,
-    text: Option<String>,
-    text_secondary: Option<String>,
-    text_muted: Option<String>,
-    text_faint: Option<String>,
-    accent: Option<String>,
-    accent_hover: Option<String>,
-    on_accent: Option<String>,
+impl Default for ThemeCards {
+    fn default() -> Self {
+        Self {
+            shape: CardShape::Rounded,
+            aspect: CardAspect::Portrait,
+            border_width: 1,
+            shadow: CardShadow::Off,
+            hover: CardHover::Lift,
+            caption: CardCaption::Below,
+        }
+    }
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-struct RawLayout {
-    card_min_width: Option<f64>,
-    card_radius: Option<f64>,
-    sidebar_width: Option<f64>,
+impl Default for ThemeShapes {
+    fn default() -> Self {
+        Self {
+            control_radius: 8,
+            panel_radius: 12,
+            chip_radius: 6,
+        }
+    }
+}
+
+impl Default for ThemeIcons {
+    fn default() -> Self {
+        Self {
+            stroke_width: 2.0,
+            corners: IconCorners::Round,
+            scale: 1.0,
+            fill: 0.0,
+        }
+    }
+}
+
+impl Default for ThemeEffects {
+    fn default() -> Self {
+        Self {
+            background_gradient: Vec::new(),
+            background_angle: 180,
+        }
+    }
 }
 
 fn invalid(detail: impl std::fmt::Display) -> String {
@@ -194,97 +433,408 @@ fn clean_text(raw: &str, max_chars: usize) -> String {
         .collect()
 }
 
-impl Theme {
-    /// Parses and validates a theme file. Missing colors and sizes fall back to Kanso's
-    /// defaults for the theme's color scheme; anything present but wrong is an error that
-    /// names the offending field, so authors know what to fix.
-    pub fn from_json(raw: &str) -> Result<Self, String> {
-        let raw = raw.trim_start_matches('\u{feff}');
-        let parsed: RawTheme = serde_json::from_str(raw).map_err(invalid)?;
+/// A CSS font stack made only of plain font names: nothing that could end the declaration it
+/// is placed in or reference a resource.
+fn is_plain_font_stack(stack: &str) -> bool {
+    stack.len() <= 200
+        && stack
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | ',' | '-' | '_' | '\'' | '"'))
+}
 
-        if parsed.kanso_theme.is_some_and(|v| v > THEME_FORMAT_VERSION) {
+fn is_plain_font_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= 60
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_'))
+}
+
+/// One object of a theme file, read field by field. A missing (or `null`) field takes its
+/// default; a field of the wrong kind is an error naming it, so authors know what to fix;
+/// numbers out of range are brought to the nearest limit, so the theme still looks as meant.
+struct Fields<'a> {
+    path: &'a str,
+    map: Option<&'a Map<String, Value>>,
+}
+
+impl<'a> Fields<'a> {
+    /// The object under `key` of `root`; absent is fine, anything but an object is not.
+    fn section(root: &'a Map<String, Value>, key: &'a str) -> Result<Self, String> {
+        match root.get(key) {
+            None | Some(Value::Null) => Ok(Self { path: key, map: None }),
+            Some(Value::Object(map)) => Ok(Self {
+                path: key,
+                map: Some(map),
+            }),
+            Some(_) => Err(invalid(key)),
+        }
+    }
+
+    fn name_of(&self, key: &str) -> String {
+        if self.path.is_empty() {
+            key.to_string()
+        } else {
+            format!("{}.{key}", self.path)
+        }
+    }
+
+    fn get(&self, key: &str) -> Option<&'a Value> {
+        self.map?.get(key).filter(|value| !value.is_null())
+    }
+
+    fn wrong(&self, key: &str, value: &Value) -> String {
+        invalid(format!(
+            "{} {}",
+            self.name_of(key),
+            clean_text(&value.to_string(), 48)
+        ))
+    }
+
+    fn number(&self, key: &str, default: f64, min: f64, max: f64) -> Result<f64, String> {
+        match self.get(key) {
+            None => Ok(default),
+            Some(value) => value
+                .as_f64()
+                .filter(|n| n.is_finite())
+                .map(|n| n.clamp(min, max))
+                .ok_or_else(|| self.wrong(key, value)),
+        }
+    }
+
+    fn int(&self, key: &str, default: u32, min: u32, max: u32) -> Result<u32, String> {
+        self.number(key, f64::from(default), f64::from(min), f64::from(max))
+            .map(|n| n.round() as u32)
+    }
+
+    /// A number kept to two decimals.
+    fn decimal(&self, key: &str, default: f64, min: f64, max: f64) -> Result<f64, String> {
+        self.number(key, default, min, max)
+            .map(|n| (n * 100.0).round() / 100.0)
+    }
+
+    fn flag(&self, key: &str, default: bool) -> Result<bool, String> {
+        match self.get(key) {
+            None => Ok(default),
+            Some(value) => value.as_bool().ok_or_else(|| self.wrong(key, value)),
+        }
+    }
+
+    fn text(&self, key: &str) -> Result<Option<&'a str>, String> {
+        match self.get(key) {
+            None => Ok(None),
+            Some(value) => value
+                .as_str()
+                .map(Some)
+                .ok_or_else(|| self.wrong(key, value)),
+        }
+    }
+
+    /// One of the names an enum accepts.
+    fn choice<C: DeserializeOwned>(&self, key: &str, default: C) -> Result<C, String> {
+        match self.get(key) {
+            None => Ok(default),
+            Some(value) => {
+                serde_json::from_value(value.clone()).map_err(|_| self.wrong(key, value))
+            }
+        }
+    }
+
+    fn color(&self, key: &str) -> Result<Option<String>, String> {
+        match self.get(key) {
+            None => Ok(None),
+            Some(value) => value
+                .as_str()
+                .and_then(normalize_hex_color)
+                .map(Some)
+                .ok_or_else(|| self.wrong(key, value)),
+        }
+    }
+
+    fn font_stack(&self, key: &str) -> Result<Option<String>, String> {
+        match self.text(key)?.map(str::trim) {
+            None | Some("") => Ok(None),
+            Some(stack) if is_plain_font_stack(stack) => Ok(Some(stack.to_string())),
+            Some(_) => Err(invalid(self.name_of(key))),
+        }
+    }
+}
+
+fn looks_like_font(bytes: &[u8]) -> bool {
+    const SIGNATURES: [&[u8]; 5] = [b"wOF2", b"wOFF", b"OTTO", b"true", &[0, 1, 0, 0]];
+    SIGNATURES.iter().any(|signature| bytes.starts_with(signature))
+}
+
+/// Decodes the `data` of a font entry: base64, optionally as a `data:` URL.
+fn decode_font_data(raw: &str) -> Option<Vec<u8>> {
+    let payload = match raw.trim().strip_prefix("data:") {
+        Some(rest) => rest.split_once("base64,")?.1,
+        None => raw,
+    };
+    // Checked before decoding: an oversized entry must not be decoded at all
+    if payload.len() > MAX_FONT_BYTES / 3 * 4 + 1024 {
+        return None;
+    }
+    let compact: String = payload.chars().filter(|c| !c.is_whitespace()).collect();
+    STANDARD
+        .decode(&compact)
+        .or_else(|_| STANDARD_NO_PAD.decode(compact.trim_end_matches('=')))
+        .ok()
+}
+
+/// Reads a font a theme file names with `file`: a plain file name next to the theme, never a
+/// path, so a theme cannot make Kanso read anything else.
+fn read_sibling_font(dir: Option<&Path>, name: &str) -> Result<Vec<u8>, String> {
+    let dir = dir.ok_or("not available here")?;
+    let extension_ok = Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| FONT_FILE_EXTENSIONS.iter().any(|known| e.eq_ignore_ascii_case(known)));
+    let is_plain_name = Path::new(name).file_name().and_then(|n| n.to_str()) == Some(name)
+        && !name.contains(['/', '\\', ':']);
+    if !is_plain_name || !extension_ok {
+        return Err(format!("\"{}\"", clean_text(name, 60)));
+    }
+    let path = dir.join(name);
+    let size = fs::metadata(&path)
+        .map_err(|e| format!("{}: {e}", path.display()))?
+        .len();
+    if size > MAX_FONT_BYTES as u64 {
+        return Err(format!("{size} bytes"));
+    }
+    fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+fn parse_font_files(
+    root: &Map<String, Value>,
+    fonts_dir: Option<&Path>,
+) -> Result<Vec<ThemeFontFile>, String> {
+    let entries = match root.get("fontFiles") {
+        None | Some(Value::Null) => return Ok(Vec::new()),
+        Some(Value::Array(entries)) => entries,
+        Some(_) => return Err(invalid("fontFiles")),
+    };
+    if entries.len() > MAX_FONT_FILES {
+        return Err(invalid(format!(
+            "fontFiles ({} > {MAX_FONT_FILES})",
+            entries.len()
+        )));
+    }
+
+    let mut fonts = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let path = format!("fontFiles[{index}]");
+        let Value::Object(map) = entry else {
+            return Err(invalid(&path));
+        };
+        let fields = Fields {
+            path: &path,
+            map: Some(map),
+        };
+
+        let family = fields
+            .text("family")?
+            .map(str::trim)
+            .filter(|name| is_plain_font_name(name))
+            .ok_or_else(|| invalid(fields.name_of("family")))?
+            .to_string();
+
+        let weight = match fields.get("weight") {
+            None => "400".to_string(),
+            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::String(s)) => s.split_whitespace().collect::<Vec<_>>().join(" "),
+            Some(other) => return Err(fields.wrong("weight", other)),
+        };
+        let weights: Vec<&str> = weight.split(' ').collect();
+        let weight_ok = (1..=2).contains(&weights.len())
+            && weights
+                .iter()
+                .all(|w| w.parse::<u32>().is_ok_and(|w| (1..=1000).contains(&w)));
+        if !weight_ok {
+            return Err(invalid(fields.name_of("weight")));
+        }
+
+        let style = fields.choice("style", FontStyle::Normal)?;
+
+        let bytes = match (fields.text("data")?, fields.text("file")?) {
+            (Some(data), _) => {
+                decode_font_data(data).ok_or_else(|| invalid(fields.name_of("data")))?
+            }
+            (None, Some(name)) => read_sibling_font(fonts_dir, name)
+                .map_err(|detail| invalid(format!("{} {detail}", fields.name_of("file"))))?,
+            (None, None) => return Err(invalid(fields.name_of("data"))),
+        };
+        if bytes.len() > MAX_FONT_BYTES || !looks_like_font(&bytes) {
             return Err(invalid(format!(
-                "kansoTheme {} (max {THEME_FORMAT_VERSION})",
-                parsed.kanso_theme.unwrap_or_default()
+                "{path} (woff2/woff/ttf/otf, max {} MB)",
+                MAX_FONT_BYTES / (1024 * 1024)
             )));
         }
 
-        let name = clean_text(&parsed.name, 60);
+        fonts.push(ThemeFontFile {
+            family,
+            weight,
+            style,
+            data: STANDARD.encode(bytes),
+        });
+    }
+    Ok(fonts)
+}
+
+impl Theme {
+    /// Parses and validates a theme. Missing values fall back to Kanso's defaults (colors: for
+    /// the theme's color scheme); anything present but wrong is an error that names the
+    /// offending field.
+    pub fn from_json(raw: &str) -> Result<Self, String> {
+        Self::parse(raw, None)
+    }
+
+    /// Like [`Theme::from_json`] for a theme file on disk: font files it names with `file`
+    /// are read from `dir`, the folder the theme is in, and embedded.
+    pub fn from_json_in(raw: &str, dir: &Path) -> Result<Self, String> {
+        Self::parse(raw, Some(dir))
+    }
+
+    fn parse(raw: &str, fonts_dir: Option<&Path>) -> Result<Self, String> {
+        let raw = raw.trim_start_matches('\u{feff}');
+        let Value::Object(root) = serde_json::from_str::<Value>(raw).map_err(invalid)? else {
+            return Err(invalid("{ ... }"));
+        };
+        let top = Fields {
+            path: "",
+            map: Some(&root),
+        };
+
+        let version = top.int("kansoTheme", 1, 0, u32::MAX)?;
+        if version > THEME_FORMAT_VERSION {
+            return Err(invalid(format!(
+                "kansoTheme {version} (max {THEME_FORMAT_VERSION})"
+            )));
+        }
+
+        let name = clean_text(top.text("name")?.unwrap_or_default(), 60);
         if name.is_empty() {
             return Err(invalid("name"));
         }
-        let Some(raw_colors) = parsed.colors else {
-            return Err(invalid("colors"));
-        };
 
-        let color_scheme = match parsed.color_scheme.as_deref().map(str::trim) {
+        let color_scheme = match top.text("colorScheme")?.map(str::trim) {
             None | Some("") | Some("dark") => ColorScheme::Dark,
             Some("light") => ColorScheme::Light,
             Some(other) => return Err(invalid(format!("colorScheme \"{other}\""))),
         };
 
+        let c = Fields::section(&root, "colors")?;
+        if c.map.is_none() {
+            return Err(invalid("colors"));
+        }
         let base = ThemeColors::defaults(color_scheme);
-        let color = |field: &str, value: Option<String>, fallback: String| match value {
-            None => Ok(fallback),
-            Some(text) => normalize_hex_color(&text)
-                .ok_or_else(|| invalid(format!("colors.{field} \"{}\"", clean_text(&text, 40)))),
-        };
         let colors = ThemeColors {
-            background: color("background", raw_colors.background, base.background)?,
-            surface: color("surface", raw_colors.surface, base.surface)?,
-            elevated: color("elevated", raw_colors.elevated, base.elevated)?,
-            border: color("border", raw_colors.border, base.border)?,
-            border_strong: color("borderStrong", raw_colors.border_strong, base.border_strong)?,
-            text: color("text", raw_colors.text, base.text)?,
-            text_secondary: color("textSecondary", raw_colors.text_secondary, base.text_secondary)?,
-            text_muted: color("textMuted", raw_colors.text_muted, base.text_muted)?,
-            text_faint: color("textFaint", raw_colors.text_faint, base.text_faint)?,
-            accent: color("accent", raw_colors.accent, base.accent)?,
-            accent_hover: color("accentHover", raw_colors.accent_hover, base.accent_hover)?,
-            on_accent: color("onAccent", raw_colors.on_accent, base.on_accent)?,
+            background: c.color("background")?.unwrap_or(base.background),
+            surface: c.color("surface")?.unwrap_or(base.surface),
+            elevated: c.color("elevated")?.unwrap_or(base.elevated),
+            border: c.color("border")?.unwrap_or(base.border),
+            border_strong: c.color("borderStrong")?.unwrap_or(base.border_strong),
+            text: c.color("text")?.unwrap_or(base.text),
+            text_secondary: c.color("textSecondary")?.unwrap_or(base.text_secondary),
+            text_muted: c.color("textMuted")?.unwrap_or(base.text_muted),
+            text_faint: c.color("textFaint")?.unwrap_or(base.text_faint),
+            accent: c.color("accent")?.unwrap_or(base.accent),
+            accent_hover: c.color("accentHover")?.unwrap_or(base.accent_hover),
+            on_accent: c.color("onAccent")?.unwrap_or(base.on_accent),
         };
 
-        let raw_layout = parsed.layout.unwrap_or_default();
-        let defaults = ThemeLayout::default();
-        // Out-of-range sizes are clamped rather than rejected: the theme still looks as intended
-        let size = |value: Option<f64>, fallback: u32, min: u32, max: u32| {
-            value
-                .filter(|v| v.is_finite())
-                .map_or(fallback, |v| (v.round() as i64).clamp(i64::from(min), i64::from(max)) as u32)
+        let t = Fields::section(&root, "typography")?;
+        let typography = ThemeTypography {
+            heading_font: t.font_stack("headingFont")?,
+            heading_weight: match t.get("headingWeight") {
+                None => None,
+                // Font weights come in hundreds
+                Some(_) => Some((t.int("headingWeight", 600, 100, 900)? + 50) / 100 * 100),
+            },
+            heading_uppercase: t.flag("headingUppercase", false)?,
+            heading_spacing: t.decimal("headingSpacing", 0.0, -0.05, 0.3)?,
+            scale: t.decimal("scale", 1.0, 0.85, 1.25)?,
         };
+
+        let l = Fields::section(&root, "layout")?;
+        let d = ThemeLayout::default();
         let layout = ThemeLayout {
-            card_min_width: size(raw_layout.card_min_width, defaults.card_min_width, 120, 320),
-            card_radius: size(raw_layout.card_radius, defaults.card_radius, 0, 28),
-            sidebar_width: size(raw_layout.sidebar_width, defaults.sidebar_width, 160, 320),
+            card_min_width: l.int("cardMinWidth", d.card_min_width, 120, 320)?,
+            card_radius: l.int("cardRadius", d.card_radius, 0, 40)?,
+            sidebar_width: l.int("sidebarWidth", d.sidebar_width, 160, 320)?,
+            grid_gap: l.int("gridGap", d.grid_gap, 2, 40)?,
+            header_height: l.int("headerHeight", d.header_height, 44, 72)?,
+            content_padding: l.int("contentPadding", d.content_padding, 8, 56)?,
+            sidebar_side: l.choice("sidebarSide", d.sidebar_side)?,
+            dividers: l.flag("dividers", d.dividers)?,
+            scrollbars: l.choice("scrollbars", d.scrollbars)?,
+            window_controls: l.choice("windowControls", d.window_controls)?,
         };
 
-        let font_family = match parsed.font_family.as_deref().map(str::trim) {
-            None | Some("") => None,
-            Some(stack) => {
-                let allowed = stack.len() <= 200
-                    && stack
-                        .chars()
-                        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | ',' | '-' | '_' | '\'' | '"'));
-                if !allowed {
-                    return Err(invalid("fontFamily"));
-                }
-                Some(stack.to_string())
-            }
+        let k = Fields::section(&root, "cards")?;
+        let d = ThemeCards::default();
+        let cards = ThemeCards {
+            shape: k.choice("shape", d.shape)?,
+            aspect: k.choice("aspect", d.aspect)?,
+            border_width: k.int("borderWidth", d.border_width, 0, 4)?,
+            shadow: k.choice("shadow", d.shadow)?,
+            hover: k.choice("hover", d.hover)?,
+            caption: k.choice("caption", d.caption)?,
+        };
+
+        let s = Fields::section(&root, "shapes")?;
+        let d = ThemeShapes::default();
+        let shapes = ThemeShapes {
+            control_radius: s.int("controlRadius", d.control_radius, 0, 24)?,
+            panel_radius: s.int("panelRadius", d.panel_radius, 0, 32)?,
+            chip_radius: s.int("chipRadius", d.chip_radius, 0, 16)?,
+        };
+
+        let i = Fields::section(&root, "icons")?;
+        let d = ThemeIcons::default();
+        let icons = ThemeIcons {
+            stroke_width: i.decimal("strokeWidth", d.stroke_width, 1.0, 3.0)?,
+            corners: i.choice("corners", d.corners)?,
+            scale: i.decimal("scale", d.scale, 0.8, 1.4)?,
+            fill: i.decimal("fill", d.fill, 0.0, 0.6)?,
+        };
+
+        let e = Fields::section(&root, "effects")?;
+        let background_gradient = match e.get("backgroundGradient") {
+            None => Vec::new(),
+            Some(Value::Array(stops)) if stops.is_empty() => Vec::new(),
+            Some(value @ Value::Array(stops)) if (2..=3).contains(&stops.len()) => stops
+                .iter()
+                .map(|stop| stop.as_str().and_then(normalize_hex_color))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| e.wrong("backgroundGradient", value))?,
+            Some(other) => return Err(e.wrong("backgroundGradient", other)),
+        };
+        let effects = ThemeEffects {
+            background_gradient,
+            background_angle: e.int("backgroundAngle", 180, 0, 360)?,
         };
 
         Ok(Self {
             id: String::new(),
             name,
-            author: clean_text(&parsed.author, 60),
-            description: clean_text(&parsed.description, 240),
+            author: clean_text(top.text("author")?.unwrap_or_default(), 60),
+            description: clean_text(top.text("description")?.unwrap_or_default(), 240),
             color_scheme,
             colors,
+            font_family: top.font_stack("fontFamily")?,
+            typography,
             layout,
-            font_family,
+            cards,
+            shapes,
+            icons,
+            effects,
+            font_files: parse_font_files(&root, fonts_dir)?,
         })
     }
 
-    /// The theme as a shareable file: pretty-printed, with the format marker, without the id.
+    /// The theme as a shareable file: pretty-printed, with the format marker, without the id
+    /// and with every value spelled out, so an exported theme doubles as a template.
     pub fn to_json(&self) -> String {
         let value = serde_json::json!({
             "kansoTheme": THEME_FORMAT_VERSION,
@@ -293,8 +843,14 @@ impl Theme {
             "description": self.description,
             "colorScheme": self.color_scheme,
             "colors": self.colors,
-            "layout": self.layout,
             "fontFamily": self.font_family,
+            "typography": self.typography,
+            "layout": self.layout,
+            "cards": self.cards,
+            "shapes": self.shapes,
+            "icons": self.icons,
+            "effects": self.effects,
+            "fontFiles": self.font_files,
         });
         let mut text = serde_json::to_string_pretty(&value).unwrap_or_default();
         text.push('\n');
@@ -368,7 +924,10 @@ fn read_theme_file(path: &Path) -> Result<Theme, String> {
     }
     let raw = fs::read_to_string(path)
         .map_err(|e| format!("{} {}: {e}", T::CannotRead.s(), path.display()))?;
-    Theme::from_json(&raw)
+    match path.parent() {
+        Some(dir) => Theme::from_json_in(&raw, dir),
+        None => Theme::from_json(&raw),
+    }
 }
 
 /// Stores `theme` in the themes folder. With `replace_id` the existing theme of that id is
@@ -406,7 +965,8 @@ pub fn save_user_theme(
     Ok(theme)
 }
 
-/// Validates the theme file at `source` and installs a copy in the themes folder.
+/// Validates the theme file at `source` and installs a copy in the themes folder. Fonts the
+/// file refers to by name are embedded, so the installed copy stands on its own.
 pub fn import_theme_file(themes_dir: &Path, source: &Path) -> Result<Theme, String> {
     let theme = read_theme_file(source)?;
     save_user_theme(themes_dir, &theme, None)
@@ -445,8 +1005,11 @@ mod tests {
         "fontFamily": "Segoe UI, 'Fira Sans', sans-serif"
     }"##;
 
+    /// The smallest thing that passes for a font file: a woff2 signature and some bytes.
+    const FAKE_WOFF2: &[u8] = b"wOF2\x00\x01\x00\x00kanso-test-font";
+
     #[test]
-    fn parses_a_partial_theme_filling_defaults_and_normalising_values() {
+    fn parses_a_version_1_theme_filling_defaults_and_normalising_values() {
         let theme = Theme::from_json(NORD).expect("valid theme");
         assert_eq!(theme.name, "Nord Night");
         assert_eq!(theme.author, "Arctic Ice Studio");
@@ -460,9 +1023,70 @@ mod tests {
         assert_eq!(theme.layout.card_radius, 14);
         assert_eq!(theme.layout.sidebar_width, 208);
         assert_eq!(theme.font_family.as_deref(), Some("Segoe UI, 'Fira Sans', sans-serif"));
+        // Everything version 1 could not express keeps Kanso's look
+        assert_eq!(theme.typography, ThemeTypography::default());
+        assert_eq!(theme.cards, ThemeCards::default());
+        assert_eq!(theme.shapes, ThemeShapes::default());
+        assert_eq!(theme.icons, ThemeIcons::default());
+        assert_eq!(theme.effects, ThemeEffects::default());
+        assert!(theme.font_files.is_empty());
 
         let light = Theme::from_json(r#"{"name":"Carta","colorScheme":"light","colors":{}}"#).unwrap();
         assert_eq!(light.colors, ThemeColors::defaults(ColorScheme::Light));
+    }
+
+    #[test]
+    fn parses_shapes_typography_icons_and_effects() {
+        let theme = Theme::from_json(
+            r##"{
+                "kansoTheme": 2,
+                "name": "Arcade",
+                "colors": {},
+                "fontFamily": "Pixelify Sans",
+                "typography": { "headingFont": "Tektur", "headingWeight": 760, "headingUppercase": true, "headingSpacing": 0.084, "scale": 9 },
+                "layout": { "gridGap": 0, "headerHeight": 60, "contentPadding": 32, "sidebarSide": "right", "dividers": true, "scrollbars": "hidden", "windowControls": "dots" },
+                "cards": { "shape": "cut", "aspect": "1:1", "borderWidth": 9, "shadow": "glow", "hover": "none", "caption": "overlay" },
+                "shapes": { "controlRadius": 0, "panelRadius": 99, "chipRadius": 2.6 },
+                "icons": { "strokeWidth": 1.256, "corners": "sharp", "scale": 1.2, "fill": 5 },
+                "effects": { "backgroundGradient": ["#ABC", "#102030"], "backgroundAngle": 135 }
+            }"##,
+        )
+        .expect("valid theme");
+
+        assert_eq!(theme.font_family.as_deref(), Some("Pixelify Sans"));
+        assert_eq!(theme.typography.heading_font.as_deref(), Some("Tektur"));
+        assert_eq!(theme.typography.heading_weight, Some(800), "rounded to a real weight");
+        assert!(theme.typography.heading_uppercase);
+        assert_eq!(theme.typography.heading_spacing, 0.08);
+        assert_eq!(theme.typography.scale, 1.25, "clamped");
+
+        assert_eq!(theme.layout.grid_gap, 2, "clamped");
+        assert_eq!(theme.layout.header_height, 60);
+        assert_eq!(theme.layout.content_padding, 32);
+        assert_eq!(theme.layout.sidebar_side, SidebarSide::Right);
+        assert!(theme.layout.dividers);
+        assert_eq!(theme.layout.scrollbars, Scrollbars::Hidden);
+        assert_eq!(theme.layout.window_controls, WindowControls::Dots);
+        assert_eq!(theme.layout.card_min_width, 185, "untouched fields keep their default");
+
+        assert_eq!(theme.cards.shape, CardShape::Cut);
+        assert_eq!(theme.cards.aspect, CardAspect::Square);
+        assert_eq!(theme.cards.border_width, 4, "clamped");
+        assert_eq!(theme.cards.shadow, CardShadow::Glow);
+        assert_eq!(theme.cards.hover, CardHover::Off);
+        assert_eq!(theme.cards.caption, CardCaption::Overlay);
+
+        assert_eq!(theme.shapes.control_radius, 0);
+        assert_eq!(theme.shapes.panel_radius, 32, "clamped");
+        assert_eq!(theme.shapes.chip_radius, 3);
+
+        assert_eq!(theme.icons.stroke_width, 1.26);
+        assert_eq!(theme.icons.corners, IconCorners::Sharp);
+        assert_eq!(theme.icons.scale, 1.2);
+        assert_eq!(theme.icons.fill, 0.6, "clamped");
+
+        assert_eq!(theme.effects.background_gradient, vec!["#aabbcc", "#102030"]);
+        assert_eq!(theme.effects.background_angle, 135);
     }
 
     #[test]
@@ -470,13 +1094,28 @@ mod tests {
         let bad = [
             (r#"{"colors":{}}"#, "name"),
             (r#"{"name":"X"}"#, "colors"),
+            (r#"{"name":"X","colors":"red"}"#, "colors"),
             (r#"{"name":"X","colors":{"accent":"red"}}"#, "colors.accent"),
+            (r#"{"name":"X","colors":{"accent":12}}"#, "colors.accent"),
             (r#"{"name":"X","colors":{"background":"url(https://evil.example/x.png)"}}"#, "colors.background"),
             (r##"{"name":"X","colors":{"text":"#12345"}}"##, "colors.text"),
             (r#"{"name":"X","colorScheme":"sepia","colors":{}}"#, "colorScheme"),
             (r#"{"name":"X","colors":{},"fontFamily":"x; } body { display:none"}"#, "fontFamily"),
             (r#"{"name":"X","colors":{},"fontFamily":"url(https://evil.example/f.woff)"}"#, "fontFamily"),
-            (r#"{"kansoTheme":2,"name":"X","colors":{}}"#, "kansoTheme"),
+            (r#"{"name":"X","colors":{},"typography":{"headingFont":"a; } * { display:none"}}"#, "typography.headingFont"),
+            (r#"{"name":"X","colors":{},"typography":{"scale":"big"}}"#, "typography.scale"),
+            (r#"{"name":"X","colors":{},"layout":{"cardRadius":"10px"}}"#, "layout.cardRadius"),
+            (r#"{"name":"X","colors":{},"layout":{"dividers":"yes"}}"#, "layout.dividers"),
+            (r#"{"name":"X","colors":{},"layout":{"sidebarSide":"top"}}"#, "layout.sidebarSide"),
+            (r#"{"name":"X","colors":{},"cards":{"shape":"polygon(0 0, 100% 0)"}}"#, "cards.shape"),
+            (r#"{"name":"X","colors":{},"cards":{"aspect":"16:9"}}"#, "cards.aspect"),
+            (r#"{"name":"X","colors":{},"cards":[]}"#, "cards"),
+            (r#"{"name":"X","colors":{},"icons":{"corners":"wavy"}}"#, "icons.corners"),
+            (r#"{"name":"X","colors":{},"effects":{"backgroundGradient":["red","blue"]}}"#, "effects.backgroundGradient"),
+            (r##"{"name":"X","colors":{},"effects":{"backgroundGradient":["#000"]}}"##, "effects.backgroundGradient"),
+            (r#"{"name":"X","colors":{},"effects":{"backgroundGradient":"linear-gradient(red, blue)"}}"#, "effects.backgroundGradient"),
+            (r#"{"kansoTheme":3,"name":"X","colors":{}}"#, "kansoTheme"),
+            (r#"["not", "a", "theme"]"#, "Tema non valido"),
             ("not json", "Tema non valido"),
         ];
         for (raw, expected) in bad {
@@ -489,14 +1128,120 @@ mod tests {
     fn exported_file_round_trips_and_carries_no_id() {
         let mut theme = Theme::from_json(NORD).unwrap();
         theme.id = "nord-night".to_string();
+        theme.cards.shape = CardShape::Slant;
+        theme.icons.stroke_width = 1.5;
+        theme.effects.background_gradient = vec!["#000000".to_string(), "#112233".to_string()];
         let json = theme.to_json();
-        assert!(json.contains("\"kansoTheme\": 1"));
+        assert!(json.contains("\"kansoTheme\": 2"));
         assert!(!json.contains("\"id\""));
+        // Every section is spelled out: an exported theme is a complete template
+        for section in ["typography", "layout", "cards", "shapes", "icons", "effects", "fontFiles"] {
+            assert!(json.contains(&format!("\"{section}\"")), "{section} missing");
+        }
+        assert!(json.contains("\"aspect\": \"2:3\"") && json.contains("\"shadow\": \"none\""));
 
         let mut reparsed = Theme::from_json(&json).unwrap();
         assert_eq!(reparsed.id, "");
         reparsed.id = theme.id.clone();
         assert_eq!(reparsed, theme);
+
+        // A theme object as an older interface would send it (no new sections) is still valid
+        let from_ui: Theme = serde_json::from_str(
+            r##"{"id":"x","name":"X","colorScheme":"dark","colors":{"background":"#000000","surface":"#000000","elevated":"#000000","border":"#000000","borderStrong":"#000000","text":"#ffffff","textSecondary":"#ffffff","textMuted":"#ffffff","textFaint":"#ffffff","accent":"#ff0000","accentHover":"#ff0000","onAccent":"#000000"},"layout":{"cardMinWidth":200,"cardRadius":4,"sidebarWidth":200},"fontFamily":null}"##,
+        )
+        .expect("deserializes");
+        let validated = from_ui.validated().unwrap();
+        assert_eq!(validated.layout.card_min_width, 200);
+        assert_eq!(validated.layout.grid_gap, 16);
+        assert_eq!(validated.cards, ThemeCards::default());
+    }
+
+    #[test]
+    fn embeds_fonts_given_as_data_or_as_a_file_next_to_the_theme() {
+        let tmp = tempdir().unwrap();
+        fs::write(tmp.path().join("Pixel.woff2"), FAKE_WOFF2).unwrap();
+        let encoded = STANDARD.encode(FAKE_WOFF2);
+
+        let raw = format!(
+            r#"{{"name":"Fonts","colors":{{}},"fontFamily":"Pixel, Mono Two","fontFiles":[
+                {{"family":"Pixel","file":"Pixel.woff2"}},
+                {{"family":"Mono Two","weight":"100  900","style":"italic","data":"data:font/woff2;base64,{encoded}"}},
+                {{"family":"Three","weight":700,"data":"{}"}}
+            ]}}"#,
+            encoded.trim_end_matches('=')
+        );
+        let theme = Theme::from_json_in(&raw, tmp.path()).expect("valid theme");
+        assert_eq!(theme.font_files.len(), 3);
+        assert_eq!(theme.font_files[0].family, "Pixel");
+        assert_eq!(theme.font_files[0].weight, "400");
+        assert_eq!(theme.font_files[0].style, FontStyle::Normal);
+        assert_eq!(theme.font_files[0].data, encoded, "the file was read and embedded");
+        assert_eq!(theme.font_files[1].weight, "100 900");
+        assert_eq!(theme.font_files[1].style, FontStyle::Italic);
+        assert_eq!(theme.font_files[1].data, encoded);
+        assert_eq!(theme.font_files[2].weight, "700");
+        assert_eq!(theme.font_files[2].data, encoded, "missing padding is tolerated");
+
+        // The exported file needs no companion files any more
+        assert_eq!(Theme::from_json(&theme.to_json()).unwrap().font_files, theme.font_files);
+
+        // Importing embeds too
+        let source = tmp.path().join("fonts.kanso-theme.json");
+        fs::write(&source, &raw).unwrap();
+        let themes_dir = tmp.path().join("themes");
+        let imported = import_theme_file(&themes_dir, &source).expect("import");
+        assert_eq!(imported.font_files[0].data, encoded);
+        let (listed, warnings) = list_user_themes(&themes_dir);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(listed[0].font_files.len(), 3);
+    }
+
+    #[test]
+    fn rejects_font_entries_that_are_not_fonts_or_reach_outside_the_theme_folder() {
+        let tmp = tempdir().unwrap();
+        let themes = tmp.path().join("themes");
+        fs::create_dir_all(&themes).unwrap();
+        fs::write(tmp.path().join("secret.ttf"), FAKE_WOFF2).unwrap();
+        fs::write(themes.join("notes.woff2"), b"just some text, not a font").unwrap();
+        fs::write(themes.join("ok.woff2"), FAKE_WOFF2).unwrap();
+        fs::write(themes.join("config.json"), FAKE_WOFF2).unwrap();
+        let not_a_font = STANDARD.encode(b"<script>alert(1)</script>");
+        let font = STANDARD.encode(FAKE_WOFF2);
+
+        let theme_with = |entry: String| format!(r#"{{"name":"X","colors":{{}},"fontFiles":[{entry}]}}"#);
+        let bad = [
+            (r#"{"family":"A","file":"../secret.ttf"}"#.to_string(), "fontFiles[0].file"),
+            (format!(r#"{{"family":"A","file":{:?}}}"#, tmp.path().join("secret.ttf")), "fontFiles[0].file"),
+            (r#"{"family":"A","file":"config.json"}"#.to_string(), "fontFiles[0].file"),
+            (r#"{"family":"A","file":"missing.woff2"}"#.to_string(), "fontFiles[0].file"),
+            (r#"{"family":"A","file":"notes.woff2"}"#.to_string(), "fontFiles[0]"),
+            (format!(r#"{{"family":"A","data":"{not_a_font}"}}"#), "fontFiles[0]"),
+            (r#"{"family":"A","data":"***"}"#.to_string(), "fontFiles[0].data"),
+            (r#"{"family":"A"}"#.to_string(), "fontFiles[0].data"),
+            (format!(r#"{{"family":"A; }} body {{","data":"{font}"}}"#), "fontFiles[0].family"),
+            (format!(r#"{{"data":"{font}"}}"#), "fontFiles[0].family"),
+            (format!(r#"{{"family":"A","weight":"bold","data":"{font}"}}"#), "fontFiles[0].weight"),
+            (format!(r#"{{"family":"A","style":"oblique 20deg","data":"{font}"}}"#), "fontFiles[0].style"),
+            (r#""ok.woff2""#.to_string(), "fontFiles[0]"),
+        ];
+        for (entry, expected) in bad {
+            let raw = theme_with(entry);
+            let err = Theme::from_json_in(&raw, &themes).expect_err(&raw);
+            assert!(err.contains(expected), "{raw} -> {err}");
+        }
+
+        // The good file works from its folder, and only there: a theme arriving from the UI
+        // cannot name files at all
+        let good = theme_with(r#"{"family":"A","file":"ok.woff2"}"#.to_string());
+        assert!(Theme::from_json_in(&good, &themes).is_ok());
+        assert!(Theme::from_json(&good).unwrap_err().contains("fontFiles[0].file"));
+
+        let too_many = theme_with(vec![format!(r#"{{"family":"A","data":"{font}"}}"#); 7].join(","));
+        assert!(Theme::from_json(&too_many).unwrap_err().contains("fontFiles (7"));
+
+        let oversized = STANDARD.encode(vec![0u8; MAX_FONT_BYTES + 4096]);
+        let too_big = theme_with(format!(r#"{{"family":"A","data":"{oversized}"}}"#));
+        assert!(Theme::from_json(&too_big).unwrap_err().contains("fontFiles[0]"));
     }
 
     #[test]
@@ -550,11 +1295,21 @@ mod tests {
     }
 
     #[test]
-    fn the_example_theme_in_the_docs_is_valid() {
-        let example = include_str!("../../../../docs/themes/nord.kanso-theme.json");
-        let theme = Theme::from_json(example).expect("docs/themes/nord.kanso-theme.json must stay importable");
-        assert_eq!(theme.name, "Nord");
-        assert_eq!(theme.colors.accent, "#88c0d0");
-        assert_eq!(theme.font_family, None);
+    fn the_example_themes_in_the_docs_are_valid() {
+        let nord = Theme::from_json(include_str!("../../../../docs/themes/nord.kanso-theme.json"))
+            .expect("docs/themes/nord.kanso-theme.json must stay importable");
+        assert_eq!(nord.name, "Nord");
+        assert_eq!(nord.colors.accent, "#88c0d0");
+        assert_eq!(nord.font_family, None);
+
+        let arcade = Theme::from_json(include_str!("../../../../docs/themes/arcade.kanso-theme.json"))
+            .expect("docs/themes/arcade.kanso-theme.json must stay importable");
+        assert_eq!(arcade.cards.shape, CardShape::Cut);
+        assert_eq!(arcade.icons.corners, IconCorners::Sharp);
+
+        let aurora = Theme::from_json(include_str!("../../../../docs/themes/aurora.kanso-theme.json"))
+            .expect("docs/themes/aurora.kanso-theme.json must stay importable");
+        assert_eq!(aurora.cards.caption, CardCaption::Overlay);
+        assert_eq!(aurora.effects.background_gradient.len(), 3);
     }
 }
