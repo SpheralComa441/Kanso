@@ -1,0 +1,56 @@
+{
+  "kansoTheme": 2,
+  "name": "Aurora",
+  "author": "Kanso",
+  "description": "Gradient night sky, round shapes, titles over the covers.",
+  "colorScheme": "dark",
+  "colors": {
+    "background": "#0d1026",
+    "surface": "#171b3a",
+    "elevated": "#222750",
+    "border": "#2e3463",
+    "borderStrong": "#5964a8",
+    "text": "#f3f5ff",
+    "textSecondary": "#d5daf5",
+    "textMuted": "#a3abd6",
+    "textFaint": "#7982b3",
+    "accent": "#7ef0c6",
+    "accentHover": "#a5f7d9",
+    "onAccent": "#062019"
+  },
+  "fontFamily": "Nunito",
+  "typography": {
+    "headingFont": "Unbounded",
+    "headingWeight": 500,
+    "headingUppercase": false,
+    "headingSpacing": -0.01,
+    "scale": 1
+  },
+  "layout": {
+    "cardMinWidth": 200,
+    "cardRadius": 22,
+    "sidebarWidth": 220,
+    "gridGap": 22,
+    "headerHeight": 56,
+    "contentPadding": 28,
+    "sidebarSide": "left",
+    "dividers": false,
+    "scrollbars": "auto",
+    "windowControls": "dots"
+  },
+  "cards": {
+    "shape": "rounded",
+    "aspect": "3:4",
+    "borderWidth": 0,
+    "shadow": "soft",
+    "hover": "zoom",
+    "caption": "overlay"
+  },
+  "shapes": { "controlRadius": 14, "panelRadius": 24, "chipRadius": 12 },
+  "icons": { "strokeWidth": 1.75, "corners": "round", "scale": 1, "fill": 0.18 },
+  "effects": {
+    "backgroundGradient": ["#0d1026", "#1a1440", "#0c2a3a"],
+    "backgroundAngle": 155
+  },
+  "fontFiles": []
+}
