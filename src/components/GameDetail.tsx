@@ -1,10 +1,12 @@
 import { useEffect, useRef } from "react";
 import { Eye, EyeOff, Pencil, Play, Star, X } from "lucide-react";
+import { useI18n, type I18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
-import { formatRelativePast, genreKey } from "../lib/library";
-import { PLATFORM_META } from "../lib/platforms";
+import { genreKey } from "../lib/library";
+import { PLATFORM_META, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame } from "../types/game";
+import { Cover } from "./Cover";
 
 interface GameDetailProps {
   game: DetectedGame | null;
@@ -20,13 +22,13 @@ interface GameDetailProps {
 }
 
 /** Describes how the game will be started, shown as a small technical footnote. */
-function launchTarget(game: DetectedGame): string {
+function launchTarget(game: DetectedGame, t: I18n["t"]): string {
   if (game.launchUri) {
-    if (game.platform === "steam") return "Avvio tramite Steam";
-    if (game.platform === "epic") return "Avvio tramite Epic Games Launcher";
-    return "Avvio tramite client della piattaforma";
+    if (game.platform === "steam") return t("detail.viaSteam");
+    if (game.platform === "epic") return t("detail.viaEpic");
+    return t("detail.viaClient");
   }
-  return game.executablePath ?? "Nessun eseguibile configurato";
+  return game.executablePath ?? t("detail.noExe");
 }
 
 export function GameDetail({
@@ -40,6 +42,7 @@ export function GameDetail({
   onEdit,
   onSelectGenre,
 }: GameDetailProps) {
+  const { t, plural, relativePast } = useI18n();
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const { usableCover, markBroken } = useBrokenCovers();
   const gameId = game?.id ?? null;
@@ -65,6 +68,7 @@ export function GameDetail({
     resolveCoverUrl(game.coverPath, game.updatedAt)
   );
   const canLaunch = Boolean(game.launchUri || game.executablePath);
+  const hideLabel = game.isHidden ? t("detail.unhide") : t("detail.hide");
 
   return (
     <div
@@ -93,7 +97,7 @@ export function GameDetail({
           id="close-game-detail-button"
           type="button"
           onClick={onClose}
-          aria-label="Chiudi dettagli"
+          aria-label={t("detail.close")}
           className="absolute right-3 top-3 z-10 rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-oled-elevated hover:text-zinc-100"
         >
           <X className="h-4 w-4" />
@@ -101,22 +105,20 @@ export function GameDetail({
 
         {/* Cover */}
         <div className="relative hidden w-[17rem] shrink-0 self-stretch bg-oled-bg sm:block">
-          <div className="aspect-[2/3] w-full">
+          <div className="relative aspect-[2/3] w-full overflow-hidden">
             {coverUrl ? (
-              <img
-                src={coverUrl}
-                alt={`Copertina di ${game.title}`}
-                draggable={false}
+              <Cover
+                url={coverUrl}
+                alt={t("detail.coverAlt", { title: game.title })}
                 onError={() => markBroken(coverUrl)}
-                className="h-full w-full object-cover"
               />
             ) : (
               <div className="flex h-full w-full flex-col items-center justify-center gap-1 bg-gradient-to-b from-oled-elevated/50 to-oled-bg p-6 text-center">
                 <span className="line-clamp-4 text-sm font-semibold text-zinc-300">
                   {game.title}
                 </span>
-                <span className="text-[11px] text-zinc-600">
-                  Nessuna copertina
+                <span className="text-[11px] text-zinc-500">
+                  {t("detail.noCover")}
                 </span>
               </div>
             )}
@@ -129,7 +131,7 @@ export function GameDetail({
             <span
               className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-medium ${platformMeta.badgeClass}`}
             >
-              {platformMeta.label}
+              {platformLabel(game.platform, t)}
             </span>
             <h2
               id="game-detail-title"
@@ -139,13 +141,13 @@ export function GameDetail({
             </h2>
 
             {game.genres.length > 0 && (
-              <ul className="flex flex-wrap gap-1.5" aria-label="Generi">
+              <ul className="flex flex-wrap gap-1.5" aria-label={t("detail.genres")}>
                 {game.genres.map((genre) => (
                   <li key={genre}>
                     <button
                       type="button"
                       onClick={() => onSelectGenre(genreKey(genre))}
-                      title={`Mostra tutti i giochi "${genre}"`}
+                      title={t("detail.showGenre", { genre })}
                       className="rounded-full border border-oled-border bg-oled-bg/60 px-2.5 py-0.5 text-[11px] text-zinc-300 transition-colors hover:border-accent/50 hover:text-accent"
                     >
                       {genre}
@@ -158,16 +160,15 @@ export function GameDetail({
 
           <p
             className={`select-text text-sm leading-relaxed ${
-              game.shortDescription ? "text-zinc-300" : "text-zinc-600"
+              game.shortDescription ? "text-zinc-300" : "text-zinc-500"
             }`}
           >
-            {game.shortDescription ??
-              "Nessuna descrizione disponibile. Puoi aggiungerla da Modifica."}
+            {game.shortDescription ?? t("detail.noDescription")}
           </p>
 
           <dl className="mt-auto space-y-2 border-t border-oled-border/70 pt-4 text-[11px]">
             <div className="flex gap-3">
-              <dt className="w-16 shrink-0 text-zinc-600">Cartella</dt>
+              <dt className="w-20 shrink-0 text-zinc-500">{t("detail.folder")}</dt>
               <dd
                 className="min-w-0 select-text truncate font-mono text-zinc-400"
                 title={game.installDir}
@@ -176,20 +177,22 @@ export function GameDetail({
               </dd>
             </div>
             <div className="flex gap-3">
-              <dt className="w-16 shrink-0 text-zinc-600">Avvio</dt>
+              <dt className="w-20 shrink-0 text-zinc-500">{t("detail.launch")}</dt>
               <dd
                 className="min-w-0 select-text truncate font-mono text-zinc-400"
-                title={launchTarget(game)}
+                title={launchTarget(game, t)}
               >
-                {launchTarget(game)}
+                {launchTarget(game, t)}
               </dd>
             </div>
             {game.lastPlayedAt !== null && (
               <div className="flex gap-3">
-                <dt className="w-16 shrink-0 text-zinc-600">Giocato</dt>
+                <dt className="w-20 shrink-0 text-zinc-500">{t("detail.played")}</dt>
                 <dd className="min-w-0 truncate text-zinc-400">
-                  {formatRelativePast(game.lastPlayedAt)}
-                  {game.playCount > 1 ? ` · ${game.playCount} avvii` : ""}
+                  {relativePast(game.lastPlayedAt)}
+                  {game.playCount > 1
+                    ? ` · ${plural("launches", game.playCount)}`
+                    : ""}
                 </dd>
               </div>
             )}
@@ -205,7 +208,7 @@ export function GameDetail({
               className="inline-flex min-w-[9rem] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-accent-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Play className="h-4 w-4 fill-current" />
-              <span>{isLaunching ? "Avvio..." : "Avvia"}</span>
+              <span>{isLaunching ? t("common.launching") : t("common.play")}</span>
             </button>
 
             <button
@@ -222,7 +225,9 @@ export function GameDetail({
               <Star
                 className={`h-3.5 w-3.5 ${game.isFavorite ? "fill-accent" : ""}`}
               />
-              <span>{game.isFavorite ? "Nei preferiti" : "Preferito"}</span>
+              <span>
+                {game.isFavorite ? t("detail.inFavorites") : t("detail.favorite")}
+              </span>
             </button>
 
             <button
@@ -232,23 +237,15 @@ export function GameDetail({
               className="inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-bg/60 px-3.5 py-2 text-xs font-medium text-zinc-300 transition-colors hover:border-zinc-600"
             >
               <Pencil className="h-3.5 w-3.5" />
-              <span>Modifica</span>
+              <span>{t("common.edit")}</span>
             </button>
 
             <button
               id="detail-hide-button"
               type="button"
               onClick={() => onToggleHidden(game)}
-              title={
-                game.isHidden
-                  ? "Mostra di nuovo in libreria"
-                  : "Nascondi dalla libreria (resta in Nascosti)"
-              }
-              aria-label={
-                game.isHidden
-                  ? "Mostra di nuovo in libreria"
-                  : "Nascondi dalla libreria"
-              }
+              title={hideLabel}
+              aria-label={hideLabel}
               className="ml-auto rounded-lg p-2 text-zinc-500 transition-colors hover:bg-oled-bg/60 hover:text-zinc-200"
             >
               {game.isHidden ? (

@@ -1,21 +1,27 @@
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AppConfig,
+  DealsReport,
   DetectedGame,
   GameManualUpdate,
   ScanReport,
   SgdbGameMatch,
+  Theme,
 } from "../types/game";
-import { PREVIEW_MOCK_GAMES } from "./previewData";
+import { PREVIEW_MOCK_DEALS, PREVIEW_MOCK_GAMES } from "./previewData";
 
 const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
+
+const PREVIEW_THEMES_KEY = "kanso.browser_preview.themes";
 
 const DEFAULT_CONFIG: AppConfig = {
   steamgriddbApiKey: "",
   customFolders: [],
   minimizeToTrayOnLaunch: false,
+  language: null,
+  themeId: null,
 };
 
 // Same ordering the desktop backend applies to a real scan
@@ -66,6 +72,8 @@ export async function getSettings(): Promise<AppConfig> {
         ? parsed.customFolders
         : [],
       minimizeToTrayOnLaunch: Boolean(parsed.minimizeToTrayOnLaunch),
+      language: typeof parsed.language === "string" ? parsed.language : null,
+      themeId: typeof parsed.themeId === "string" ? parsed.themeId : null,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -79,6 +87,8 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
       new Set(config.customFolders.map((f) => f.trim()).filter(Boolean))
     ),
     minimizeToTrayOnLaunch: config.minimizeToTrayOnLaunch,
+    language: config.language,
+    themeId: config.themeId,
   };
 
   if (isTauri()) {
@@ -312,4 +322,129 @@ export async function pickCoverImageFile(): Promise<string | null> {
   return typeof selected === "string" && selected.trim().length > 0
     ? selected
     : null;
+}
+
+/* ------------------------------------------------------------------ deals */
+
+/**
+ * Current discounts on Steam, Epic and GOG. `country` (ISO code) selects regional prices;
+ * the backend reuses its last answer for half an hour unless `forceRefresh`.
+ */
+export async function fetchDeals(
+  country: string,
+  forceRefresh = false
+): Promise<DealsReport> {
+  if (isTauri()) {
+    return invoke<DealsReport>("fetch_deals", { country, forceRefresh });
+  }
+  return { deals: PREVIEW_MOCK_DEALS, failedStores: [], fetchedAt: Date.now() };
+}
+
+/** Opens a deal's store page in the default browser. */
+export async function openStorePage(url: string): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_store_page", { url });
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/* ----------------------------------------------------------------- themes */
+
+function readPreviewThemes(): Theme[] {
+  try {
+    const raw = localStorage.getItem(PREVIEW_THEMES_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? (parsed as Theme[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePreviewThemes(themes: Theme[]): void {
+  try {
+    localStorage.setItem(PREVIEW_THEMES_KEY, JSON.stringify(themes));
+  } catch {
+    // Preview only: themes simply won't survive a reload
+  }
+}
+
+/** Themes installed by the user, plus a warning per invalid file in the themes folder. */
+export async function listThemes(): Promise<{
+  themes: Theme[];
+  warnings: string[];
+}> {
+  if (isTauri()) {
+    return invoke<{ themes: Theme[]; warnings: string[] }>("list_themes");
+  }
+  return { themes: readPreviewThemes(), warnings: [] };
+}
+
+/**
+ * Stores a theme made in the editor. `replaceId` overwrites that installed theme; without
+ * it a new theme is created.
+ */
+export async function saveTheme(
+  theme: Theme,
+  replaceId: string | null
+): Promise<Theme> {
+  if (isTauri()) {
+    return invoke<Theme>("save_theme", { theme, replaceId });
+  }
+  const themes = readPreviewThemes();
+  const slug =
+    theme.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "theme";
+  let id = replaceId ?? slug;
+  for (let n = 2; !replaceId && themes.some((t) => t.id === id); n += 1) {
+    id = `${slug}-${n}`;
+  }
+  const saved: Theme = { ...theme, id };
+  writePreviewThemes([...themes.filter((t) => t.id !== id), saved]);
+  return saved;
+}
+
+export async function deleteTheme(id: string): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("delete_theme", { id });
+    return;
+  }
+  writePreviewThemes(readPreviewThemes().filter((t) => t.id !== id));
+}
+
+/** Lets the user pick a theme file and installs it. `null` if the dialog was cancelled. */
+export async function importThemeFromFile(): Promise<Theme | null> {
+  if (!isTauri()) return null;
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    filters: [{ name: "Kanso theme", extensions: ["json"] }],
+  });
+  if (typeof selected !== "string" || !selected.trim()) return null;
+  return invoke<Theme>("import_theme", { path: selected });
+}
+
+/** Lets the user choose where to write `theme`. `false` if the dialog was cancelled. */
+export async function exportThemeToFile(theme: Theme): Promise<boolean> {
+  if (!isTauri()) return false;
+  const fileName =
+    theme.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "theme";
+  const path = await save({
+    defaultPath: `${fileName}.kanso-theme.json`,
+    filters: [{ name: "Kanso theme", extensions: ["json"] }],
+  });
+  if (!path) return false;
+  await invoke<void>("export_theme", { theme, path });
+  return true;
+}
+
+export async function openThemesFolder(): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_themes_folder");
+  }
 }

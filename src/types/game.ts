@@ -35,6 +35,8 @@ export interface DetectedGame {
   /** Last launch from Kanso (ms since epoch). */
   lastPlayedAt: number | null;
   playCount: number;
+  /** Language the cached description and genres were fetched in. */
+  metadataLang: string | null;
   updatedAt: number;
 }
 
@@ -64,4 +66,65 @@ export interface AppConfig {
   steamgriddbApiKey: string;
   customFolders: string[];
   minimizeToTrayOnLaunch: boolean;
+  /** `it`, `en`, `es` or `ru`; `null` until chosen or detected on first run. */
+  language: string | null;
+  /** Selected theme (`builtin:<name>` or an installed theme's id); `null` = default. */
+  themeId: string | null;
+}
+
+export type DealStore = "steam" | "epic" | "gog";
+
+export interface Deal {
+  id: string;
+  store: DealStore;
+  title: string;
+  url: string;
+  imageUrl: string | null;
+  originalPrice: number | null;
+  finalPrice: number;
+  currency: string;
+  discountPercent: number;
+  /** Not started yet (next week's free game on Epic). */
+  upcoming: boolean;
+  startsAt: number | null;
+  endsAt: number | null;
+  steamAppid: string | null;
+}
+
+export interface DealsReport {
+  deals: Deal[];
+  failedStores: DealStore[];
+  fetchedAt: number;
+}
+
+export interface ThemeColors {
+  background: string;
+  surface: string;
+  elevated: string;
+  border: string;
+  borderStrong: string;
+  text: string;
+  textSecondary: string;
+  textMuted: string;
+  textFaint: string;
+  accent: string;
+  accentHover: string;
+  onAccent: string;
+}
+
+export interface ThemeLayout {
+  cardMinWidth: number;
+  cardRadius: number;
+  sidebarWidth: number;
+}
+
+export interface Theme {
+  id: string;
+  name: string;
+  author: string;
+  description: string;
+  colorScheme: "dark" | "light";
+  colors: ThemeColors;
+  layout: ThemeLayout;
+  fontFamily: string | null;
 }

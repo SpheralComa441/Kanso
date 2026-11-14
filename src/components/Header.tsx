@@ -7,6 +7,7 @@ import {
   Search,
   Settings,
 } from "lucide-react";
+import { useI18n } from "../i18n";
 
 export type ViewMode = "grid" | "list";
 
@@ -19,6 +20,8 @@ interface HeaderProps {
   activeFilterCount: number;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
+  /** The grid/list switch only applies to the library. */
+  showViewMode: boolean;
   isScanning: boolean;
   isSyncingMetadata: boolean;
   hasApiKey: boolean;
@@ -35,13 +38,18 @@ export function Header({
   activeFilterCount,
   viewMode,
   onViewModeChange,
+  showViewMode,
   isScanning,
   isSyncingMetadata,
   hasApiKey,
   onScan,
   onOpenSettings,
 }: HeaderProps) {
+  const { t, plural } = useI18n();
   const SidebarIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen;
+  const sidebarLabel = isSidebarOpen
+    ? t("header.hideFilters")
+    : t("header.showFilters");
 
   return (
     <header className="shrink-0 border-b border-oled-border bg-oled-bg">
@@ -54,8 +62,8 @@ export function Header({
             onClick={onToggleSidebar}
             aria-expanded={isSidebarOpen}
             aria-controls="library-sidebar"
-            title={isSidebarOpen ? "Nascondi filtri" : "Mostra filtri"}
-            aria-label={isSidebarOpen ? "Nascondi filtri" : "Mostra filtri"}
+            title={sidebarLabel}
+            aria-label={sidebarLabel}
             className="relative rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-oled-elevated hover:text-zinc-100"
           >
             <SidebarIcon className="h-4 w-4" />
@@ -73,20 +81,20 @@ export function Header({
               Kanso
             </h1>
             <span className="rounded-md border border-oled-border bg-oled-surface px-2 py-0.5 text-xs font-medium tabular-nums text-zinc-400">
-              {totalGames} {totalGames === 1 ? "gioco" : "giochi"}
+              {plural("games", totalGames)}
             </span>
           </div>
         </div>
 
         {/* Instant search */}
-        <div className="relative mx-auto w-full max-w-xl min-w-0 flex-1">
+        <div className="relative mx-auto w-full min-w-0 max-w-xl flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
           <input
             id="library-search-input"
             type="search"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Cerca nella libreria..."
+            placeholder={t("header.searchPlaceholder")}
             className="w-full rounded-lg border border-oled-border bg-oled-surface py-1.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-500 transition-colors focus:border-accent/60 focus:outline-none"
           />
         </div>
@@ -99,53 +107,48 @@ export function Header({
               className="hidden items-center gap-1.5 text-[11px] text-zinc-400 lg:inline-flex"
             >
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-              Sincronizzazione metadata...
+              {t("header.syncing")}
             </span>
           )}
 
-          <div
-            role="group"
-            aria-label="Modalità vista"
-            className="flex items-center rounded-lg border border-oled-border bg-oled-surface p-0.5"
-          >
-            <button
-              id="view-mode-grid"
-              type="button"
-              onClick={() => onViewModeChange("grid")}
-              title="Vista griglia copertine"
-              aria-label="Vista griglia copertine"
-              aria-pressed={viewMode === "grid"}
-              className={`rounded-md p-1.5 transition-colors ${
-                viewMode === "grid"
-                  ? "bg-oled-elevated text-zinc-100"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
+          {showViewMode && (
+            <div
+              role="group"
+              aria-label={t("header.viewMode")}
+              className="flex items-center rounded-lg border border-oled-border bg-oled-surface p-0.5"
             >
-              <LayoutGrid className="h-3.5 w-3.5" />
-            </button>
-            <button
-              id="view-mode-list"
-              type="button"
-              onClick={() => onViewModeChange("list")}
-              title="Vista elenco dettagliato"
-              aria-label="Vista elenco dettagliato"
-              aria-pressed={viewMode === "list"}
-              className={`rounded-md p-1.5 transition-colors ${
-                viewMode === "list"
-                  ? "bg-oled-elevated text-zinc-100"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              <List className="h-3.5 w-3.5" />
-            </button>
-          </div>
+              {(
+                [
+                  ["grid", LayoutGrid, t("header.gridView")],
+                  ["list", List, t("header.listView")],
+                ] as const
+              ).map(([mode, Icon, label]) => (
+                <button
+                  key={mode}
+                  id={`view-mode-${mode}`}
+                  type="button"
+                  onClick={() => onViewModeChange(mode)}
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={viewMode === mode}
+                  className={`rounded-md p-1.5 transition-colors ${
+                    viewMode === mode
+                      ? "bg-oled-elevated text-zinc-100"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                </button>
+              ))}
+            </div>
+          )}
 
           <button
             id="scan-library-button"
             type="button"
             onClick={onScan}
             disabled={isScanning}
-            title="Scansiona di nuovo i giochi installati"
+            title={t("header.scanTitle")}
             className="inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-surface px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-700 hover:bg-oled-elevated disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw
@@ -153,21 +156,21 @@ export function Header({
                 isScanning ? "animate-spin text-accent" : "text-zinc-400"
               }`}
             />
-            <span>{isScanning ? "Scansione..." : "Scansiona"}</span>
+            <span>{isScanning ? t("header.scanning") : t("header.scan")}</span>
           </button>
 
           <button
             id="open-settings-button"
             type="button"
             onClick={onOpenSettings}
-            title="Impostazioni"
-            aria-label="Impostazioni"
+            title={t("header.settings")}
+            aria-label={t("header.settings")}
             className="relative rounded-lg border border-oled-border bg-oled-surface p-2 text-zinc-400 transition-colors hover:border-zinc-700 hover:bg-oled-elevated hover:text-zinc-100"
           >
             <Settings className="h-3.5 w-3.5" />
             {!hasApiKey && (
               <span
-                title="SteamGridDB API Key non configurata"
+                title={t("header.apiKeyMissing")}
                 className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-oled-bg bg-accent"
               />
             )}

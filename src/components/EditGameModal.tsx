@@ -19,6 +19,8 @@ import {
   setGameLocalCover,
   updateGameDetails,
 } from "../lib/backend";
+import { useI18n } from "../i18n";
+import { platformLabel } from "../lib/platforms";
 import type { DetectedGame, SgdbGameMatch } from "../types/game";
 
 interface EditGameModalProps {
@@ -36,6 +38,7 @@ export function EditGameModal({
   onGameUpdated,
   onOpenSettings,
 }: EditGameModalProps) {
+  const { t } = useI18n();
   const [title, setTitle] = useState("");
   const [exePath, setExePath] = useState("");
   const [genresText, setGenresText] = useState("");
@@ -93,9 +96,7 @@ export function EditGameModal({
       setFeedbackMsg({
         type: "error",
         text:
-          err instanceof Error
-            ? err.message
-            : "Errore durante la ricerca su SteamGridDB.",
+          typeof err === "string" ? err : t("edit.sgdbSearchError"),
       });
     } finally {
       setIsSearchingSgdb(false);
@@ -117,15 +118,13 @@ export function EditGameModal({
       onGameUpdated(updated);
       setFeedbackMsg({
         type: "success",
-        text: `Copertina e metadata aggiornati con "${match.name}".`,
+        text: t("edit.sgdbApplied", { name: match.name }),
       });
     } catch (err) {
       setFeedbackMsg({
         type: "error",
         text:
-          err instanceof Error
-            ? err.message
-            : "Impossibile scaricare copertina e metadata da SteamGridDB.",
+          typeof err === "string" ? err : t("edit.sgdbApplyError"),
       });
     } finally {
       setApplyingSgdbId(null);
@@ -141,15 +140,13 @@ export function EditGameModal({
       onGameUpdated(updated);
       setFeedbackMsg({
         type: "success",
-        text: "Copertina locale aggiornata con successo.",
+        text: t("edit.localCoverOk"),
       });
     } catch (err) {
       setFeedbackMsg({
         type: "error",
         text:
-          err instanceof Error
-            ? err.message
-            : "Impossibile impostare l'immagine locale.",
+          typeof err === "string" ? err : t("edit.localCoverError"),
       });
     }
   };
@@ -164,9 +161,7 @@ export function EditGameModal({
       setFeedbackMsg({
         type: "error",
         text:
-          err instanceof Error
-            ? err.message
-            : "Impossibile selezionare il file eseguibile.",
+          typeof err === "string" ? err : t("edit.exePickError"),
       });
     }
   };
@@ -194,9 +189,7 @@ export function EditGameModal({
       setFeedbackMsg({
         type: "error",
         text:
-          err instanceof Error
-            ? err.message
-            : "Errore durante il salvataggio delle modifiche.",
+          typeof err === "string" ? err : t("edit.saveError"),
       });
     } finally {
       setIsSaving(false);
@@ -223,10 +216,13 @@ export function EditGameModal({
               id="edit-game-modal-title"
               className="truncate text-base font-semibold text-zinc-100"
             >
-              Modifica gioco — {game.title}
+              {t("edit.title", { title: game.title })}
             </h2>
             <p className="mt-0.5 text-xs text-zinc-400">
-              Piattaforma: <strong className="text-zinc-300">{game.platform}</strong>
+              {t("edit.platform")}:{" "}
+              <strong className="text-zinc-300">
+                {platformLabel(game.platform, t)}
+              </strong>
               {game.platformAppId ? ` · ID: ${game.platformAppId}` : ""}
             </p>
           </div>
@@ -234,7 +230,7 @@ export function EditGameModal({
             id="close-edit-game-button"
             type="button"
             onClick={onClose}
-            aria-label="Chiudi finestra modifica"
+            aria-label={t("edit.close")}
             className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-oled-elevated hover:text-zinc-200"
           >
             <X className="h-4 w-4" />
@@ -270,8 +266,8 @@ export function EditGameModal({
                     <span className="text-xs font-medium text-zinc-400 line-clamp-3">
                       {game.title}
                     </span>
-                    <span className="mt-1 text-[10px] text-zinc-600">
-                      Nessuna copertina
+                    <span className="mt-1 text-[10px] text-zinc-500">
+                      {t("detail.noCover")}
                     </span>
                   </div>
                 )}
@@ -290,7 +286,7 @@ export function EditGameModal({
                   className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-oled-border bg-oled-elevated px-2.5 py-1.5 text-[11px] font-medium text-zinc-200 transition-colors hover:border-zinc-600"
                 >
                   <ImagePlus className="h-3.5 w-3.5 text-accent" />
-                  <span>File locale...</span>
+                  <span>{t("edit.localFile")}</span>
                 </button>
               )}
             </div>
@@ -303,7 +299,7 @@ export function EditGameModal({
                   className="flex items-center gap-1.5 text-xs font-semibold text-zinc-100"
                 >
                   <Sparkles className="h-3.5 w-3.5 text-accent" />
-                  <span>Cerca su SteamGridDB</span>
+                  <span>{t("edit.sgdbSearch")}</span>
                 </label>
                 {game.steamgriddbId && (
                   <span className="font-mono text-[11px] text-zinc-500">
@@ -314,11 +310,7 @@ export function EditGameModal({
 
               {!hasApiKey && isRunningInTauri() ? (
                 <div className="rounded-lg border border-oled-border bg-oled-bg p-3.5 text-xs text-zinc-400 space-y-2">
-                  <p>
-                    Per cercare manualmente su SteamGridDB e scaricare la
-                    copertina, inserisci prima la tua API Key nelle
-                    Impostazioni.
-                  </p>
+                  <p>{t("edit.sgdbNeedsKey")}</p>
                   <button
                     type="button"
                     onClick={() => {
@@ -327,7 +319,7 @@ export function EditGameModal({
                     }}
                     className="rounded-md bg-accent/15 px-2.5 py-1 font-medium text-accent hover:bg-accent/25"
                   >
-                    Configura API Key
+                    {t("edit.configureKey")}
                   </button>
                 </div>
               ) : (
@@ -346,7 +338,7 @@ export function EditGameModal({
                             void handleSearchSgdb();
                           }
                         }}
-                        placeholder="Digita il titolo corretto da cercare..."
+                        placeholder={t("edit.sgdbPlaceholder")}
                         className="w-full rounded-lg border border-oled-border bg-oled-bg py-1.5 pl-9 pr-3 text-xs text-zinc-100 placeholder-zinc-500 focus:border-accent/60 focus:outline-none"
                       />
                     </div>
@@ -362,13 +354,12 @@ export function EditGameModal({
                       ) : (
                         <Search className="h-3.5 w-3.5 text-accent" />
                       )}
-                      <span>Cerca</span>
+                      <span>{t("common.search")}</span>
                     </button>
                   </div>
 
                   <p className="text-[11px] text-zinc-500">
-                    Seleziona un risultato per aggiornare subito copertina
-                    verticale (600×900) e metadata.
+                    {t("edit.sgdbHint")}
                   </p>
 
                   {sgdbResults.length > 0 ? (
@@ -398,7 +389,7 @@ export function EditGameModal({
                                   )}
                                   {item.verified && (
                                     <span
-                                      title="Verificato su SteamGridDB"
+                                      title={t("edit.sgdbVerified")}
                                       className="inline-flex shrink-0"
                                     >
                                       <CheckCircle2 className="h-3 w-3 text-emerald-400" />
@@ -412,10 +403,10 @@ export function EditGameModal({
 
                               <span className="shrink-0 rounded-md border border-oled-border bg-oled-surface px-2 py-1 text-[11px] font-medium text-accent">
                                 {isApplyingThis
-                                  ? "Download..."
+                                  ? t("edit.sgdbDownloading")
                                   : isCurrent
-                                    ? "Attuale"
-                                    : "Applica"}
+                                    ? t("edit.sgdbCurrent")
+                                    : t("edit.sgdbApply")}
                               </span>
                             </button>
                           </li>
@@ -426,8 +417,7 @@ export function EditGameModal({
                     hasSearchedOnce &&
                     !isSearchingSgdb && (
                       <div className="rounded-lg border border-dashed border-oled-border bg-oled-bg/50 px-3 py-3 text-center text-xs text-zinc-500">
-                        Nessun risultato trovato su SteamGridDB per &ldquo;
-                        {sgdbQuery}&rdquo;.
+                        {t("edit.sgdbNoResults", { query: sgdbQuery })}
                       </div>
                     )
                   )}
@@ -448,7 +438,7 @@ export function EditGameModal({
                   htmlFor="edit-game-title-input"
                   className="block text-xs font-medium text-zinc-300"
                 >
-                  Titolo visualizzato
+                  {t("edit.displayTitle")}
                 </label>
                 <input
                   id="edit-game-title-input"
@@ -464,14 +454,14 @@ export function EditGameModal({
                   htmlFor="edit-game-genres-input"
                   className="block text-xs font-medium text-zinc-300"
                 >
-                  Generi (separati da virgola)
+                  {t("edit.genres")}
                 </label>
                 <input
                   id="edit-game-genres-input"
                   type="text"
                   value={genresText}
                   onChange={(e) => setGenresText(e.target.value)}
-                  placeholder="Es. Azione, GDR, Indie"
+                  placeholder={t("edit.genresPlaceholder")}
                   className="w-full rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:border-accent/60 focus:outline-none"
                 />
               </div>
@@ -482,7 +472,7 @@ export function EditGameModal({
                 htmlFor="edit-game-exe-input"
                 className="block text-xs font-medium text-zinc-300"
               >
-                Percorso eseguibile (`.exe`)
+                {t("edit.exePath")}
               </label>
               <div className="flex gap-2">
                 <input
@@ -492,8 +482,8 @@ export function EditGameModal({
                   onChange={(e) => setExePath(e.target.value)}
                   placeholder={
                     game.launchUri
-                      ? `Avvio tramite ${game.launchUri} (opzionale .exe custom)`
-                      : "Percorso completo del file .exe"
+                      ? t("edit.exePlaceholderUri", { uri: game.launchUri })
+                      : t("edit.exePlaceholder")
                   }
                   className="flex-1 rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 focus:border-accent/60 focus:outline-none"
                 />
@@ -505,7 +495,7 @@ export function EditGameModal({
                     className="inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-elevated px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-600"
                   >
                     <FolderOpen className="h-3.5 w-3.5 text-accent" />
-                    <span>Sfoglia</span>
+                    <span>{t("common.browse")}</span>
                   </button>
                 )}
               </div>
@@ -516,14 +506,14 @@ export function EditGameModal({
                 htmlFor="edit-game-description-input"
                 className="block text-xs font-medium text-zinc-300"
               >
-                Descrizione breve
+                {t("edit.description")}
               </label>
               <textarea
                 id="edit-game-description-input"
                 rows={3}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="Descrizione del gioco..."
+                placeholder={t("edit.descriptionPlaceholder")}
                 className="w-full resize-none rounded-lg border border-oled-border bg-oled-bg px-3 py-2 text-xs leading-relaxed text-zinc-100 placeholder-zinc-500 focus:border-accent/60 focus:outline-none"
               />
             </div>
@@ -538,7 +528,7 @@ export function EditGameModal({
             onClick={onClose}
             className="rounded-lg border border-oled-border bg-oled-bg px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-oled-elevated"
           >
-            Chiudi
+            {t("common.close")}
           </button>
           <button
             id="save-edit-game-button"
@@ -548,7 +538,7 @@ export function EditGameModal({
             className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover disabled:opacity-60"
           >
             <Check className="h-3.5 w-3.5" />
-            <span>{isSaving ? "Salvataggio..." : "Salva modifiche"}</span>
+            <span>{isSaving ? t("edit.saving") : t("edit.saveChanges")}</span>
           </button>
         </div>
       </div>

@@ -1,7 +1,7 @@
-import { EyeOff, History, Library, Star } from "lucide-react";
+import { EyeOff, History, Home, Library, Star } from "lucide-react";
 import type { ReactNode } from "react";
+import { useI18n } from "../i18n";
 import {
-  COLLECTION_LABELS,
   EMPTY_FILTERS,
   hasActiveFilters,
   type GenreSummary,
@@ -9,91 +9,92 @@ import {
   type LibraryCounts,
   type LibraryFilters,
 } from "../lib/library";
-import { PLATFORM_META, PLATFORM_ORDER } from "../lib/platforms";
+import { PLATFORM_ORDER, platformLabel } from "../lib/platforms";
+
+export type MainView = "home" | "library";
 
 interface SidebarProps {
   isOpen: boolean;
+  view: MainView;
+  onOpenHome: () => void;
   filters: LibraryFilters;
+  /** Changing a filter always shows the library. */
   onFiltersChange: (next: LibraryFilters) => void;
   counts: LibraryCounts;
   genres: GenreSummary[];
 }
 
-interface FilterRowProps {
+interface NavRowProps {
   id: string;
   label: string;
-  count: number;
+  count?: number;
   active: boolean;
-  disabled?: boolean;
   icon?: ReactNode;
   onClick: () => void;
 }
 
-function FilterRow({
-  id,
-  label,
-  count,
-  active,
-  disabled = false,
-  icon,
-  onClick,
-}: FilterRowProps) {
+function NavRow({ id, label, count, active, icon, onClick }: NavRowProps) {
   return (
     <button
       id={id}
       type="button"
       onClick={onClick}
-      disabled={disabled}
       aria-pressed={active}
-      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors disabled:cursor-default ${
+      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors ${
         active
           ? "bg-oled-elevated font-medium text-zinc-100"
-          : disabled
-            ? "text-zinc-600"
-            : "text-zinc-400 hover:bg-oled-surface hover:text-zinc-200"
+          : "text-zinc-400 hover:bg-oled-surface hover:text-zinc-200"
       }`}
     >
       {icon}
       <span className="min-w-0 flex-1 truncate" title={label}>
         {label}
       </span>
-      <span
-        className={`shrink-0 tabular-nums ${
-          active ? "text-accent" : disabled ? "text-zinc-700" : "text-zinc-500"
-        }`}
-      >
-        {count}
-      </span>
+      {count !== undefined && (
+        <span
+          className={`shrink-0 tabular-nums ${
+            active ? "text-accent" : "text-zinc-500"
+          }`}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-600">
+    <h2 className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
       {children}
     </h2>
   );
 }
 
 /**
- * Collapsible quick-filter panel: collections (favorites, recently played, hidden), platform
- * and the genres found in the library's metadata. Filters combine; clicking an active one
- * switches it off.
+ * Collapsible side panel: the Home (deals) entry, then the library with its collections
+ * (favorites, recently played, hidden), platforms and the genres found in the metadata.
+ * Library filters combine; clicking an active one switches it off.
  */
 export function Sidebar({
   isOpen,
+  view,
+  onOpenHome,
   filters,
   onFiltersChange,
   counts,
   genres,
 }: SidebarProps) {
+  const { t } = useI18n();
+  const inLibrary = view === "library";
   const nothingFiltered = !hasActiveFilters(filters);
   const viewingHidden = filters.collection === "hidden";
+  const collectionActive = (collection: LibraryCollection) =>
+    inLibrary && filters.collection === collection;
 
   /** Toggles a collection. Hidden games form a separate pool, so entering it drops the rest. */
   const toggleCollection = (collection: LibraryCollection) => {
-    if (filters.collection === collection) {
+    if (collectionActive(collection)) {
       onFiltersChange({ ...filters, collection: "all" });
     } else if (collection === "hidden") {
       onFiltersChange({ ...EMPTY_FILTERS, collection });
@@ -117,53 +118,59 @@ export function Sidebar({
   return (
     <aside
       id="library-sidebar"
-      aria-label="Filtri libreria"
+      aria-label={t("sidebar.label")}
       className={`h-full shrink-0 overflow-hidden border-oled-border transition-[width,visibility] duration-200 ease-out ${
         isOpen ? "visible w-[var(--sidebar-width)] border-r" : "invisible w-0"
       }`}
     >
       <nav className="flex h-full w-[var(--sidebar-width)] flex-col gap-5 overflow-y-auto px-2.5 py-4">
+        <NavRow
+          id="nav-home"
+          label={t("sidebar.home")}
+          active={view === "home"}
+          icon={<Home className="h-3.5 w-3.5 shrink-0" />}
+          onClick={onOpenHome}
+        />
+
         <section>
-          <SectionTitle>Libreria</SectionTitle>
+          <SectionTitle>{t("sidebar.library")}</SectionTitle>
           <div className="space-y-0.5">
-            <FilterRow
+            <NavRow
               id="filter-all"
-              label={COLLECTION_LABELS.all}
+              label={t("collection.all")}
               count={counts.visible}
-              active={nothingFiltered}
+              active={inLibrary && nothingFiltered}
               icon={<Library className="h-3.5 w-3.5 shrink-0" />}
               onClick={() => onFiltersChange(EMPTY_FILTERS)}
             />
-            <FilterRow
+            <NavRow
               id="filter-favorites"
-              label={COLLECTION_LABELS.favorites}
+              label={t("collection.favorites")}
               count={counts.favorites}
-              active={filters.collection === "favorites"}
+              active={collectionActive("favorites")}
               icon={
                 <Star
                   className={`h-3.5 w-3.5 shrink-0 ${
-                    filters.collection === "favorites"
-                      ? "fill-accent text-accent"
-                      : ""
+                    collectionActive("favorites") ? "fill-accent text-accent" : ""
                   }`}
                 />
               }
               onClick={() => toggleCollection("favorites")}
             />
-            <FilterRow
+            <NavRow
               id="filter-recent"
-              label={COLLECTION_LABELS.recent}
+              label={t("collection.recent")}
               count={counts.recent}
-              active={filters.collection === "recent"}
+              active={collectionActive("recent")}
               icon={<History className="h-3.5 w-3.5 shrink-0" />}
               onClick={() => toggleCollection("recent")}
             />
             {(counts.hidden > 0 || viewingHidden) && (
-              <FilterRow
+              <NavRow
                 id="filter-hidden"
-                label={COLLECTION_LABELS.hidden}
+                label={t("collection.hidden")}
                 count={counts.hidden}
-                active={viewingHidden}
+                active={collectionActive("hidden")}
                 icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
                 onClick={() => toggleCollection("hidden")}
               />
@@ -173,15 +180,15 @@ export function Sidebar({
 
         {platformsWithGames.length > 0 && (
           <section>
-            <SectionTitle>Piattaforma</SectionTitle>
+            <SectionTitle>{t("sidebar.platform")}</SectionTitle>
             <div className="space-y-0.5">
               {platformsWithGames.map((platform) => {
-                const active = filters.platform === platform;
+                const active = inLibrary && filters.platform === platform;
                 return (
-                  <FilterRow
+                  <NavRow
                     key={platform}
                     id={`filter-platform-${platform}`}
-                    label={PLATFORM_META[platform].label}
+                    label={platformLabel(platform, t)}
                     count={counts.byPlatform[platform]}
                     active={active}
                     onClick={() =>
@@ -197,18 +204,17 @@ export function Sidebar({
         )}
 
         <section className="min-h-0">
-          <SectionTitle>Genere</SectionTitle>
+          <SectionTitle>{t("sidebar.genre")}</SectionTitle>
           {genres.length === 0 ? (
-            <p className="px-2.5 text-[11px] leading-relaxed text-zinc-600">
-              I generi compaiono qui man mano che i metadata vengono
-              sincronizzati.
+            <p className="px-2.5 text-[11px] leading-relaxed text-zinc-500">
+              {t("sidebar.genresEmpty")}
             </p>
           ) : (
             <div className="space-y-0.5">
               {genres.map((genre) => {
-                const active = filters.genre === genre.key;
+                const active = inLibrary && filters.genre === genre.key;
                 return (
-                  <FilterRow
+                  <NavRow
                     key={genre.key}
                     id={`filter-genre-${genre.key}`}
                     label={genre.label}

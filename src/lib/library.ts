@@ -21,13 +21,6 @@ export const EMPTY_FILTERS: LibraryFilters = {
   genre: null,
 };
 
-export const COLLECTION_LABELS: Record<LibraryCollection, string> = {
-  all: "Tutti i giochi",
-  favorites: "Preferiti",
-  recent: "Giocati di recente",
-  hidden: "Nascosti",
-};
-
 export interface GenreSummary {
   key: string;
   label: string;
@@ -154,27 +147,6 @@ export function sortGamesByTitle(games: DetectedGame[]): DetectedGame[] {
       a.title.toLowerCase().localeCompare(b.title.toLowerCase()) ||
       a.id.localeCompare(b.id)
   );
-}
-
-const RELATIVE_TIME = new Intl.RelativeTimeFormat("it", { numeric: "auto" });
-const RELATIVE_STEPS: [limitSeconds: number, unit: Intl.RelativeTimeFormatUnit, seconds: number][] = [
-  [3600, "minute", 60],
-  [86400, "hour", 3600],
-  [86400 * 30, "day", 86400],
-  [86400 * 365, "month", 86400 * 30],
-  [Infinity, "year", 86400 * 365],
-];
-
-/** "poco fa", "3 ore fa", "ieri", "2 mesi fa"... for a past timestamp in milliseconds. */
-export function formatRelativePast(timestampMs: number, nowMs = Date.now()): string {
-  const elapsed = Math.max(0, Math.round((nowMs - timestampMs) / 1000));
-  if (elapsed < 60) return "poco fa";
-  for (const [limit, unit, size] of RELATIVE_STEPS) {
-    if (elapsed < limit) {
-      return RELATIVE_TIME.format(-Math.floor(elapsed / size), unit);
-    }
-  }
-  return "";
 }
 
 /** Reads a small per-device UI preference; never throws (private mode, blocked storage). */

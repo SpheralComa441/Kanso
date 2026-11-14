@@ -12,6 +12,10 @@ export const PLATFORM_ORDER: GamePlatform[] = [
   "standalone",
 ];
 
+/**
+ * Store names are brand names and stay untranslated; only "local" games get a translated
+ * label, through `platformLabel`.
+ */
 export const PLATFORM_META: Record<
   GamePlatform,
   { label: string; badgeClass: string }
@@ -49,3 +53,13 @@ export const PLATFORM_META: Record<
     badgeClass: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300",
   },
 };
+
+/** Display name of a platform in the current language. */
+export function platformLabel(
+  platform: GamePlatform,
+  t: (key: "platform.local") => string
+): string {
+  return platform === "standalone"
+    ? t("platform.local")
+    : PLATFORM_META[platform].label;
+}
