@@ -1,3 +1,4 @@
+use crate::i18n::{Lang, T};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs;
@@ -14,12 +15,22 @@ pub struct AppConfig {
     pub custom_folders: Vec<String>,
     /// Whether Kanso should minimize to the system tray when launching a game.
     pub minimize_to_tray_on_launch: bool,
+    /// Interface language (`it`, `en`, `es`, `ru`). `None` until the user or the first-run
+    /// detection picks one.
+    pub language: Option<String>,
+    /// Id of the selected theme; `None` means the built-in default.
+    pub theme_id: Option<String>,
 }
 
 impl AppConfig {
     /// Returns `true` when a non-empty SteamGridDB API key has been configured.
     pub fn has_api_key(&self) -> bool {
         !self.steamgriddb_api_key.trim().is_empty()
+    }
+
+    /// The configured interface language, if it is one Kanso supports.
+    pub fn lang(&self) -> Option<Lang> {
+        self.language.as_deref().and_then(Lang::from_code)
     }
 
     /// Normalizes fields by trimming whitespace and deduplicating custom folder paths.
@@ -41,6 +52,16 @@ impl AppConfig {
             steamgriddb_api_key: self.steamgriddb_api_key.trim().to_string(),
             custom_folders: folders,
             minimize_to_tray_on_launch: self.minimize_to_tray_on_launch,
+            // Unsupported codes are dropped rather than stored
+            language: self
+                .language
+                .as_deref()
+                .and_then(Lang::from_code)
+                .map(|lang| lang.code().to_string()),
+            theme_id: self
+                .theme_id
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty()),
         }
     }
 
@@ -50,9 +71,9 @@ impl AppConfig {
             return Ok(Self::default());
         }
         let raw = fs::read_to_string(path)
-            .map_err(|e| format!("Impossibile leggere il file di configurazione {}: {e}", path.display()))?;
+            .map_err(|e| format!("{} {}: {e}", T::CannotRead.s(), path.display()))?;
         let parsed: Self = serde_json::from_str(&raw)
-            .map_err(|e| format!("Formato config.json non valido in {}: {e}", path.display()))?;
+            .map_err(|e| format!("{} {}: {e}", T::InvalidFormat.s(), path.display()))?;
         Ok(parsed.sanitized())
     }
 
@@ -61,20 +82,17 @@ impl AppConfig {
         let clean = self.clone().sanitized();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                format!(
-                    "Impossibile creare la cartella di configurazione {}: {e}",
-                    parent.display()
-                )
+                format!("{} {}: {e}", T::CannotCreateFolder.s(), parent.display())
             })?;
         }
         let serialized = serde_json::to_string_pretty(&clean)
-            .map_err(|e| format!("Errore di serializzazione config.json: {e}"))?;
+            .map_err(|e| format!("{} config.json: {e}", T::CannotSave.s()))?;
         // Write to a sibling file and rename over the target: a crash mid-write can no longer
         // leave a truncated config.json (and with it a lost API key) behind
         let tmp_path = path.with_extension("json.tmp");
         fs::write(&tmp_path, serialized)
             .and_then(|()| fs::rename(&tmp_path, path))
-            .map_err(|e| format!("Impossibile salvare config.json in {}: {e}", path.display()))?;
+            .map_err(|e| format!("{} {}: {e}", T::CannotSave.s(), path.display()))?;
         Ok(clean)
     }
 }
@@ -109,12 +127,17 @@ mod tests {
                 r"E:\IndieGames".to_string(),
             ],
             minimize_to_tray_on_launch: true,
+            language: Some("EN-us".to_string()),
+            theme_id: Some("  nord ".to_string()),
         };
 
         let saved = input.save_to_file(&cfg_path).expect("save config");
         assert_eq!(saved.steamgriddb_api_key, "sgdb_secret_key_123");
         assert_eq!(saved.custom_folders, vec![r"D:\Games\", r"E:\IndieGames"]);
         assert!(saved.has_api_key());
+        assert_eq!(saved.language.as_deref(), Some("en"));
+        assert_eq!(saved.lang(), Some(Lang::En));
+        assert_eq!(saved.theme_id.as_deref(), Some("nord"));
 
         let reloaded = AppConfig::load_from_file(&cfg_path).expect("reload config");
         assert_eq!(reloaded, saved);

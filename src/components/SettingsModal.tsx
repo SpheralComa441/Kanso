@@ -1,30 +1,72 @@
 import { useEffect, useState } from "react";
 import {
   Check,
+  Download,
   Eye,
   EyeOff,
+  FolderOpen,
   FolderPlus,
   KeyRound,
+  Languages,
+  Palette,
   Plus,
+  SlidersHorizontal,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
-import { isRunningInTauri, pickCustomFolder } from "../lib/backend";
-import type { AppConfig } from "../types/game";
+import {
+  LANGUAGES,
+  LANGUAGE_NAMES,
+  isLanguageCode,
+  useI18n,
+  type LanguageCode,
+} from "../i18n";
+import {
+  deleteTheme,
+  exportThemeToFile,
+  importThemeFromFile,
+  isRunningInTauri,
+  openThemesFolder,
+  pickCustomFolder,
+} from "../lib/backend";
+import {
+  BUILTIN_THEMES,
+  DEFAULT_THEME,
+  isBuiltinTheme,
+  resolveTheme,
+} from "../lib/themes";
+import type { AppConfig, Theme } from "../types/game";
 
 interface SettingsModalProps {
   isOpen: boolean;
   initialConfig: AppConfig;
+  /** Language currently shown (the saved one, or the one detected on first run). */
+  currentLanguage: LanguageCode;
+  userThemes: Theme[];
   onClose: () => void;
   onSave: (updated: AppConfig) => Promise<void>;
+  /** Re-reads the installed themes after an import or a delete. */
+  onThemesChanged: () => Promise<Theme[]>;
+  /** Shows a theme right away without saving it; `null` goes back to the saved one. */
+  onPreviewTheme: (theme: Theme | null) => void;
+  onCustomizeTheme: (theme: Theme) => void;
 }
+
+const SKIPPED_EXE_PATTERNS = "unins, crash, redist, dxsetup, vc_redist, launcher";
 
 export function SettingsModal({
   isOpen,
   initialConfig,
+  currentLanguage,
+  userThemes,
   onClose,
   onSave,
+  onThemesChanged,
+  onPreviewTheme,
+  onCustomizeTheme,
 }: SettingsModalProps) {
+  const { t } = useI18n();
   const [apiKey, setApiKey] = useState(initialConfig.steamgriddbApiKey);
   const [showKey, setShowKey] = useState(false);
   const [folders, setFolders] = useState<string[]>(initialConfig.customFolders);
@@ -32,6 +74,12 @@ export function SettingsModal({
   const [minimizeOnLaunch, setMinimizeOnLaunch] = useState(
     initialConfig.minimizeToTrayOnLaunch
   );
+  const [language, setLanguage] = useState<LanguageCode>(currentLanguage);
+  const [themeId, setThemeId] = useState<string | null>(initialConfig.themeId);
+  const [themeNotice, setThemeNotice] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -40,31 +88,104 @@ export function SettingsModal({
       setApiKey(initialConfig.steamgriddbApiKey);
       setFolders(initialConfig.customFolders);
       setMinimizeOnLaunch(initialConfig.minimizeToTrayOnLaunch);
+      setLanguage(currentLanguage);
+      setThemeId(initialConfig.themeId);
       setManualFolderInput("");
       setShowKey(false);
       setErrorMsg(null);
+      setThemeNotice(null);
     }
-  }, [isOpen, initialConfig]);
+    // Only when the dialog opens: edits in progress must survive background updates
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
+
+  const closeWithoutSaving = () => {
+    onPreviewTheme(null);
+    onClose();
+  };
 
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") closeWithoutSaving();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  const allThemes = [...BUILTIN_THEMES, ...userThemes];
+  const selectedTheme = resolveTheme(themeId, userThemes);
+
+  const selectTheme = (theme: Theme) => {
+    setThemeId(theme.id);
+    onPreviewTheme(theme);
+  };
+
+  const reportThemeError = (err: unknown) =>
+    setThemeNotice({
+      type: "error",
+      text: typeof err === "string" ? err : t("theme.error"),
+    });
+
+  const handleImportTheme = async () => {
+    setThemeNotice(null);
+    if (!isRunningInTauri()) {
+      setThemeNotice({ type: "error", text: t("theme.previewOnly") });
+      return;
+    }
+    try {
+      const imported = await importThemeFromFile();
+      if (!imported) return;
+      await onThemesChanged();
+      selectTheme(imported);
+      setThemeNotice({
+        type: "success",
+        text: t("theme.imported", { name: imported.name }),
+      });
+    } catch (err) {
+      reportThemeError(err);
+    }
+  };
+
+  const handleExportTheme = async () => {
+    setThemeNotice(null);
+    if (!isRunningInTauri()) {
+      setThemeNotice({ type: "error", text: t("theme.previewOnly") });
+      return;
+    }
+    try {
+      if (await exportThemeToFile(selectedTheme)) {
+        setThemeNotice({ type: "success", text: t("theme.exported") });
+      }
+    } catch (err) {
+      reportThemeError(err);
+    }
+  };
+
+  const handleDeleteTheme = async (theme: Theme) => {
+    setThemeNotice(null);
+    try {
+      await deleteTheme(theme.id);
+      await onThemesChanged();
+      if (themeId === theme.id) selectTheme(DEFAULT_THEME);
+      setThemeNotice({
+        type: "success",
+        text: t("theme.deleted", { name: theme.name }),
+      });
+    } catch (err) {
+      reportThemeError(err);
+    }
+  };
 
   const addFolderPath = (rawPath: string) => {
     const trimmed = rawPath.trim();
     if (!trimmed) return;
-    const norm = trimmed.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-    const exists = folders.some(
-      (f) => f.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() === norm
-    );
-    if (!exists) {
+    const norm = (f: string) =>
+      f.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    if (!folders.some((f) => norm(f) === norm(trimmed))) {
       setFolders((prev) => [...prev, trimmed]);
     }
   };
@@ -72,14 +193,10 @@ export function SettingsModal({
   const handleBrowseFolder = async () => {
     try {
       const picked = await pickCustomFolder();
-      if (picked) {
-        addFolderPath(picked);
-      }
+      if (picked) addFolderPath(picked);
     } catch (err) {
       setErrorMsg(
-        err instanceof Error
-          ? err.message
-          : "Impossibile aprire il selettore cartelle."
+        typeof err === "string" ? err : t("settings.folderPickerError")
       );
     }
   };
@@ -88,10 +205,6 @@ export function SettingsModal({
     if (!manualFolderInput.trim()) return;
     addFolderPath(manualFolderInput);
     setManualFolderInput("");
-  };
-
-  const handleRemoveFolder = (index: number) => {
-    setFolders((prev) => prev.filter((_, idx) => idx !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -103,64 +216,218 @@ export function SettingsModal({
         steamgriddbApiKey: apiKey.trim(),
         customFolders: folders,
         minimizeToTrayOnLaunch: minimizeOnLaunch,
+        language,
+        themeId: selectedTheme.id,
       });
+      onPreviewTheme(null);
       onClose();
     } catch (err) {
-      setErrorMsg(
-        err instanceof Error
-          ? err.message
-          : "Errore durante il salvataggio delle impostazioni."
-      );
+      setErrorMsg(typeof err === "string" ? err : t("settings.saveError"));
     } finally {
       setIsSaving(false);
     }
   };
 
   const keyConfigured = apiKey.trim().length > 0;
+  const smallButton =
+    "inline-flex items-center gap-1.5 rounded-md border border-oled-border bg-oled-elevated px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-600";
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) closeWithoutSaving();
       }}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
-        className="w-full max-w-lg overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
+        className="flex max-h-[92vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-oled-border px-6 py-4">
+        <div className="flex shrink-0 items-center justify-between border-b border-oled-border px-6 py-4">
           <div>
             <h2
               id="settings-modal-title"
               className="text-base font-semibold text-zinc-100"
             >
-              Impostazioni
+              {t("settings.title")}
             </h2>
-            <p className="mt-0.5 text-xs text-zinc-400">
-              Configurazione salvata localmente in AppData sul tuo PC
-            </p>
+            <p className="mt-0.5 text-xs text-zinc-400">{t("settings.subtitle")}</p>
           </div>
           <button
             id="close-settings-button"
             type="button"
-            onClick={onClose}
-            aria-label="Chiudi impostazioni"
+            onClick={closeWithoutSaving}
+            aria-label={t("settings.close")}
             className="rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-oled-elevated hover:text-zinc-200"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6 px-6 py-5">
+        <form
+          id="settings-form"
+          onSubmit={handleSubmit}
+          className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5"
+        >
           {errorMsg && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-200">
+            <div className="select-text rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-200">
               {errorMsg}
             </div>
           )}
+
+          {/* Language */}
+          <section className="space-y-2">
+            <label
+              htmlFor="language-select"
+              className="flex items-center gap-1.5 text-xs font-medium text-zinc-200"
+            >
+              <Languages className="h-3.5 w-3.5 text-accent" />
+              <span>{t("settings.language")}</span>
+            </label>
+            <select
+              id="language-select"
+              value={language}
+              onChange={(e) => {
+                if (isLanguageCode(e.target.value)) setLanguage(e.target.value);
+              }}
+              className="w-full rounded-lg border border-oled-border bg-oled-bg px-3 py-2 text-xs text-zinc-100 focus:border-accent/60 focus:outline-none"
+            >
+              {LANGUAGES.map((code) => (
+                <option key={code} value={code}>
+                  {LANGUAGE_NAMES[code]}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-zinc-500">{t("settings.languageHelp")}</p>
+          </section>
+
+          {/* Theme */}
+          <section className="space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
+              <Palette className="h-3.5 w-3.5 text-accent" />
+              <span>{t("theme.section")}</span>
+            </div>
+
+            <ul className="grid grid-cols-2 gap-2">
+              {allThemes.map((theme) => {
+                const selected = theme.id === selectedTheme.id;
+                const builtIn = isBuiltinTheme(theme);
+                return (
+                  <li key={theme.id} className="relative">
+                    <button
+                      id={`theme-option-${theme.id}`}
+                      type="button"
+                      onClick={() => selectTheme(theme)}
+                      aria-pressed={selected}
+                      className={`flex w-full items-center gap-2.5 rounded-lg border px-2.5 py-2 text-left transition-colors ${
+                        selected
+                          ? "border-accent/70 bg-oled-elevated"
+                          : "border-oled-border bg-oled-bg hover:border-zinc-600"
+                      }`}
+                    >
+                      {/* The theme's own colors, whatever theme is active */}
+                      <span
+                        aria-hidden="true"
+                        className="flex h-8 w-8 shrink-0 items-end justify-end overflow-hidden rounded-md border"
+                        style={{
+                          background: theme.colors.background,
+                          borderColor: theme.colors.border,
+                        }}
+                      >
+                        <span
+                          className="h-4 w-4 rounded-tl-md"
+                          style={{ background: theme.colors.accent }}
+                        />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-xs font-medium text-zinc-100">
+                          {theme.name}
+                        </span>
+                        <span className="block truncate text-[10px] text-zinc-500">
+                          {builtIn
+                            ? t("theme.builtin")
+                            : theme.author
+                              ? t("theme.by", { author: theme.author })
+                              : theme.description}
+                        </span>
+                      </span>
+                    </button>
+                    {!builtIn && (
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteTheme(theme)}
+                        aria-label={t("theme.deleteNamed", { name: theme.name })}
+                        title={t("common.delete")}
+                        className="absolute right-1.5 top-1.5 rounded p-1 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-300"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                id="customize-theme-button"
+                type="button"
+                onClick={() => onCustomizeTheme(selectedTheme)}
+                className={smallButton}
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5 text-accent" />
+                <span>{t("theme.customize")}</span>
+              </button>
+              <button
+                id="import-theme-button"
+                type="button"
+                onClick={() => void handleImportTheme()}
+                className={smallButton}
+              >
+                <Download className="h-3.5 w-3.5 text-accent" />
+                <span>{t("theme.import")}</span>
+              </button>
+              <button
+                id="export-theme-button"
+                type="button"
+                onClick={() => void handleExportTheme()}
+                className={smallButton}
+              >
+                <Upload className="h-3.5 w-3.5 text-accent" />
+                <span>{t("theme.export")}</span>
+              </button>
+              {isRunningInTauri() && (
+                <button
+                  id="open-themes-folder-button"
+                  type="button"
+                  onClick={() => void openThemesFolder().catch(reportThemeError)}
+                  className={smallButton}
+                >
+                  <FolderOpen className="h-3.5 w-3.5 text-accent" />
+                  <span>{t("theme.openFolder")}</span>
+                </button>
+              )}
+            </div>
+
+            {themeNotice && (
+              <p
+                role="status"
+                className={`select-text text-[11px] ${
+                  themeNotice.type === "success"
+                    ? "text-emerald-300"
+                    : "text-red-300"
+                }`}
+              >
+                {themeNotice.text}
+              </p>
+            )}
+            <p className="text-[11px] leading-relaxed text-zinc-500">
+              {t("theme.help")}
+            </p>
+          </section>
 
           {/* SteamGridDB API Key */}
           <section className="space-y-2">
@@ -179,7 +446,9 @@ export function SettingsModal({
                     : "bg-zinc-800 text-zinc-400"
                 }`}
               >
-                {keyConfigured ? "Configurata" : "Non impostata"}
+                {keyConfigured
+                  ? t("settings.keyConfigured")
+                  : t("settings.keyMissing")}
               </span>
             </div>
 
@@ -189,7 +458,7 @@ export function SettingsModal({
                 type={showKey ? "text" : "password"}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Incolla qui la tua API key di SteamGridDB..."
+                placeholder={t("settings.keyPlaceholder")}
                 autoComplete="off"
                 spellCheck={false}
                 className="w-full rounded-lg border border-oled-border bg-oled-bg py-2 pl-3 pr-10 font-mono text-xs text-zinc-100 placeholder-zinc-500 focus:border-accent/60 focus:outline-none"
@@ -198,7 +467,7 @@ export function SettingsModal({
                 id="toggle-apikey-visibility"
                 type="button"
                 onClick={() => setShowKey((v) => !v)}
-                aria-label={showKey ? "Nascondi chiave" : "Mostra chiave"}
+                aria-label={showKey ? t("settings.hideKey") : t("settings.showKey")}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:text-zinc-200"
               >
                 {showKey ? (
@@ -208,13 +477,10 @@ export function SettingsModal({
                 )}
               </button>
             </div>
-            <p className="text-[11px] leading-relaxed text-zinc-500">
-              Ottieni gratuitamente una chiave su{" "}
-              <span className="font-mono text-zinc-400">
-                steamgriddb.com/profile/preferences/api
-              </span>
-              . La chiave resta solo sul tuo dispositivo e non usa file{" "}
-              <code className="text-zinc-400">.env</code>.
+            <p className="select-text text-[11px] leading-relaxed text-zinc-500">
+              {t("settings.keyHelp", {
+                url: "steamgriddb.com/profile/preferences/api",
+              })}
             </p>
           </section>
 
@@ -222,17 +488,17 @@ export function SettingsModal({
           <section className="space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-200">
-                Cartelle Giochi Personalizzate (Standalone)
+                {t("settings.folders")}
               </span>
               {isRunningInTauri() && (
                 <button
                   id="browse-custom-folder-button"
                   type="button"
-                  onClick={handleBrowseFolder}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-oled-border bg-oled-elevated px-2.5 py-1 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-600"
+                  onClick={() => void handleBrowseFolder()}
+                  className={smallButton}
                 >
                   <FolderPlus className="h-3.5 w-3.5 text-accent" />
-                  <span>Sfoglia...</span>
+                  <span>{t("common.browse")}...</span>
                 </button>
               )}
             </div>
@@ -249,7 +515,7 @@ export function SettingsModal({
                     handleAddManualFolder();
                   }
                 }}
-                placeholder="Es. D:\Games o E:\Giochi Portatili"
+                placeholder={t("settings.folderPlaceholder")}
                 className="flex-1 rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 font-mono text-xs text-zinc-100 placeholder-zinc-500 focus:border-accent/60 focus:outline-none"
               />
               <button
@@ -259,13 +525,13 @@ export function SettingsModal({
                 className="inline-flex items-center gap-1 rounded-lg border border-oled-border bg-oled-elevated px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-600"
               >
                 <Plus className="h-3.5 w-3.5" />
-                <span>Aggiungi</span>
+                <span>{t("common.add")}</span>
               </button>
             </div>
 
             {folders.length === 0 ? (
               <div className="rounded-lg border border-dashed border-oled-border bg-oled-bg/50 px-3 py-3 text-center text-xs text-zinc-500">
-                Nessuna cartella aggiuntiva configurata.
+                {t("settings.noFolders")}
               </div>
             ) : (
               <ul className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
@@ -274,18 +540,17 @@ export function SettingsModal({
                     key={`${folder}-${index}`}
                     className="flex items-center justify-between gap-2 rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 text-xs"
                   >
-                    <span
-                      className="truncate font-mono text-zinc-300"
-                      title={folder}
-                    >
+                    <span className="truncate font-mono text-zinc-300" title={folder}>
                       {folder}
                     </span>
                     <button
                       id={`remove-folder-${index}`}
                       type="button"
-                      onClick={() => handleRemoveFolder(index)}
-                      aria-label={`Rimuovi ${folder}`}
-                      className="rounded p-1 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-400"
+                      onClick={() =>
+                        setFolders((prev) => prev.filter((_, i) => i !== index))
+                      }
+                      aria-label={t("settings.removeFolder", { folder })}
+                      className="rounded p-1 text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-300"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -295,59 +560,52 @@ export function SettingsModal({
             )}
 
             <p className="text-[11px] text-zinc-500">
-              Gli eseguibili di servizio (<code className="text-zinc-400">unins</code>,{" "}
-              <code className="text-zinc-400">crash</code>,{" "}
-              <code className="text-zinc-400">redist</code>,{" "}
-              <code className="text-zinc-400">dxsetup</code>,{" "}
-              <code className="text-zinc-400">vc_redist</code>,{" "}
-              <code className="text-zinc-400">launcher</code>) vengono esclusi
-              automaticamente.
+              {t("settings.foldersHelp", { list: SKIPPED_EXE_PATTERNS })}
             </p>
           </section>
 
           {/* Launch behavior */}
-          <section className="flex items-center justify-between rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+          <section className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
             <div>
               <label
                 htmlFor="minimize-to-tray-checkbox"
                 className="block text-xs font-medium text-zinc-200"
               >
-                Nascondi nell&apos;area di notifica quando avvii un gioco
+                {t("settings.trayTitle")}
               </label>
-              <p className="text-[11px] text-zinc-500">
-                Kanso resta nella system tray: clicca l&apos;icona per riaprirlo
-              </p>
+              <p className="text-[11px] text-zinc-500">{t("settings.trayHelp")}</p>
             </div>
             <input
               id="minimize-to-tray-checkbox"
               type="checkbox"
               checked={minimizeOnLaunch}
               onChange={(e) => setMinimizeOnLaunch(e.target.checked)}
-              className="h-4 w-4 rounded border-zinc-600 bg-oled-surface accent-accent"
+              className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
             />
           </section>
-
-          {/* Footer */}
-          <div className="flex items-center justify-end gap-2.5 border-t border-oled-border pt-4">
-            <button
-              id="cancel-settings-button"
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-oled-border bg-oled-bg px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-oled-elevated"
-            >
-              Annulla
-            </button>
-            <button
-              id="save-settings-button"
-              type="submit"
-              disabled={isSaving}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover disabled:opacity-60"
-            >
-              <Check className="h-3.5 w-3.5" />
-              <span>{isSaving ? "Salvataggio..." : "Salva impostazioni"}</span>
-            </button>
-          </div>
         </form>
+
+        {/* Footer */}
+        <div className="flex shrink-0 items-center justify-end gap-2.5 border-t border-oled-border px-6 py-4">
+          <button
+            id="cancel-settings-button"
+            type="button"
+            onClick={closeWithoutSaving}
+            className="rounded-lg border border-oled-border bg-oled-bg px-3.5 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-oled-elevated"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            id="save-settings-button"
+            type="submit"
+            form="settings-form"
+            disabled={isSaving}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover disabled:opacity-60"
+          >
+            <Check className="h-3.5 w-3.5" />
+            <span>{isSaving ? t("settings.saving") : t("settings.save")}</span>
+          </button>
+        </div>
       </div>
     </div>
   );

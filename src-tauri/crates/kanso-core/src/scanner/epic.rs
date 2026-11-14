@@ -1,4 +1,5 @@
 use crate::cleaner::clean_game_title;
+use crate::i18n::T;
 use crate::models::{DetectedGame, GamePlatform, SourceScanOutput};
 use serde::Deserialize;
 use std::collections::HashSet;
@@ -56,7 +57,7 @@ pub fn default_epic_manifests_dir() -> Option<PathBuf> {
 pub fn parse_epic_item_manifest(content: &str) -> Result<Option<DetectedGame>, String> {
     let stripped = content.strip_prefix('\u{feff}').unwrap_or(content);
     let manifest: EpicItemManifest = serde_json::from_str(stripped)
-        .map_err(|e| format!("JSON .item Epic non valido: {e}"))?;
+        .map_err(|e| format!("{} (.item): {e}", T::InvalidManifest.s()))?;
 
     if manifest.is_incomplete_install {
         return Ok(None);
@@ -157,7 +158,8 @@ pub fn scan_epic_manifests_dir(manifests_dir: &Path) -> SourceScanOutput {
         Ok(entries) => entries,
         Err(err) => {
             output.warnings.push(format!(
-                "Impossibile leggere la cartella manifest Epic {}: {err}",
+                "{} {}: {err}",
+                T::CannotRead.s(),
                 manifests_dir.display()
             ));
             return output;
@@ -193,7 +195,7 @@ pub fn scan_epic_manifests_dir(manifests_dir: &Path) -> SourceScanOutput {
             },
             Err(err) => output
                 .warnings
-                .push(format!("Impossibile leggere {}: {err}", path.display())),
+                .push(format!("{} {}: {err}", T::CannotRead.s(), path.display())),
         }
     }
 

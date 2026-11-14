@@ -1,7 +1,13 @@
-use kanso_core::{
-    is_metadata_sync_due, now_timestamp_ms, scan_all_installed_games, AppConfig, DetectedGame,
-    GameManualUpdate, LibraryDb, LibraryStore, MetadataClient, ScanReport, SgdbGameMatch,
+use kanso_core::deals::is_allowed_store_url;
+use kanso_core::theme::{
+    delete_user_theme, export_theme_file, import_theme_file, list_user_themes, save_user_theme,
 };
+use kanso_core::{
+    current_language, is_metadata_sync_due, now_timestamp_ms, scan_all_installed_games,
+    set_language, AppConfig, DealsClient, DealsReport, DetectedGame, GameManualUpdate, Lang,
+    LibraryDb, LibraryStore, MetadataClient, ScanReport, SgdbGameMatch, Theme, T,
+};
+use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -17,11 +23,24 @@ const GAME_UPDATED_EVENT: &str = "library:game-updated";
 /// never across network requests.
 type SharedDb = Arc<Mutex<LibraryDb>>;
 
+/// How long fetched deals are reused before the stores are asked again.
+const DEALS_CACHE_TTL_MS: u64 = 30 * 60 * 1000;
+
+struct CachedDeals {
+    lang: Lang,
+    country: String,
+    report: DealsReport,
+}
+
 struct AppState {
     db: SharedDb,
     /// Problems found while opening the library at startup, reported with the first scan.
     startup_warnings: Mutex<Vec<String>>,
+    deals_cache: Arc<Mutex<Option<CachedDeals>>>,
 }
+
+/// Language used when none is configured yet (the UI picks one from the OS on first run).
+const FALLBACK_LANGUAGE: Lang = Lang::En;
 
 fn lock_db(db: &SharedDb) -> MutexGuard<'_, LibraryDb> {
     db.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -30,7 +49,7 @@ fn lock_db(db: &SharedDb) -> MutexGuard<'_, LibraryDb> {
 fn resolve_app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_local_data_dir()
-        .map_err(|e| format!("Impossibile risolvere la cartella AppData locale: {e}"))
+        .map_err(|e| format!("{}: {e}", T::AppDataUnavailable.s()))
 }
 
 fn resolve_config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -41,12 +60,20 @@ fn resolve_covers_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_app_data_dir(app)?.join("covers"))
 }
 
+fn resolve_themes_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(resolve_app_data_dir(app)?.join("themes"))
+}
+
+fn game_not_found(game_id: &str) -> String {
+    format!("{}: {game_id}", T::GameNotFound.s())
+}
+
 /// Loads the one game a command works on as a single-entry store, so the merge rules in
 /// [`LibraryStore`] apply to exactly what is in the database right now.
 fn load_single_game_store(db: &LibraryDb, game_id: &str) -> Result<LibraryStore, String> {
     let game = db
         .get_game(game_id)?
-        .ok_or_else(|| format!("Gioco '{game_id}' non trovato nella libreria."))?;
+        .ok_or_else(|| game_not_found(game_id))?;
     Ok(LibraryStore { games: vec![game] })
 }
 
@@ -59,7 +86,20 @@ fn get_settings(app: AppHandle) -> Result<AppConfig, String> {
 #[tauri::command]
 fn save_settings(app: AppHandle, config: AppConfig) -> Result<AppConfig, String> {
     let config_path = resolve_config_path(&app)?;
-    config.save_to_file(&config_path)
+    let saved = config.save_to_file(&config_path)?;
+    apply_language(&app, saved.lang().unwrap_or(FALLBACK_LANGUAGE));
+    Ok(saved)
+}
+
+/// Makes `lang` the language of backend messages and of the tray menu.
+fn apply_language(app: &AppHandle, lang: Lang) {
+    if lang == current_language() && app.tray_by_id(TRAY_ICON_ID).is_some() {
+        return;
+    }
+    set_language(lang);
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id(TRAY_ICON_ID), build_tray_menu(app)) {
+        let _ = tray.set_menu(Some(menu));
+    }
 }
 
 #[tauri::command]
@@ -85,7 +125,7 @@ async fn scan_games(app: AppHandle, state: State<'_, AppState>) -> Result<ScanRe
         Ok(merged)
     })
     .await
-    .map_err(|e| format!("Errore durante la scansione della libreria: {e}"))?
+    .map_err(|e| format!("{}: {e}", T::ScanFailed.s()))?
 }
 
 /// Fills in missing covers, descriptions, genres and official names.
@@ -106,15 +146,16 @@ async fn sync_library_metadata(
 
     tauri::async_runtime::spawn_blocking(move || {
         let has_api_key = config.has_api_key();
+        let lang = config.lang().unwrap_or(FALLBACK_LANGUAGE);
         let now = now_timestamp_ms();
 
         let candidates: Vec<DetectedGame> = lock_db(&db)
             .load_games()?
             .into_iter()
-            .filter(|game| is_metadata_sync_due(game, has_api_key, now, retry_now))
+            .filter(|game| is_metadata_sync_due(game, has_api_key, lang, now, retry_now))
             .collect();
 
-        let client = MetadataClient::new();
+        let client = MetadataClient::new().with_language(lang);
         let api_key = has_api_key.then_some(config.steamgriddb_api_key.as_str());
 
         for mut game in candidates {
@@ -144,7 +185,7 @@ async fn sync_library_metadata(
         Ok(final_store.to_report())
     })
     .await
-    .map_err(|e| format!("Errore sincronizzazione metadata: {e}"))?
+    .map_err(|e| format!("{}: {e}", T::SyncFailed.s()))?
 }
 
 #[tauri::command]
@@ -155,9 +196,7 @@ async fn search_steamgriddb_games(
     let config_path = resolve_config_path(&app)?;
     let config = AppConfig::load_from_file(&config_path)?;
     if !config.has_api_key() {
-        return Err(
-            "Configura prima la tua SteamGridDB API Key nelle Impostazioni.".to_string(),
-        );
+        return Err(T::SgdbKeyMissing.s().to_string());
     }
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -165,7 +204,7 @@ async fn search_steamgriddb_games(
         client.search_steamgriddb(&config.steamgriddb_api_key, &query)
     })
     .await
-    .map_err(|e| format!("Errore ricerca SteamGridDB: {e}"))?
+    .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))?
 }
 
 #[tauri::command]
@@ -181,9 +220,7 @@ async fn apply_steamgriddb_match(
     let config = AppConfig::load_from_file(&config_path)?;
 
     if !config.has_api_key() {
-        return Err(
-            "Configura prima la tua SteamGridDB API Key nelle Impostazioni.".to_string(),
-        );
+        return Err(T::SgdbKeyMissing.s().to_string());
     }
 
     let db = Arc::clone(&state.db);
@@ -192,9 +229,10 @@ async fn apply_steamgriddb_match(
     tauri::async_runtime::spawn_blocking(move || {
         let mut game = lock_db(&db)
             .get_game(&game_id)?
-            .ok_or_else(|| format!("Gioco '{game_id}' non trovato nella libreria."))?;
+            .ok_or_else(|| game_not_found(&game_id))?;
 
-        let client = MetadataClient::new();
+        let client =
+            MetadataClient::new().with_language(config.lang().unwrap_or(FALLBACK_LANGUAGE));
         client.apply_manual_sgdb_selection(
             &mut game,
             &config.steamgriddb_api_key,
@@ -208,7 +246,7 @@ async fn apply_steamgriddb_match(
             let mut current = load_single_game_store(&db, &game_id)?;
             let committed = current
                 .commit_enriched_game(game, false)
-                .ok_or_else(|| format!("Gioco '{game_id}' non più presente nella libreria."))?;
+                .ok_or_else(|| game_not_found(&game_id))?;
             db.upsert_game(&committed)?;
             committed
         };
@@ -217,7 +255,7 @@ async fn apply_steamgriddb_match(
         Ok(game)
     })
     .await
-    .map_err(|e| format!("Errore applicazione copertina SteamGridDB: {e}"))?
+    .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))?
 }
 
 /// Applies `change` to the stored game `game_id`, saves it and notifies the UI.
@@ -297,7 +335,7 @@ fn launch_game(
 ) -> Result<(), String> {
     let game = lock_db(&state.db)
         .get_game(&game_id)?
-        .ok_or_else(|| format!("Gioco '{game_id}' non trovato nella libreria."))?;
+        .ok_or_else(|| game_not_found(&game_id))?;
 
     launch_game_inner(&app, &game)?;
 
@@ -341,11 +379,16 @@ fn hide_main_window_to_tray(app: &AppHandle) {
     }
 }
 
-/// Creates the system tray icon: left click (or "Apri Kanso") restores the window, "Esci" quits.
+fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW_ID, T::TrayOpen.s(), true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT_ID, T::TrayQuit.s(), true, None::<&str>)?;
+    Menu::with_items(app, &[&show_item, &quit_item])
+}
+
+/// Creates the system tray icon: left click (or the first menu entry) restores the window,
+/// the second entry quits.
 fn setup_system_tray(app: &AppHandle) -> tauri::Result<()> {
-    let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW_ID, "Apri Kanso", true, None::<&str>)?;
-    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT_ID, "Esci", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+    let menu = build_tray_menu(app)?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ICON_ID)
         .tooltip("Kanso")
@@ -375,6 +418,107 @@ fn setup_system_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Current discounts on Steam, Epic and GOG. Results are reused for half an hour unless
+/// `force_refresh`; `country` (ISO code) selects the regional prices.
+#[tauri::command]
+async fn fetch_deals(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    country: String,
+    force_refresh: bool,
+) -> Result<DealsReport, String> {
+    let lang = resolve_config_path(&app)
+        .ok()
+        .and_then(|p| AppConfig::load_from_file(&p).ok())
+        .and_then(|c| c.lang())
+        .unwrap_or(FALLBACK_LANGUAGE);
+    let country = kanso_core::deals::normalize_country(&country);
+    let cache = Arc::clone(&state.deals_cache);
+
+    if !force_refresh {
+        let cached = cache.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(entry) = cached.as_ref() {
+            let fresh = now_timestamp_ms().saturating_sub(entry.report.fetched_at) < DEALS_CACHE_TTL_MS;
+            if fresh && entry.lang == lang && entry.country == country {
+                return Ok(entry.report.clone());
+            }
+        }
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let report = DealsClient::new().fetch_all(lang, &country);
+        // A fully failed fetch (offline) is not worth caching: the next visit retries
+        if !report.deals.is_empty() {
+            *cache.lock().unwrap_or_else(|p| p.into_inner()) = Some(CachedDeals {
+                lang,
+                country,
+                report: report.clone(),
+            });
+        }
+        report
+    })
+    .await
+    .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
+}
+
+/// Opens a deal's store page in the default browser. Only `https` pages on the stores' own
+/// domains are accepted: the URLs originate from remote JSON.
+#[tauri::command]
+fn open_store_page(app: AppHandle, url: String) -> Result<(), String> {
+    if !is_allowed_store_url(&url) {
+        return Err(format!("{}: {url}", T::UrlNotAllowed.s()));
+    }
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserThemes {
+    themes: Vec<Theme>,
+    /// One entry per file in the themes folder that is not a valid theme.
+    warnings: Vec<String>,
+}
+
+#[tauri::command]
+fn list_themes(app: AppHandle) -> Result<UserThemes, String> {
+    let (themes, warnings) = list_user_themes(&resolve_themes_dir(&app)?);
+    Ok(UserThemes { themes, warnings })
+}
+
+#[tauri::command]
+fn import_theme(app: AppHandle, path: String) -> Result<Theme, String> {
+    import_theme_file(&resolve_themes_dir(&app)?, Path::new(&path))
+}
+
+/// Saves a theme made in the editor; with `replace_id` it overwrites that installed theme.
+#[tauri::command]
+fn save_theme(app: AppHandle, theme: Theme, replace_id: Option<String>) -> Result<Theme, String> {
+    save_user_theme(&resolve_themes_dir(&app)?, &theme, replace_id.as_deref())
+}
+
+#[tauri::command]
+fn delete_theme(app: AppHandle, id: String) -> Result<(), String> {
+    delete_user_theme(&resolve_themes_dir(&app)?, &id)
+}
+
+#[tauri::command]
+fn export_theme(theme: Theme, path: String) -> Result<(), String> {
+    export_theme_file(&theme, Path::new(&path))
+}
+
+/// Opens the themes folder in the file manager, so theme files can simply be dropped in.
+#[tauri::command]
+fn open_themes_folder(app: AppHandle) -> Result<(), String> {
+    let dir = resolve_themes_dir(&app)?;
+    fs::create_dir_all(&dir)
+        .map_err(|e| format!("{} {}: {e}", T::CannotCreateFolder.s(), dir.display()))?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
+}
+
 fn launch_game_inner(app: &AppHandle, game: &DetectedGame) -> Result<(), String> {
     // Prefer protocol URI when available (Steam `steam://rungameid/{appid}`, Epic launcher URI)
     if let Some(uri) = game.launch_uri.as_deref().filter(|u| !u.trim().is_empty()) {
@@ -391,7 +535,8 @@ fn launch_game_inner(app: &AppHandle, game: &DetectedGame) -> Result<(), String>
                     }
                 }
                 return Err(format!(
-                    "Impossibile avviare '{}' tramite URI: {uri_err}",
+                    "{} \"{}\": {uri_err}",
+                    T::LaunchFailed.s(),
                     game.title
                 ));
             }
@@ -406,19 +551,13 @@ fn launch_game_inner(app: &AppHandle, game: &DetectedGame) -> Result<(), String>
         return spawn_executable(exe);
     }
 
-    Err(format!(
-        "Nessun percorso eseguibile o URI di avvio configurato per '{}'.",
-        game.title
-    ))
+    Err(format!("{} \"{}\".", T::NoLaunchTarget.s(), game.title))
 }
 
 fn spawn_executable(exe_path: &str) -> Result<(), String> {
     let path = Path::new(exe_path);
     if !path.is_file() {
-        return Err(format!(
-            "Eseguibile non trovato sul disco: {}",
-            path.display()
-        ));
+        return Err(format!("{}: {}", T::ExeNotFound.s(), path.display()));
     }
 
     let mut cmd = Command::new(path);
@@ -428,7 +567,7 @@ fn spawn_executable(exe_path: &str) -> Result<(), String> {
 
     cmd.spawn()
         .map(|_| ())
-        .map_err(|e| format!("Impossibile avviare {}: {e}", path.display()))
+        .map_err(|e| format!("{} {}: {e}", T::LaunchFailed.s(), path.display()))
 }
 
 /// Removes the SQLite mirror older versions kept through `tauri-plugin-sql`. It was never read
@@ -445,29 +584,33 @@ fn remove_legacy_sql_mirror(app: &AppHandle) {
 /// Opens the library and prepares everything the commands rely on.
 fn setup_app(app: &AppHandle) -> Result<(), String> {
     let data_dir = resolve_app_data_dir(app)?;
+
+    // Language first: everything below may produce user-facing messages
+    let configured_lang = AppConfig::load_from_file(&data_dir.join("config.json"))
+        .ok()
+        .and_then(|config| config.lang());
+    set_language(configured_lang.unwrap_or(FALLBACK_LANGUAGE));
+
     let (db, startup_warnings) = LibraryDb::open_or_recover(&data_dir);
     app.manage(AppState {
         db: Arc::new(Mutex::new(db)),
         startup_warnings: Mutex::new(startup_warnings),
+        deals_cache: Arc::new(Mutex::new(None)),
     });
     remove_legacy_sql_mirror(app);
 
     // The webview may load local files from the covers folder only. The folder must exist
     // before it is allowed, so the scope also learns its canonical form.
     let covers_dir = data_dir.join("covers");
-    fs::create_dir_all(&covers_dir).map_err(|e| {
-        format!(
-            "Impossibile creare la cartella copertine {}: {e}",
-            covers_dir.display()
-        )
-    })?;
+    fs::create_dir_all(&covers_dir)
+        .map_err(|e| format!("{} {}: {e}", T::CannotCreateFolder.s(), covers_dir.display()))?;
     app.asset_protocol_scope()
         .allow_directory(&covers_dir, false)
-        .map_err(|e| format!("Impossibile autorizzare la cartella copertine: {e}"))?;
+        .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))?;
 
     // The tray is a convenience: failing to create it must not prevent startup
     if let Err(err) = setup_system_tray(app) {
-        eprintln!("Kanso: impossibile creare l'icona nella system tray: {err}");
+        eprintln!("Kanso: could not create the system tray icon: {err}");
     }
     Ok(())
 }
@@ -494,8 +637,16 @@ pub fn run() {
             set_game_local_cover,
             set_game_favorite,
             set_game_hidden,
-            launch_game
+            launch_game,
+            fetch_deals,
+            open_store_page,
+            list_themes,
+            import_theme,
+            save_theme,
+            delete_theme,
+            export_theme,
+            open_themes_folder
         ])
         .run(tauri::generate_context!())
-        .expect("Errore critico durante l'avvio di Kanso");
+        .expect("Kanso failed to start");
 }

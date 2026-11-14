@@ -1,21 +1,50 @@
 /*
- * Kanso Theme Tokens
- * Personalizza qui colori principali, raggio bordi e dimensione minima delle card.
+ * Kanso theme tokens — the built-in "Kanso OLED" look.
+ *
+ * Themes override these variables at runtime (see src/lib/themes.ts and docs/THEMES.md);
+ * editing this file changes the defaults every theme starts from.
  */
 :root {
-  /* Deep OLED dark palette */
+  /* Surfaces */
   --bg-primary: #0f0f11;
   --bg-surface: #16161a;
   --bg-elevated: #1e1e24;
   --border-subtle: #272730;
+  --border-strong: #52525b;
 
-  /* Warm minimalist Kanso amber-gold accent (no purple/neon) */
+  /* Text */
+  --text-primary: #f4f4f5;
+  --text-secondary: #d4d4d8;
+  --text-muted: #a1a1aa;
+  --text-faint: #71717a;
+
+  /* Accent (warm amber-gold) and the text drawn on top of it */
   --accent-color: #e5a93c;
   --accent-hover: #f0bc59;
+  --accent-contrast: #09090b;
 
   /* Layout & card geometry */
   --card-min-width: 185px;
   --card-radius: 10px;
   --sidebar-width: 208px;
   --header-height: 52px;
+
+  --font-sans: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
 }
+
+/*
+ * Light themes. Platform badges and status messages are tinted with pale text colors chosen
+ * for dark surfaces; on a light surface they get the dark shade of the same hue.
+ */
+:root[data-scheme="light"] .text-sky-300 { color: #0369a1; }
+:root[data-scheme="light"] .text-blue-300 { color: #1d4ed8; }
+:root[data-scheme="light"] .text-indigo-300 { color: #4338ca; }
+:root[data-scheme="light"] .text-fuchsia-300 { color: #a21caf; }
+:root[data-scheme="light"] .text-rose-300 { color: #be123c; }
+:root[data-scheme="light"] .text-green-300 { color: #15803d; }
+:root[data-scheme="light"] .text-emerald-300,
+:root[data-scheme="light"] .text-emerald-200 { color: #047857; }
+:root[data-scheme="light"] .text-amber-200 { color: #92400e; }
+:root[data-scheme="light"] .text-amber-400 { color: #b45309; }
+:root[data-scheme="light"] .text-red-200,
+:root[data-scheme="light"] .text-red-300 { color: #b91c1c; }

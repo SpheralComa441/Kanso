@@ -1,4 +1,5 @@
 import { KeyRound, X } from "lucide-react";
+import { useI18n } from "../i18n";
 
 interface ApiKeyBannerProps {
   onConfigure: () => void;
@@ -6,6 +7,7 @@ interface ApiKeyBannerProps {
 }
 
 export function ApiKeyBanner({ onConfigure, onDismiss }: ApiKeyBannerProps) {
+  const { t } = useI18n();
   return (
     <div
       role="status"
@@ -15,12 +17,8 @@ export function ApiKeyBanner({ onConfigure, onDismiss }: ApiKeyBannerProps) {
         <div className="flex items-center gap-2.5 text-zinc-300">
           <KeyRound className="h-3.5 w-3.5 shrink-0 text-accent" />
           <p>
-            <span className="font-medium text-zinc-100">
-              SteamGridDB API Key non configurata.
-            </span>{" "}
-            La scansione e l&apos;avvio dei giochi funzionano normalmente;
-            aggiungi la chiave nelle Impostazioni per abilitare il download
-            automatico delle copertine.
+            <span className="font-medium text-zinc-100">{t("banner.title")}</span>{" "}
+            {t("banner.body")}
           </p>
         </div>
 
@@ -31,13 +29,13 @@ export function ApiKeyBanner({ onConfigure, onDismiss }: ApiKeyBannerProps) {
             onClick={onConfigure}
             className="rounded-md bg-accent/15 px-2.5 py-1 font-medium text-accent transition-colors hover:bg-accent/25"
           >
-            Configura ora
+            {t("banner.configure")}
           </button>
           <button
             id="banner-dismiss-button"
             type="button"
             onClick={onDismiss}
-            aria-label="Nascondi avviso"
+            aria-label={t("banner.dismiss")}
             className="rounded-md p-1 text-zinc-500 transition-colors hover:bg-oled-elevated hover:text-zinc-300"
           >
             <X className="h-3.5 w-3.5" />

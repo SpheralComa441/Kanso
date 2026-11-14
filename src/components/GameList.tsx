@@ -1,8 +1,10 @@
 import { AlertTriangle, FolderOpen, Gamepad2, Play, Star } from "lucide-react";
+import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
-import { PLATFORM_META } from "../lib/platforms";
+import { PLATFORM_META, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame } from "../types/game";
+import { Cover } from "./Cover";
 import type { ViewMode } from "./Header";
 
 interface GameListProps {
@@ -25,16 +27,16 @@ interface FavoriteButtonProps {
 }
 
 function FavoriteButton({ game, onToggle, className = "" }: FavoriteButtonProps) {
-  const label = game.isFavorite
-    ? `Rimuovi ${game.title} dai preferiti`
-    : `Aggiungi ${game.title} ai preferiti`;
+  const { t } = useI18n();
   return (
     <button
       type="button"
       onClick={() => onToggle(game)}
       aria-pressed={game.isFavorite}
-      aria-label={label}
-      title={game.isFavorite ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"}
+      aria-label={t(game.isFavorite ? "fav.removeNamed" : "fav.addNamed", {
+        title: game.title,
+      })}
+      title={t(game.isFavorite ? "fav.remove" : "fav.add")}
       className={className}
     >
       <Star
@@ -58,18 +60,16 @@ export function GameList({
   onToggleFavorite,
   onOpenSettings,
 }: GameListProps) {
+  const { t } = useI18n();
   const { usableCover, markBroken } = useBrokenCovers();
 
   if (isScanning && totalDetected === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
         <div className="mb-3 h-6 w-6 animate-spin rounded-full border-2 border-oled-border border-t-accent" />
-        <p className="text-sm font-medium text-zinc-300">
-          Ricerca dei giochi installati in corso...
-        </p>
-        <p className="mt-1 text-xs text-zinc-500">
-          Lettura librerie Steam, Epic Games, Battle.net e cartelle
-          personalizzate
+        <p className="text-sm font-medium text-zinc-300">{t("list.searching")}</p>
+        <p className="mt-1 max-w-md text-xs text-zinc-500">
+          {t("list.searchingHint")}
         </p>
       </div>
     );
@@ -81,7 +81,7 @@ export function GameList({
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-            <ul className="space-y-1">
+            <ul className="min-w-0 select-text space-y-1 break-words">
               {warnings.map((w, idx) => (
                 <li key={idx}>{w}</li>
               ))}
@@ -94,12 +94,10 @@ export function GameList({
         <div className="rounded-xl border border-oled-border bg-oled-surface/60 px-6 py-16 text-center">
           <Gamepad2 className="mx-auto mb-3 h-8 w-8 text-zinc-500" />
           <h2 className="text-sm font-semibold text-zinc-200">
-            Nessun gioco rilevato sul sistema
+            {t("list.emptyTitle")}
           </h2>
           <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-zinc-400">
-            Kanso rileva automaticamente i giochi installati su Steam, Epic
-            Games e Battle.net. Puoi anche aggiungere manualmente le cartelle
-            dei tuoi giochi standalone dalle Impostazioni.
+            {t("list.emptyBody")}
           </p>
           <button
             id="empty-add-folder-button"
@@ -108,14 +106,12 @@ export function GameList({
             className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover"
           >
             <FolderOpen className="h-3.5 w-3.5" />
-            <span>Aggiungi cartelle giochi</span>
+            <span>{t("list.addFolders")}</span>
           </button>
         </div>
       ) : games.length === 0 ? (
         <div className="rounded-xl border border-oled-border bg-oled-surface/40 px-6 py-12 text-center">
-          <p className="text-sm text-zinc-400">
-            Nessun gioco corrisponde alla ricerca o ai filtri attivi.
-          </p>
+          <p className="text-sm text-zinc-400">{t("list.noMatch")}</p>
         </div>
       ) : viewMode === "grid" ? (
         <div
@@ -126,8 +122,8 @@ export function GameList({
           }}
         >
           {games.map((game) => {
-            const platformMeta = PLATFORM_META[game.platform];
             const isLaunching = launchingId === game.id;
+            const label = platformLabel(game.platform, t);
             const coverUrl = usableCover(
               resolveCoverUrl(game.coverPath, game.updatedAt)
             );
@@ -140,13 +136,10 @@ export function GameList({
                 {/* 2:3 vertical cover */}
                 <div className="relative aspect-[2/3] w-full overflow-hidden bg-oled-bg">
                   {coverUrl ? (
-                    <img
-                      src={coverUrl}
-                      alt=""
-                      loading="lazy"
-                      draggable={false}
+                    <Cover
+                      url={coverUrl}
+                      zoomOnHover
                       onError={() => markBroken(coverUrl)}
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                     />
                   ) : (
                     <div className="flex h-full w-full flex-col justify-end bg-gradient-to-b from-oled-elevated/50 to-oled-bg p-4">
@@ -156,10 +149,9 @@ export function GameList({
                     </div>
                   )}
 
-                  <span
-                    className={`absolute left-2.5 top-2.5 rounded-md border px-2 py-0.5 text-[10px] font-medium backdrop-blur-md ${platformMeta.badgeClass}`}
-                  >
-                    {platformMeta.label}
+                  {/* Over artwork of any color: fixed dark chip, independent of the theme */}
+                  <span className="absolute left-2.5 top-2.5 rounded-md border border-white/15 bg-black/60 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-md">
+                    {label}
                   </span>
 
                   {/* Whole cover opens the detail view */}
@@ -167,14 +159,14 @@ export function GameList({
                     id={`open-detail-${game.id}`}
                     type="button"
                     onClick={() => onOpenDetail(game)}
-                    aria-label={`Apri dettagli di ${game.title}`}
+                    aria-label={t("game.openDetails", { title: game.title })}
                     className="absolute inset-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
                   />
 
                   <FavoriteButton
                     game={game}
                     onToggle={onToggleFavorite}
-                    className={`absolute right-2.5 top-2.5 rounded-lg border border-white/10 bg-black/65 p-1.5 text-zinc-300 backdrop-blur-md transition-opacity hover:bg-black/85 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 ${
+                    className={`absolute right-2.5 top-2.5 rounded-lg border border-white/10 bg-black/65 p-1.5 text-white/80 backdrop-blur-md transition-opacity hover:bg-black/85 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 ${
                       game.isFavorite ? "opacity-100" : "opacity-0"
                     }`}
                   />
@@ -186,11 +178,13 @@ export function GameList({
                       type="button"
                       onClick={() => onLaunch(game)}
                       disabled={isLaunching}
-                      aria-label={`Avvia ${game.title}`}
+                      aria-label={t("game.launchNamed", { title: game.title })}
                       className="pointer-events-auto inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-xs font-semibold text-zinc-950 shadow-lg transition-colors hover:bg-accent-hover disabled:opacity-60"
                     >
                       <Play className="h-3.5 w-3.5 fill-current" />
-                      <span>{isLaunching ? "Avvio..." : "Avvia"}</span>
+                      <span>
+                        {isLaunching ? t("common.launching") : t("common.play")}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -206,7 +200,7 @@ export function GameList({
                   <p className="truncate text-[11px] text-zinc-500">
                     {game.genres.length > 0
                       ? game.genres.slice(0, 2).join(", ")
-                      : platformMeta.label}
+                      : label}
                   </p>
                 </div>
               </article>
@@ -232,19 +226,12 @@ export function GameList({
                     id={`open-detail-${game.id}`}
                     type="button"
                     onClick={() => onOpenDetail(game)}
-                    aria-label={`Apri dettagli di ${game.title}`}
+                    aria-label={t("game.openDetails", { title: game.title })}
                     className="flex min-w-0 flex-1 items-center gap-3.5 rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
-                    <div className="h-14 w-[38px] shrink-0 overflow-hidden rounded border border-oled-border bg-oled-bg">
+                    <div className="relative h-14 w-[38px] shrink-0 overflow-hidden rounded border border-oled-border bg-oled-bg">
                       {coverUrl && (
-                        <img
-                          src={coverUrl}
-                          alt=""
-                          loading="lazy"
-                          draggable={false}
-                          onError={() => markBroken(coverUrl)}
-                          className="h-full w-full object-cover"
-                        />
+                        <Cover url={coverUrl} onError={() => markBroken(coverUrl)} />
                       )}
                     </div>
 
@@ -256,7 +243,7 @@ export function GameList({
                         <span
                           className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-medium ${platformMeta.badgeClass}`}
                         >
-                          {platformMeta.label}
+                          {platformLabel(game.platform, t)}
                         </span>
                       </div>
                       <p className="truncate text-[11px] text-zinc-500">
@@ -281,7 +268,9 @@ export function GameList({
                       className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-60"
                     >
                       <Play className="h-3.5 w-3.5 fill-current" />
-                      <span>{isLaunching ? "Avvio..." : "Avvia"}</span>
+                      <span>
+                        {isLaunching ? t("common.launching") : t("common.play")}
+                      </span>
                     </button>
                   </div>
                 </li>

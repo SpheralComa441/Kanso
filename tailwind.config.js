@@ -23,19 +23,28 @@ export default {
           DEFAULT: themeColor("--accent-color"),
           hover: themeColor("--accent-hover"),
         },
+        // The neutral scale is what components use for text and strong borders. Routing it
+        // through theme tokens makes every text color themeable (light themes included)
+        // without touching the components.
+        zinc: {
+          50: themeColor("--text-primary"),
+          100: themeColor("--text-primary"),
+          200: themeColor("--text-secondary"),
+          300: themeColor("--text-secondary"),
+          400: themeColor("--text-muted"),
+          500: themeColor("--text-faint"),
+          600: themeColor("--border-strong"),
+          700: themeColor("--border-strong"),
+          800: themeColor("--bg-elevated"),
+          900: themeColor("--bg-surface"),
+          950: themeColor("--accent-contrast"),
+        },
       },
       borderRadius: {
         card: "var(--card-radius)",
       },
       fontFamily: {
-        sans: [
-          "Inter",
-          "Segoe UI Variable",
-          "Segoe UI",
-          "system-ui",
-          "-apple-system",
-          "sans-serif",
-        ],
+        sans: ["var(--font-sans)"],
         mono: [
           "JetBrains Mono",
           "Cascadia Code",

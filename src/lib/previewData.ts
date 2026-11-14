@@ -1,4 +1,4 @@
-import type { DetectedGame } from "../types/game";
+import type { Deal, DetectedGame } from "../types/game";
 
 /**
  * Sample library shown only in the browser preview (`npm run dev` outside Tauri),
@@ -57,6 +57,7 @@ function seed(game: PreviewSeed): DetectedGame {
     metadataAttemptedAt: 1700000000000,
     lastPlayedAt: null,
     playCount: 0,
+    metadataLang: "it",
     updatedAt: 1700000000000,
     ...rest,
   };
@@ -206,4 +207,107 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
       "Forgia il tuo cammino in Hollow Knight! Un'epica avventura d'azione in un vasto regno in rovina.",
     colors: ["#3b4a78", "#12162b"],
   }),
+];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function previewBanner(title: string, from: string, to: string): string {
+  const escape = (text: string) =>
+    text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 215"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="460" height="215" fill="url(#g)"/><circle cx="380" cy="40" r="120" fill="#ffffff" fill-opacity="0.07"/><text x="28" y="120" font-family="Segoe UI, Inter, sans-serif" font-size="34" font-weight="700" fill="#ffffff" fill-opacity="0.94">${escape(title)}</text></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/** Sample deals for the browser preview, shaped like the real store answers. */
+export const PREVIEW_MOCK_DEALS: Deal[] = [
+  {
+    id: "epic:knightica",
+    store: "epic",
+    title: "Knightica",
+    url: "https://store.epicgames.com/it/p/knightica-9a3e",
+    imageUrl: previewBanner("Knightica", "#31506b", "#101c26"),
+    originalPrice: 13.49,
+    finalPrice: 0,
+    currency: "EUR",
+    discountPercent: 100,
+    upcoming: false,
+    startsAt: Date.now() - 2 * DAY_MS,
+    endsAt: Date.now() + 5 * DAY_MS,
+    steamAppid: null,
+  },
+  {
+    id: "epic:alien-isolation",
+    store: "epic",
+    title: "Alien: Isolation",
+    url: "https://store.epicgames.com/it/p/alien-isolation",
+    imageUrl: previewBanner("Alien: Isolation", "#1d3b2a", "#060d09"),
+    originalPrice: 39.99,
+    finalPrice: 0,
+    currency: "EUR",
+    discountPercent: 100,
+    upcoming: true,
+    startsAt: Date.now() + 5 * DAY_MS,
+    endsAt: Date.now() + 12 * DAY_MS,
+    steamAppid: null,
+  },
+  {
+    id: "steam:1145360",
+    store: "steam",
+    title: "Hades",
+    url: "https://store.steampowered.com/app/1145360/",
+    imageUrl: previewBanner("Hades", "#c2372c", "#4a0f1c"),
+    originalPrice: 24.5,
+    finalPrice: 6.12,
+    currency: "EUR",
+    discountPercent: 75,
+    upcoming: false,
+    startsAt: null,
+    endsAt: Date.now() + 3 * DAY_MS,
+    steamAppid: "1145360",
+  },
+  {
+    id: "steam:2406770",
+    store: "steam",
+    title: "Bodycam",
+    url: "https://store.steampowered.com/app/2406770/",
+    imageUrl: previewBanner("Bodycam", "#4a4f57", "#15171a"),
+    originalPrice: 33.32,
+    finalPrice: 26.65,
+    currency: "EUR",
+    discountPercent: 20,
+    upcoming: false,
+    startsAt: null,
+    endsAt: Date.now() + 6 * DAY_MS,
+    steamAppid: "2406770",
+  },
+  {
+    id: "steam:1903340",
+    store: "steam",
+    title: "Clair Obscur: Expedition 33",
+    url: "https://store.steampowered.com/app/1903340/",
+    imageUrl: null,
+    originalPrice: 49.99,
+    finalPrice: 39.99,
+    currency: "EUR",
+    discountPercent: 20,
+    upcoming: false,
+    startsAt: null,
+    endsAt: null,
+    steamAppid: "1903340",
+  },
+  {
+    id: "gog:1207658787",
+    store: "gog",
+    title: "Heroes of Might and Magic® 3: Complete",
+    url: "https://www.gog.com/en/game/heroes_of_might_and_magic_3_complete_edition",
+    imageUrl: previewBanner("Heroes III", "#6b4a1d", "#1f1508"),
+    originalPrice: 9.99,
+    finalPrice: 4.99,
+    currency: "EUR",
+    discountPercent: 50,
+    upcoming: false,
+    startsAt: null,
+    endsAt: null,
+    steamAppid: null,
+  },
 ];
