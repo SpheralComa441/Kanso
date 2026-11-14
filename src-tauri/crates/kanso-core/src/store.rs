@@ -1,5 +1,6 @@
 use crate::cleaner::{clean_game_title, is_placeholder_title};
 use crate::db::{sort_games_by_title, LibraryDb};
+use crate::i18n::T;
 use crate::metadata::{remove_existing_cover_variants, sanitize_filename_id};
 use crate::models::{now_timestamp_ms, DetectedGame, GameManualUpdate, ScanReport};
 use std::collections::HashMap;
@@ -52,6 +53,7 @@ impl LibraryStore {
                 scanned.metadata_attempted_at = cached.metadata_attempted_at;
                 scanned.last_played_at = cached.last_played_at;
                 scanned.play_count = cached.play_count;
+                scanned.metadata_lang = cached.metadata_lang.clone();
                 scanned.custom_override = cached.custom_override;
                 scanned.updated_at = cached.updated_at;
 
@@ -129,7 +131,7 @@ impl LibraryStore {
     /// metadata override: automatic sync keeps managing the game.
     pub fn set_favorite(&mut self, game_id: &str, is_favorite: bool) -> Result<DetectedGame, String> {
         let Some(game) = self.get_game_mut(game_id) else {
-            return Err(format!("Gioco '{game_id}' non trovato nella libreria."));
+            return Err(format!("{}: {game_id}", T::GameNotFound.s()));
         };
         game.is_favorite = is_favorite;
         Ok(game.clone())
@@ -138,7 +140,7 @@ impl LibraryStore {
     /// Hides a game from the library (or shows it again). Like a favorite, not an override.
     pub fn set_hidden(&mut self, game_id: &str, is_hidden: bool) -> Result<DetectedGame, String> {
         let Some(game) = self.get_game_mut(game_id) else {
-            return Err(format!("Gioco '{game_id}' non trovato nella libreria."));
+            return Err(format!("{}: {game_id}", T::GameNotFound.s()));
         };
         game.is_hidden = is_hidden;
         Ok(game.clone())
@@ -147,7 +149,7 @@ impl LibraryStore {
     /// Records a successful launch for the "recently played" view.
     pub fn record_launch(&mut self, game_id: &str, now_ms: u64) -> Result<DetectedGame, String> {
         let Some(game) = self.get_game_mut(game_id) else {
-            return Err(format!("Gioco '{game_id}' non trovato nella libreria."));
+            return Err(format!("{}: {game_id}", T::GameNotFound.s()));
         };
         game.last_played_at = Some(now_ms);
         game.play_count = game.play_count.saturating_add(1);
@@ -157,7 +159,7 @@ impl LibraryStore {
     /// Applies manual edits (title, executable path, genres, description, favorite) to a single game.
     pub fn apply_manual_update(&mut self, payload: GameManualUpdate) -> Result<DetectedGame, String> {
         let Some(game) = self.get_game_mut(&payload.id) else {
-            return Err(format!("Gioco '{}' non trovato nella libreria.", payload.id));
+            return Err(format!("{}: {}", T::GameNotFound.s(), payload.id));
         };
 
         let trimmed_title = payload.title.trim();
@@ -206,7 +208,8 @@ impl LibraryStore {
     ) -> Result<DetectedGame, String> {
         if !source_image_path.is_file() {
             return Err(format!(
-                "File immagine non trovato: {}",
+                "{}: {}",
+                T::ImageFileNotFound.s(),
                 source_image_path.display()
             ));
         }
@@ -219,10 +222,7 @@ impl LibraryStore {
             .unwrap_or_else(|| "png".to_string());
 
         fs::create_dir_all(covers_dir).map_err(|e| {
-            format!(
-                "Impossibile creare la cartella copertine {}: {e}",
-                covers_dir.display()
-            )
+            format!("{} {}: {e}", T::CannotCreateFolder.s(), covers_dir.display())
         })?;
 
         let safe_stem = sanitize_filename_id(game_id);
@@ -230,14 +230,11 @@ impl LibraryStore {
         let dest = covers_dir.join(format!("{safe_stem}.{ext}"));
 
         fs::copy(source_image_path, &dest).map_err(|e| {
-            format!(
-                "Impossibile copiare l'immagine di copertina in {}: {e}",
-                dest.display()
-            )
+            format!("{} ({}): {e}", T::CoverSaveFailed.s(), dest.display())
         })?;
 
         let Some(game) = self.get_game_mut(game_id) else {
-            return Err(format!("Gioco '{game_id}' non trovato nella libreria."));
+            return Err(format!("{}: {game_id}", T::GameNotFound.s()));
         };
 
         game.cover_path = Some(dest.to_string_lossy().to_string());

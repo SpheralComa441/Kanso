@@ -1,6 +1,7 @@
 //! SQLite persistence for the game library: the single source of truth for discovered games,
 //! cached metadata, cover paths and everything the user customised.
 
+use crate::i18n::T;
 use crate::models::{now_timestamp_ms, DetectedGame, GamePlatform};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Deserialize;
@@ -38,21 +39,30 @@ const MIGRATIONS: &[&str] = &["
         play_count            INTEGER NOT NULL DEFAULT 0,
         updated_at            INTEGER NOT NULL DEFAULT 0
     );
-"];
+",
+    // v2: metadata language (everything cached so far was fetched in Italian), and one more
+    // lookup for every game now that Steam's own cover art is a fallback source.
+    "
+    ALTER TABLE games ADD COLUMN metadata_lang TEXT;
+    UPDATE games SET metadata_lang = 'it'
+        WHERE short_description IS NOT NULL OR genres <> '[]';
+    UPDATE games SET metadata_attempted_at = 0;
+",
+];
 
 const GAME_COLUMNS: &str = "id, title, clean_title, platform, platform_app_id, install_dir, \
     executable_path, launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, \
     is_favorite, is_hidden, metadata_synced, custom_override, title_provisional, \
-    metadata_attempted_at, last_played_at, play_count, updated_at";
+    metadata_attempted_at, last_played_at, play_count, updated_at, metadata_lang";
 
 const UPSERT_GAME_SQL: &str = "
     INSERT INTO games (
         id, title, clean_title, platform, platform_app_id, install_dir, executable_path,
         launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, is_favorite,
         is_hidden, metadata_synced, custom_override, title_provisional, metadata_attempted_at,
-        last_played_at, play_count, updated_at
+        last_played_at, play_count, updated_at, metadata_lang
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-              ?19, ?20, ?21, ?22)
+              ?19, ?20, ?21, ?22, ?23)
     ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         clean_title = excluded.clean_title,
@@ -74,7 +84,8 @@ const UPSERT_GAME_SQL: &str = "
         metadata_attempted_at = excluded.metadata_attempted_at,
         last_played_at = excluded.last_played_at,
         play_count = excluded.play_count,
-        updated_at = excluded.updated_at";
+        updated_at = excluded.updated_at,
+        metadata_lang = excluded.metadata_lang";
 
 /// Shape of the `library.json` file written by Kanso before the SQLite store existed.
 #[derive(Debug, Default, Deserialize)]
@@ -95,17 +106,11 @@ impl LibraryDb {
     pub fn open(path: &Path) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                format!(
-                    "Impossibile creare la cartella dati {}: {e}",
-                    parent.display()
-                )
+                format!("{} {}: {e}", T::CannotCreateFolder.s(), parent.display())
             })?;
         }
         let conn = Connection::open(path).map_err(|e| {
-            format!(
-                "Impossibile aprire il database libreria {}: {e}",
-                path.display()
-            )
+            format!("{} {}: {e}", T::CannotOpenLibraryDb.s(), path.display())
         })?;
         Self::from_connection(conn)
     }
@@ -133,17 +138,16 @@ impl LibraryDb {
                 match Self::open(&db_path) {
                     Ok(db) if set_aside => {
                         warnings.push(format!(
-                            "Il database della libreria era illeggibile ed è stato messo da parte in {}. \
-                             Ne è stato creato uno nuovo: preferiti e modifiche manuali vanno reimpostati.",
-                            backup.display()
+                            "{} {}. {}",
+                            T::LibraryDbSetAside.s(),
+                            backup.display(),
+                            T::LibraryDbRecreated.s()
                         ));
                         db
                     }
                     Ok(db) => db,
                     Err(_) => {
-                        warnings.push(format!(
-                            "{open_err} Le modifiche di questa sessione non verranno salvate."
-                        ));
+                        warnings.push(format!("{open_err} {}", T::SessionNotSaved.s()));
                         Self::open_in_memory()
                             .expect("SQLite must be able to create an in-memory database")
                     }
@@ -152,9 +156,7 @@ impl LibraryDb {
         };
 
         if let Err(import_err) = db.import_legacy_json(&data_dir.join(LEGACY_LIBRARY_JSON_FILE)) {
-            warnings.push(format!(
-                "Importazione della libreria precedente non riuscita: {import_err}"
-            ));
+            warnings.push(format!("{}: {import_err}", T::LegacyImportFailed.s()));
         }
 
         (db, warnings)
@@ -163,7 +165,7 @@ impl LibraryDb {
     /// Volatile database, for tests and as a last resort when the file cannot be opened.
     pub fn open_in_memory() -> Result<Self, String> {
         let conn = Connection::open_in_memory()
-            .map_err(|e| format!("Impossibile creare il database in memoria: {e}"))?;
+            .map_err(|e| format!("{}: {e}", T::CannotOpenLibraryDb.s()))?;
         Self::from_connection(conn)
     }
 
@@ -174,7 +176,7 @@ impl LibraryDb {
     }
 
     fn migrate(&mut self) -> Result<(), String> {
-        let db_err = |e: rusqlite::Error| format!("Migrazione database libreria fallita: {e}");
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
 
         let current: i64 = self
             .conn
@@ -182,10 +184,7 @@ impl LibraryDb {
             .map_err(db_err)?;
         let current = usize::try_from(current).unwrap_or(0);
         if current > MIGRATIONS.len() {
-            return Err(
-                "Il database libreria è stato creato da una versione più recente di Kanso."
-                    .to_string(),
-            );
+            return Err(T::LibraryDbNewer.s().to_string());
         }
 
         for (index, migration) in MIGRATIONS.iter().enumerate().skip(current) {
@@ -200,7 +199,7 @@ impl LibraryDb {
 
     /// All games, sorted by title (case-insensitive) then id.
     pub fn load_games(&self) -> Result<Vec<DetectedGame>, String> {
-        let db_err = |e: rusqlite::Error| format!("Lettura della libreria fallita: {e}");
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
         let mut stmt = self
             .conn
             .prepare(&format!("SELECT {GAME_COLUMNS} FROM games"))
@@ -222,27 +221,27 @@ impl LibraryDb {
                 game_from_row,
             )
             .optional()
-            .map_err(|e| format!("Lettura del gioco '{game_id}' fallita: {e}"))
+            .map_err(|e| format!("{} ({game_id}): {e}", T::LibraryDbError.s()))
     }
 
     pub fn game_count(&self) -> Result<usize, String> {
         self.conn
             .query_row("SELECT COUNT(*) FROM games", [], |row| row.get::<_, i64>(0))
             .map(|n| usize::try_from(n).unwrap_or(0))
-            .map_err(|e| format!("Lettura della libreria fallita: {e}"))
+            .map_err(|e| format!("{}: {e}", T::LibraryDbError.s()))
     }
 
     /// Inserts or fully updates a single game.
     pub fn upsert_game(&self, game: &DetectedGame) -> Result<(), String> {
         execute_upsert(&self.conn, game)
             .map(|_| ())
-            .map_err(|e| format!("Salvataggio del gioco '{}' fallito: {e}", game.id))
+            .map_err(|e| format!("{} ({}): {e}", T::LibraryDbError.s(), game.id))
     }
 
     /// Makes the table contain exactly `games`, atomically: either every change is stored or,
     /// on any failure, the previous library is left untouched.
     pub fn replace_all_games(&mut self, games: &[DetectedGame]) -> Result<(), String> {
-        let db_err = |e: rusqlite::Error| format!("Salvataggio della libreria fallito: {e}");
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
         let tx = self.conn.transaction().map_err(db_err)?;
 
         tx.execute_batch("CREATE TEMP TABLE IF NOT EXISTS keep_ids (id TEXT PRIMARY KEY); DELETE FROM keep_ids;")
@@ -322,6 +321,7 @@ fn execute_upsert(conn: &Connection, game: &DetectedGame) -> rusqlite::Result<us
             game.last_played_at.map(to_db_int),
             i64::from(game.play_count),
             to_db_int(game.updated_at),
+            game.metadata_lang,
         ],
     )
 }
@@ -356,6 +356,7 @@ fn game_from_row(row: &Row<'_>) -> rusqlite::Result<DetectedGame> {
         last_played_at: row.get::<_, Option<i64>>("last_played_at")?.map(from_db_int),
         play_count: u32::try_from(row.get::<_, i64>("play_count")?).unwrap_or(0),
         updated_at: from_db_int(row.get("updated_at")?),
+        metadata_lang: row.get("metadata_lang")?,
     })
 }
 
@@ -409,6 +410,7 @@ mod tests {
         full.metadata_attempted_at = 1_731_500_000_000;
         full.last_played_at = Some(1_731_600_000_000);
         full.play_count = 7;
+        full.metadata_lang = Some("ru".to_string());
         full.updated_at = 1_731_700_000_000;
 
         let bare = sample("steam:10", "alpha");

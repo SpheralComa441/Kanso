@@ -1,4 +1,5 @@
 use crate::cleaner::clean_game_title;
+use crate::i18n::T;
 use crate::models::{DetectedGame, GamePlatform, SourceScanOutput};
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -70,16 +71,16 @@ pub fn scan_custom_folders(
         let root = PathBuf::from(trimmed);
         if !root.exists() {
             output.warnings.push(format!(
-                "La cartella personalizzata '{}' non esiste o non è raggiungibile.",
+                "{}: {}",
+                T::CustomFolderMissing.s(),
                 root.display()
             ));
             continue;
         }
         if !root.is_dir() {
-            output.warnings.push(format!(
-                "Il percorso '{}' non è una cartella valida.",
-                root.display()
-            ));
+            output
+                .warnings
+                .push(format!("{}: {}", T::NotAFolder.s(), root.display()));
             continue;
         }
 
@@ -212,7 +213,7 @@ fn derive_standalone_title_and_dir(
         .and_then(|s| s.to_str())
         .map(prettify_exe_stem)
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "Gioco Locale".to_string());
+        .unwrap_or_else(|| T::LocalGame.s().to_string());
 
     (fallback_title, parent_dir)
 }

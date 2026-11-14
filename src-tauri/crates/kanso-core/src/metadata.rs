@@ -1,4 +1,5 @@
 use crate::cleaner::{clean_game_title, is_placeholder_title};
+use crate::i18n::{Lang, T};
 use crate::models::{now_timestamp_ms, DetectedGame, GamePlatform, SgdbGameMatch};
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,6 +11,9 @@ use std::time::Duration;
 const DEFAULT_SGDB_BASE_URL: &str = "https://www.steamgriddb.com/api/v2";
 const DEFAULT_STEAM_STORE_BASE_URL: &str = "https://store.steampowered.com";
 const DEFAULT_STEAM_COMMUNITY_BASE_URL: &str = "https://steamcommunity.com";
+const DEFAULT_STEAM_API_BASE_URL: &str = "https://api.steampowered.com";
+const DEFAULT_STEAM_ASSETS_BASE_URL: &str =
+    "https://shared.akamai.steamstatic.com/store_item_assets";
 
 /// Metadata extracted from the public Steam Store API (`&l=italian`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -58,36 +62,52 @@ const NON_GAME_APP_TYPES: &[&str] = &[
     "hardware",
 ];
 
-/// `true` while automatic lookup still has something to find for `game`: a cover (only with a
-/// SteamGridDB key), description and genres, the official name behind a provisional title, or
-/// the store type of a Steam app. Hidden games are left alone.
-pub fn needs_metadata(game: &DetectedGame, has_api_key: bool) -> bool {
+/// `true` while automatic lookup still has something to find for `game`: a cover (Steam games
+/// can always get Steam's own artwork, other stores need a SteamGridDB key), description and
+/// genres, the official name behind a provisional title, the store type of a Steam app, or
+/// texts cached in a language other than `lang`. Hidden games are left alone.
+pub fn needs_metadata(game: &DetectedGame, has_api_key: bool, lang: Lang) -> bool {
     if game.is_hidden {
         return false;
     }
-    let missing_cover = has_api_key
-        && game
-            .cover_path
-            .as_deref()
-            .is_none_or(|p| !Path::new(p).is_file());
+    let missing_cover = cover_is_missing(game) && (has_api_key || steam_appid_of(game).is_some());
     let missing_details = game.short_description.is_none() && game.genres.is_empty();
     let steam_type_unknown = game.app_type.is_none() && steam_appid_of(game).is_some();
-    missing_cover || missing_details || game.title_provisional || steam_type_unknown
+    missing_cover
+        || missing_details
+        || game.title_provisional
+        || steam_type_unknown
+        || needs_translation(game, lang)
 }
 
 /// Whether an automatic metadata pass should run for `game` now. Incomplete games are retried
 /// at most once per [`METADATA_RETRY_INTERVAL_MS`] unless `retry_now` (the user asked for a
-/// scan, or just configured an API key).
+/// scan, changed language, or just configured an API key).
 pub fn is_metadata_sync_due(
     game: &DetectedGame,
     has_api_key: bool,
+    lang: Lang,
     now_ms: u64,
     retry_now: bool,
 ) -> bool {
-    needs_metadata(game, has_api_key)
+    needs_metadata(game, has_api_key, lang)
         && (retry_now
             || game.metadata_attempted_at == 0
             || now_ms.saturating_sub(game.metadata_attempted_at) >= METADATA_RETRY_INTERVAL_MS)
+}
+
+fn cover_is_missing(game: &DetectedGame) -> bool {
+    game.cover_path
+        .as_deref()
+        .is_none_or(|p| !Path::new(p).is_file())
+}
+
+/// Automatically fetched description/genres exist but in another language. Texts the user
+/// edited by hand are never replaced.
+fn needs_translation(game: &DetectedGame, lang: Lang) -> bool {
+    !game.custom_override
+        && (game.short_description.is_some() || !game.genres.is_empty())
+        && game.metadata_lang.as_deref() != Some(lang.code())
 }
 
 fn steam_appid_of(game: &DetectedGame) -> Option<&str> {
@@ -109,12 +129,25 @@ pub struct SgdbResolution {
     pub exact_steam_match: bool,
 }
 
+/// Official artwork of a Steam app, as full URLs.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SteamArtwork {
+    /// Vertical 600x900 library capsule: what the Steam client shows in its library grid.
+    pub library_capsule_url: Option<String>,
+    /// Landscape 460x215 store header, available for practically every app.
+    pub header_url: Option<String>,
+}
+
 /// HTTP client for SteamGridDB API v2 and the public Steam Store API.
 #[derive(Debug, Clone)]
 pub struct MetadataClient {
     sgdb_base_url: String,
     steam_store_base_url: String,
     steam_community_base_url: String,
+    steam_api_base_url: String,
+    steam_assets_base_url: String,
+    /// Language descriptions and genres are requested in.
+    lang: Lang,
     agent: ureq::Agent,
 }
 
@@ -126,13 +159,18 @@ impl Default for MetadataClient {
 
 impl MetadataClient {
     pub fn new() -> Self {
-        Self::with_base_urls(
+        let mut client = Self::with_base_urls(
             DEFAULT_SGDB_BASE_URL,
             DEFAULT_STEAM_STORE_BASE_URL,
             DEFAULT_STEAM_COMMUNITY_BASE_URL,
-        )
+        );
+        client.steam_api_base_url = DEFAULT_STEAM_API_BASE_URL.to_string();
+        client.steam_assets_base_url = DEFAULT_STEAM_ASSETS_BASE_URL.to_string();
+        client
     }
 
+    /// Client against custom endpoints (tests, mirrors). Steam's Web API and its artwork CDN
+    /// are expected on the store base URL (`/IStoreBrowseService/...`, `/store_item_assets/...`).
     pub fn with_base_urls(
         sgdb_base_url: &str,
         steam_store_base_url: &str,
@@ -144,12 +182,22 @@ impl MetadataClient {
             .user_agent("KansoLauncher/0.1.0")
             .build();
 
+        let steam_store_base_url = steam_store_base_url.trim_end_matches('/').to_string();
         Self {
             sgdb_base_url: sgdb_base_url.trim_end_matches('/').to_string(),
-            steam_store_base_url: steam_store_base_url.trim_end_matches('/').to_string(),
+            steam_api_base_url: steam_store_base_url.clone(),
+            steam_assets_base_url: format!("{steam_store_base_url}/store_item_assets"),
+            steam_store_base_url,
             steam_community_base_url: steam_community_base_url.trim_end_matches('/').to_string(),
+            lang: Lang::It,
             agent,
         }
+    }
+
+    /// Requests descriptions and genres in `lang` from now on.
+    pub fn with_language(mut self, lang: Lang) -> Self {
+        self.lang = lang;
+        self
     }
 
     /// Queries the dedicated SteamGridDB endpoint for an exact Steam `appid`:
@@ -162,7 +210,7 @@ impl MetadataClient {
     ) -> Result<Option<SgdbGameMatch>, String> {
         let trimmed_key = api_key.trim();
         if trimmed_key.is_empty() {
-            return Err("SteamGridDB API Key mancante.".to_string());
+            return Err(T::SgdbKeyMissing.s().to_string());
         }
         let clean_appid = steam_appid.trim();
         if clean_appid.is_empty() {
@@ -184,23 +232,21 @@ impl MetadataClient {
         {
             Ok(resp) => resp,
             Err(ureq::Error::Status(401 | 403, _)) => {
-                return Err(
-                    "SteamGridDB API Key non valida o non autorizzata. Verifica la chiave nelle Impostazioni."
-                        .to_string(),
-                );
+                return Err(T::SgdbKeyInvalid.s().to_string());
             }
             Err(ureq::Error::Status(404, _)) => return Ok(None),
             Err(ureq::Error::Status(code, _)) => {
                 return Err(format!(
-                    "Errore SteamGridDB HTTP {code} su lookup Steam AppID {clean_appid}"
+                    "{} {code} (Steam AppID {clean_appid})",
+                    T::SgdbHttpError.s()
                 ));
             }
-            Err(e) => return Err(format!("Errore di rete SteamGridDB: {e}")),
+            Err(e) => return Err(format!("{}: {e}", T::SgdbNetworkError.s())),
         };
 
         let json: Value = response
             .into_json()
-            .map_err(|e| format!("Risposta JSON SteamGridDB non valida: {e}"))?;
+            .map_err(|e| format!("{}: {e}", T::SgdbBadResponse.s()))?;
 
         if json.get("success").and_then(Value::as_bool) != Some(true) {
             return Ok(None);
@@ -224,9 +270,7 @@ impl MetadataClient {
     ) -> Result<Vec<SgdbGameMatch>, String> {
         let trimmed_key = api_key.trim();
         if trimmed_key.is_empty() {
-            return Err(
-                "Configura prima la SteamGridDB API Key nelle Impostazioni.".to_string(),
-            );
+            return Err(T::SgdbKeyMissing.s().to_string());
         }
         let cleaned_query = query.trim();
         if cleaned_query.is_empty() {
@@ -248,21 +292,18 @@ impl MetadataClient {
         {
             Ok(resp) => resp,
             Err(ureq::Error::Status(401 | 403, _)) => {
-                return Err(
-                    "SteamGridDB API Key non valida o non autorizzata. Verifica la chiave nelle Impostazioni."
-                        .to_string(),
-                );
+                return Err(T::SgdbKeyInvalid.s().to_string());
             }
             Err(ureq::Error::Status(404, _)) => return Ok(Vec::new()),
             Err(ureq::Error::Status(code, _)) => {
-                return Err(format!("Errore SteamGridDB HTTP {code} durante la ricerca"));
+                return Err(format!("{} {code}", T::SgdbHttpError.s()));
             }
-            Err(e) => return Err(format!("Errore di rete durante la ricerca SteamGridDB: {e}")),
+            Err(e) => return Err(format!("{}: {e}", T::SgdbNetworkError.s())),
         };
 
         let json: Value = response
             .into_json()
-            .map_err(|e| format!("Risposta JSON SteamGridDB non valida: {e}"))?;
+            .map_err(|e| format!("{}: {e}", T::SgdbBadResponse.s()))?;
 
         if json.get("success").and_then(Value::as_bool) != Some(true) {
             return Ok(Vec::new());
@@ -313,7 +354,12 @@ impl MetadataClient {
                     Ok(None) => {
                         // Exact Steam AppID not indexed on SteamGridDB -> fallback to text autocomplete
                     }
-                    Err(err) if err.contains("API Key") => return Err(err),
+                    // A bad key will fail the text search too: report it instead of hiding it
+                    Err(err)
+                        if err == T::SgdbKeyInvalid.s() || err == T::SgdbKeyMissing.s() =>
+                    {
+                        return Err(err)
+                    }
                     Err(_) => {
                         // Transient error on Steam endpoint -> try text autocomplete fallback
                     }
@@ -343,7 +389,7 @@ impl MetadataClient {
     ) -> Result<Option<PathBuf>, String> {
         let trimmed_key = api_key.trim();
         if trimmed_key.is_empty() {
-            return Err("SteamGridDB API Key mancante.".to_string());
+            return Err(T::SgdbKeyMissing.s().to_string());
         }
 
         // 1. Primary request: 600x900 vertical grids
@@ -363,44 +409,99 @@ impl MetadataClient {
             return Ok(None);
         };
 
-        let resp = self
-            .agent
-            .get(&img_url)
-            .call()
-            .map_err(|e| format!("Impossibile scaricare l'immagine di copertina: {e}"))?;
+        self.download_cover_image(&img_url, local_game_id, covers_dir)
+    }
+
+    /// Downloads `image_url` and stores it as the cover of `local_game_id` inside `covers_dir`,
+    /// replacing any previous cover. `Ok(None)` when the server has no such image.
+    pub fn download_cover_image(
+        &self,
+        image_url: &str,
+        local_game_id: &str,
+        covers_dir: &Path,
+    ) -> Result<Option<PathBuf>, String> {
+        let resp = match self.agent.get(image_url).call() {
+            Ok(resp) => resp,
+            Err(ureq::Error::Status(404, _)) => return Ok(None),
+            Err(e) => return Err(format!("{}: {e}", T::CoverDownloadFailed.s())),
+        };
 
         let content_type = resp.content_type().to_string();
-        let ext = detect_image_extension(&img_url, &content_type);
+        let ext = detect_image_extension(image_url, &content_type);
 
         let mut bytes = Vec::new();
         resp.into_reader()
             .take(15 * 1024 * 1024)
             .read_to_end(&mut bytes)
-            .map_err(|e| format!("Errore lettura copertina scaricata: {e}"))?;
+            .map_err(|e| format!("{}: {e}", T::CoverDownloadFailed.s()))?;
 
         if bytes.is_empty() {
             return Ok(None);
         }
 
         fs::create_dir_all(covers_dir).map_err(|e| {
-            format!(
-                "Impossibile creare la cartella copertine {}: {e}",
-                covers_dir.display()
-            )
+            format!("{} {}: {e}", T::CannotCreateFolder.s(), covers_dir.display())
         })?;
 
         let safe_stem = sanitize_filename_id(local_game_id);
         remove_existing_cover_variants(covers_dir, &safe_stem);
 
         let dest = covers_dir.join(format!("{safe_stem}.{ext}"));
-        fs::write(&dest, &bytes).map_err(|e| {
-            format!(
-                "Impossibile salvare la copertina in {}: {e}",
-                dest.display()
-            )
-        })?;
+        fs::write(&dest, &bytes)
+            .map_err(|e| format!("{} ({}): {e}", T::CoverSaveFailed.s(), dest.display()))?;
 
         Ok(Some(dest))
+    }
+
+    /// Asks Steam's public store service for an app's official artwork.
+    ///
+    /// This is the only reliable source for recent apps: their images live under hashed
+    /// paths (`steam/apps/<id>/<hash>/library_capsule.jpg`), so the classic
+    /// `.../library_600x900.jpg` URL answers 404 for them.
+    pub fn fetch_steam_artwork(&self, steam_appid: &str) -> Option<SteamArtwork> {
+        let appid: u64 = steam_appid.trim().parse().ok()?;
+        let input = serde_json::json!({
+            "ids": [{ "appid": appid }],
+            "context": { "language": self.lang.steam_language(), "country_code": "US" },
+            "data_request": { "include_assets": true },
+        });
+        let url = format!(
+            "{}/IStoreBrowseService/GetItems/v1/?input_json={}",
+            self.steam_api_base_url,
+            percent_encode_path_segment(&input.to_string())
+        );
+
+        let root: Value = self.agent.get(&url).call().ok()?.into_json().ok()?;
+        let item = root
+            .get("response")?
+            .get("store_items")?
+            .as_array()?
+            .iter()
+            .find(|item| item.get("appid").and_then(Value::as_u64) == Some(appid))?;
+        let assets = item.get("assets")?;
+        // e.g. "steam/apps/3883570/${FILENAME}?t=1792307731"
+        let url_format = assets.get("asset_url_format")?.as_str()?;
+
+        let asset_url = |key: &str| {
+            assets
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|file| !file.is_empty())
+                .map(|file| {
+                    format!(
+                        "{}/{}",
+                        self.steam_assets_base_url,
+                        url_format.replace("${FILENAME}", file)
+                    )
+                })
+        };
+
+        let artwork = SteamArtwork {
+            library_capsule_url: asset_url("library_capsule"),
+            header_url: asset_url("header"),
+        };
+        (artwork != SteamArtwork::default()).then_some(artwork)
     }
 
     fn fetch_best_grid_url(
@@ -419,14 +520,14 @@ impl MetadataClient {
             Ok(r) => r,
             Err(ureq::Error::Status(404, _)) => return Ok(None),
             Err(ureq::Error::Status(401 | 403, _)) => {
-                return Err("SteamGridDB API Key non valida.".to_string())
+                return Err(T::SgdbKeyInvalid.s().to_string())
             }
-            Err(e) => return Err(format!("Errore recupero griglie SteamGridDB: {e}")),
+            Err(e) => return Err(format!("{}: {e}", T::SgdbNetworkError.s())),
         };
 
         let json: Value = resp
             .into_json()
-            .map_err(|e| format!("JSON griglie SteamGridDB non valido: {e}"))?;
+            .map_err(|e| format!("{}: {e}", T::SgdbBadResponse.s()))?;
 
         let Some(items) = json.get("data").and_then(Value::as_array) else {
             return Ok(None);
@@ -497,9 +598,10 @@ impl MetadataClient {
         };
 
         let url = format!(
-            "{}/api/appdetails?appids={}&l=italian",
+            "{}/api/appdetails?appids={}&l={}",
             self.steam_store_base_url,
-            percent_encode_path_segment(&appid)
+            percent_encode_path_segment(&appid),
+            self.lang.steam_language()
         );
 
         let Ok(resp) = self.agent.get(&url).call() else {
@@ -565,8 +667,8 @@ impl MetadataClient {
     }
 
     /// Automatically enriches a game with its official Steam name (when the scanner could only
-    /// produce a provisional title), Steam store type, public Steam Store Italian description
-    /// & genres, and SteamGridDB cover art (when `api_key` is non-empty).
+    /// produce a provisional title), Steam store type, description & genres in the client's
+    /// language, and cover art: SteamGridDB when `api_key` is set, then Steam's own artwork.
     ///
     /// Always stamps `metadata_attempted_at`; `updated_at` moves only when something visible
     /// changed, so an unsuccessful retry leaves the game (and its cached cover URL) untouched.
@@ -580,16 +682,19 @@ impl MetadataClient {
         let mut outcome = EnrichOutcome::default();
         let api_key = api_key.map(str::trim).filter(|k| !k.is_empty());
         let steam_appid = steam_appid_of(game).map(ToString::to_string);
+        let lang_code = self.lang.code();
 
         // A provisional title can only be resolved reliably through the exact Steam appid
         let mut needs_title = game.title_provisional && steam_appid.is_some();
         let type_unknown = steam_appid.is_some() && game.app_type.is_none();
+        let translate = needs_translation(game, self.lang);
 
         // 1. Official name, type, description & genres via the public Steam Store API. Runs
         //    before the cover lookup so a freshly resolved title also drives SteamGridDB's
         //    text search.
         if needs_title
             || type_unknown
+            || translate
             || game.short_description.is_none()
             || game.genres.is_empty()
         {
@@ -600,11 +705,26 @@ impl MetadataClient {
                     {
                         needs_title = false;
                     }
-                    if game.short_description.is_none() {
-                        game.short_description = meta.short_description;
+                    if translate {
+                        // Replace the texts cached in the previous language
+                        if meta.short_description.is_some() {
+                            game.short_description = meta.short_description;
+                        }
+                        if !meta.genres.is_empty() {
+                            game.genres = meta.genres;
+                        }
+                    } else {
+                        if game.short_description.is_none() {
+                            game.short_description = meta.short_description;
+                        }
+                        if game.genres.is_empty() && !meta.genres.is_empty() {
+                            game.genres = meta.genres;
+                        }
                     }
-                    if game.genres.is_empty() && !meta.genres.is_empty() {
-                        game.genres = meta.genres;
+                    if !game.custom_override
+                        && (game.short_description.is_some() || !game.genres.is_empty())
+                    {
+                        game.metadata_lang = Some(lang_code.to_string());
                     }
                     if type_unknown {
                         let app_type = meta.app_type.unwrap_or_else(|| "unknown".to_string());
@@ -621,20 +741,19 @@ impl MetadataClient {
                     if type_unknown {
                         game.app_type = Some("unlisted".to_string());
                     }
+                    if translate {
+                        // Nothing better exists: keep the old texts and stop asking
+                        game.metadata_lang = Some(lang_code.to_string());
+                    }
                 }
                 SteamStoreLookup::Unavailable => {}
             }
         }
 
-        if let Some(key) = api_key.filter(|_| !game.is_hidden) {
-            // 2. Cover art via SteamGridDB when the cover is missing
-            let needs_cover = game
-                .cover_path
-                .as_deref()
-                .is_none_or(|p| !Path::new(p).is_file());
-            let mut exact_lookup_done = false;
-
-            if needs_cover {
+        // 2. Cover art, when missing
+        let mut exact_lookup_done = false;
+        if !game.is_hidden && cover_is_missing(game) {
+            if let Some(key) = api_key {
                 exact_lookup_done = steam_appid.is_some();
                 match self.resolve_sgdb_match(key, game) {
                     Ok(Some(resolution)) => {
@@ -664,18 +783,44 @@ impl MetadataClient {
                 }
             }
 
-            // 3. The store had no usable name (delisted / region-locked app) and the cover was
-            //    already cached: ask SteamGridDB's exact appid endpoint for the name alone.
-            if needs_title && !exact_lookup_done {
-                if let Some(appid) = steam_appid.as_deref() {
-                    match self.lookup_sgdb_by_steam_appid(key, appid) {
-                        Ok(Some(exact)) => {
-                            apply_resolved_title(game, &exact.name);
+            // Steam's own artwork: the fallback when SteamGridDB has nothing (very recent or
+            // niche games) and the only source when no API key is configured. The vertical
+            // library capsule is preferred; the landscape header is better than no cover.
+            if cover_is_missing(game) {
+                if let Some(artwork) = steam_appid
+                    .as_deref()
+                    .and_then(|appid| self.fetch_steam_artwork(appid))
+                {
+                    for url in [artwork.library_capsule_url, artwork.header_url]
+                        .into_iter()
+                        .flatten()
+                    {
+                        match self.download_cover_image(&url, &game.id, covers_dir) {
+                            Ok(Some(saved_path)) => {
+                                game.cover_path = Some(saved_path.to_string_lossy().to_string());
+                                break;
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                outcome.warning.get_or_insert(e);
+                            }
                         }
-                        Ok(None) => {}
-                        Err(e) => {
-                            outcome.warning.get_or_insert(e);
-                        }
+                    }
+                }
+            }
+        }
+
+        // 3. The store had no usable name (delisted / region-locked app) and SteamGridDB's
+        //    exact appid endpoint was not asked yet: ask it for the name alone.
+        if needs_title && !exact_lookup_done && !game.is_hidden {
+            if let (Some(key), Some(appid)) = (api_key, steam_appid.as_deref()) {
+                match self.lookup_sgdb_by_steam_appid(key, appid) {
+                    Ok(Some(exact)) => {
+                        apply_resolved_title(game, &exact.name);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        outcome.warning.get_or_insert(e);
                     }
                 }
             }
@@ -733,6 +878,7 @@ impl MetadataClient {
             if !meta.genres.is_empty() {
                 game.genres = meta.genres;
             }
+            game.metadata_lang = Some(self.lang.code().to_string());
         }
 
         game.steamgriddb_id = Some(sgdb_game_id);
@@ -981,11 +1127,37 @@ mod tests {
                             "application/json",
                             r#"{"1091500":{"success":true,"data":{"short_description":"GDR d'azione futuristico.","genres":[{"id":"3","description":"GDR"}]}}}"#.as_bytes().to_vec(),
                         )
-                    } else if path.starts_with("/api/appdetails?appids=1321440") {
+                    } else if path.starts_with("/api/appdetails?appids=1321440")
+                        && !path.contains("l=english")
+                    {
                         (
                             "200 OK",
                             "application/json",
                             r#"{"1321440":{"success":true,"data":{"type":"game","name":"Cassette Beasts","short_description":"Colleziona mostri e trasformati in loro.","genres":[{"id":"23","description":"Indie"},{"id":"3","description":"GDR"}]}}}"#.as_bytes().to_vec(),
+                        )
+                    } else if path.starts_with("/IStoreBrowseService/GetItems/v1/") && path.contains("3883570") {
+                        // Recent app: artwork under hashed paths, as the real service answers
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"response":{"store_items":[{"appid":3883570,"name":"Invokyr","assets":{"asset_url_format":"steam/apps/3883570/${FILENAME}?t=1792307731","library_capsule":"1723ba58/library_capsule.jpg","header":"a1d37fb2/header.jpg"}}]}}"#.to_vec(),
+                        )
+                    } else if path.starts_with("/IStoreBrowseService/GetItems/v1/") && path.contains("4588930") {
+                        // App whose vertical capsule is listed but missing on the CDN
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"response":{"store_items":[{"appid":4588930,"name":"The Old Flesh of Nuraga","assets":{"asset_url_format":"steam/apps/4588930/${FILENAME}?t=1","library_capsule":"gone/library_capsule.jpg","header":"8da013f4/header.jpg"}}]}}"#.to_vec(),
+                        )
+                    } else if path.starts_with("/store_item_assets/steam/apps/3883570/1723ba58/library_capsule.jpg") {
+                        ("200 OK", "image/jpeg", b"\xff\xd8\xffvertical-capsule".to_vec())
+                    } else if path.starts_with("/store_item_assets/steam/apps/4588930/8da013f4/header.jpg") {
+                        ("200 OK", "image/jpeg", b"\xff\xd8\xfflandscape-header".to_vec())
+                    } else if path.starts_with("/api/appdetails?appids=1321440&l=english") {
+                        (
+                            "200 OK",
+                            "application/json",
+                            r#"{"1321440":{"success":true,"data":{"type":"game","name":"Cassette Beasts","short_description":"Collect monsters and transform into them.","genres":[{"id":"23","description":"Indie"},{"id":"3","description":"RPG"}]}}}"#.as_bytes().to_vec(),
                         )
                     } else if path.starts_with("/api/appdetails?appids=2000001") {
                         (
@@ -1186,6 +1358,7 @@ mod tests {
         game.cover_path = Some(cached_cover.to_string_lossy().to_string());
         game.short_description = Some("Descrizione in cache.".to_string());
         game.genres = vec!["Indie".to_string()];
+        game.metadata_lang = Some("it".to_string());
         game.metadata_synced = true;
 
         let outcome = client.enrich_game_automatically(&mut game, Some("test_sgdb_key"), covers_dir.path());
@@ -1273,6 +1446,7 @@ mod tests {
         );
         game.short_description = Some("Descrizione.".to_string());
         game.genres = vec!["Azione".to_string()];
+        game.metadata_lang = Some("it".to_string());
         game
     }
 
@@ -1283,7 +1457,7 @@ mod tests {
         let covers_dir = tempdir().unwrap();
 
         let mut soundtrack = synced_steam_game("2000001", "Hades Original Soundtrack");
-        assert!(needs_metadata(&soundtrack, false), "store type is still unknown");
+        assert!(needs_metadata(&soundtrack, false, Lang::It), "store type is still unknown");
 
         let outcome = client.enrich_game_automatically(&mut soundtrack, Some("key"), covers_dir.path());
         assert!(outcome.auto_hidden && outcome.changed);
@@ -1293,7 +1467,7 @@ mod tests {
             !recorded.lock().unwrap().iter().any(|p| p.starts_with("/grids/")),
             "no cover is downloaded for an entry that was just hidden"
         );
-        assert!(!needs_metadata(&soundtrack, true), "hidden entries are left alone");
+        assert!(!needs_metadata(&soundtrack, true, Lang::It), "hidden entries are left alone");
 
         // The user brings it back: later passes never hide it again
         soundtrack.is_hidden = false;
@@ -1342,18 +1516,25 @@ mod tests {
         let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
         let covers_dir = tempdir().unwrap();
 
+        // Covers are already cached, so only the type lookup is at stake here
+        let cover = covers_dir.path().join("cached.png");
+        fs::write(&cover, b"cached").unwrap();
+        let cover = Some(cover.to_string_lossy().to_string());
+
         // 777777: the store answers `success: false`
         let mut delisted = synced_steam_game("777777", "Delisted Gem");
+        delisted.cover_path = cover.clone();
         client.enrich_game_automatically(&mut delisted, None, covers_dir.path());
         assert_eq!(delisted.app_type.as_deref(), Some("unlisted"));
-        assert!(!needs_metadata(&delisted, false));
+        assert!(!needs_metadata(&delisted, false, Lang::It));
 
         // Store unreachable: the type stays unknown and is asked again later
         let offline = MetadataClient::with_base_urls(&base_url, "http://127.0.0.1:9", &base_url);
         let mut pending = synced_steam_game("1321440", "Cassette Beasts");
+        pending.cover_path = cover;
         offline.enrich_game_automatically(&mut pending, None, covers_dir.path());
         assert_eq!(pending.app_type, None);
-        assert!(needs_metadata(&pending, false));
+        assert!(needs_metadata(&pending, false, Lang::It));
     }
 
     #[test]
@@ -1371,22 +1552,125 @@ mod tests {
             Some(r"E:\Games\Tiny Quest\tiny.exe".to_string()),
             None,
         );
-        assert!(is_metadata_sync_due(&game, false, now, false), "never attempted");
+        assert!(is_metadata_sync_due(&game, false, Lang::It, now, false), "never attempted");
 
         game.metadata_attempted_at = now - 60_000;
-        assert!(!is_metadata_sync_due(&game, false, now, false), "attempted a minute ago");
-        assert!(is_metadata_sync_due(&game, false, now, true), "user asked for a scan");
+        assert!(!is_metadata_sync_due(&game, false, Lang::It, now, false), "attempted a minute ago");
+        assert!(is_metadata_sync_due(&game, false, Lang::It, now, true), "user asked for a scan");
 
         game.metadata_attempted_at = now - METADATA_RETRY_INTERVAL_MS;
-        assert!(is_metadata_sync_due(&game, false, now, false), "a day has passed");
+        assert!(is_metadata_sync_due(&game, false, Lang::It, now, false), "a day has passed");
 
         // Complete: description and genres present, cover only matters with an API key
         game.short_description = Some("Descrizione.".to_string());
         game.genres = vec!["Indie".to_string()];
-        assert!(!is_metadata_sync_due(&game, false, now, true));
-        assert!(is_metadata_sync_due(&game, true, now, true), "cover missing, key present");
+        game.metadata_lang = Some("it".to_string());
+        assert!(!is_metadata_sync_due(&game, false, Lang::It, now, true));
+        assert!(is_metadata_sync_due(&game, true, Lang::It, now, true), "cover missing, key present");
 
         game.is_hidden = true;
-        assert!(!is_metadata_sync_due(&game, true, now, true));
+        assert!(!is_metadata_sync_due(&game, true, Lang::It, now, true));
+    }
+
+    fn bare_steam_game(appid: &str, title: &str) -> DetectedGame {
+        let mut game = synced_steam_game(appid, title);
+        game.app_type = Some("game".to_string());
+        game
+    }
+
+    #[test]
+    fn steam_artwork_is_the_cover_fallback_and_needs_no_api_key() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let covers_dir = tempdir().unwrap();
+
+        // Recent game unknown to SteamGridDB: the official vertical capsule lives under a
+        // hashed path that only Steam's store service reveals
+        let mut invokyr = bare_steam_game("3883570", "Invokyr");
+        assert!(needs_metadata(&invokyr, false, Lang::It), "a Steam game can get a cover without a key");
+
+        let outcome = client.enrich_game_automatically(&mut invokyr, None, covers_dir.path());
+        assert!(outcome.changed);
+        assert_eq!(outcome.warning, None);
+        let cover = invokyr.cover_path.clone().expect("cover downloaded");
+        assert!(cover.ends_with("steam_3883570.jpg"), "{cover}");
+        assert_eq!(fs::read(&cover).unwrap(), b"\xff\xd8\xffvertical-capsule");
+        assert!(!needs_metadata(&invokyr, false, Lang::It));
+
+        let paths = recorded.lock().unwrap().clone();
+        assert!(
+            !paths.iter().any(|p| p.starts_with("/games/steam/") || p.starts_with("/search/")),
+            "SteamGridDB is not contacted without a key: {paths:?}"
+        );
+        assert!(paths.iter().any(|p| p
+            == "/store_item_assets/steam/apps/3883570/1723ba58/library_capsule.jpg?t=1792307731"));
+    }
+
+    #[test]
+    fn steam_artwork_fills_in_when_steamgriddb_has_nothing_and_falls_back_to_the_header() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let covers_dir = tempdir().unwrap();
+
+        // 4588930: SteamGridDB has no exact match (404), its text search returns an unrelated
+        // game whose grid is downloaded... so make SteamGridDB truly empty for this check by
+        // using a key-less pass first: vertical capsule 404 -> landscape header is used
+        let mut nuraga = bare_steam_game("4588930", "The Old Flesh of Nuraga");
+        client.enrich_game_automatically(&mut nuraga, None, covers_dir.path());
+        let cover = nuraga.cover_path.clone().expect("header used as cover");
+        assert_eq!(fs::read(&cover).unwrap(), b"\xff\xd8\xfflandscape-header");
+
+        let paths = recorded.lock().unwrap().clone();
+        let capsule_at = paths.iter().position(|p| p.contains("gone/library_capsule.jpg"));
+        let header_at = paths.iter().position(|p| p.contains("8da013f4/header.jpg"));
+        assert!(capsule_at.is_some() && capsule_at < header_at, "capsule is tried first: {paths:?}");
+
+        // With a key, a SteamGridDB cover wins and Steam's artwork is not requested at all
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let mut cyberpunk = bare_steam_game("1091500", "Cyberpunk 2077");
+        client.enrich_game_automatically(&mut cyberpunk, Some("test_sgdb_key"), covers_dir.path());
+        assert!(cyberpunk.cover_path.is_some());
+        assert!(
+            !recorded.lock().unwrap().iter().any(|p| p.starts_with("/IStoreBrowseService/")),
+            "no need to ask Steam when SteamGridDB delivered"
+        );
+    }
+
+    #[test]
+    fn cached_texts_are_refetched_when_the_language_changes_but_manual_edits_are_kept() {
+        let (base_url, _recorded) = spawn_mock_api_server();
+        let english = MetadataClient::with_base_urls(&base_url, &base_url, &base_url)
+            .with_language(Lang::En);
+        let covers_dir = tempdir().unwrap();
+        let cover = covers_dir.path().join("steam_1321440.png");
+        fs::write(&cover, b"cached").unwrap();
+
+        // Synced in Italian by a previous session
+        let mut game = bare_steam_game("1321440", "Cassette Beasts");
+        game.cover_path = Some(cover.to_string_lossy().to_string());
+        game.short_description = Some("Colleziona mostri e trasformati in loro.".to_string());
+        game.genres = vec!["Indie".to_string(), "GDR".to_string()];
+        assert!(!needs_metadata(&game, false, Lang::It));
+        assert!(needs_metadata(&game, false, Lang::En), "texts are in another language");
+
+        let outcome = english.enrich_game_automatically(&mut game, None, covers_dir.path());
+        assert!(outcome.changed);
+        assert_eq!(
+            game.short_description.as_deref(),
+            Some("Collect monsters and transform into them.")
+        );
+        assert_eq!(game.genres, vec!["Indie", "RPG"]);
+        assert_eq!(game.metadata_lang.as_deref(), Some("en"));
+        assert!(!needs_metadata(&game, false, Lang::En));
+
+        // Texts the user wrote by hand are never replaced
+        let mut edited = bare_steam_game("1321440", "Cassette Beasts");
+        edited.cover_path = Some(cover.to_string_lossy().to_string());
+        edited.custom_override = true;
+        edited.short_description = Some("La mia descrizione.".to_string());
+        assert!(!needs_metadata(&edited, false, Lang::En));
+        english.enrich_game_automatically(&mut edited, None, covers_dir.path());
+        assert_eq!(edited.short_description.as_deref(), Some("La mia descrizione."));
     }
 }

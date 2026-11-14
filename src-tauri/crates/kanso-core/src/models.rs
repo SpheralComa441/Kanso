@@ -130,6 +130,9 @@ pub struct DetectedGame {
     /// How many times the game was launched from Kanso.
     #[serde(default)]
     pub play_count: u32,
+    /// Language (`it`, `en`, ...) the cached description and genres were fetched in.
+    #[serde(default)]
+    pub metadata_lang: Option<String>,
     /// Last metadata/cover update timestamp in ms (also used for UI image cache busting).
     #[serde(default)]
     pub updated_at: u64,
@@ -170,6 +173,7 @@ impl DetectedGame {
             metadata_attempted_at: 0,
             last_played_at: None,
             play_count: 0,
+            metadata_lang: None,
             updated_at: now_timestamp_ms(),
         }
     }

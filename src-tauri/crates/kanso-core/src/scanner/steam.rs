@@ -1,4 +1,5 @@
 use crate::cleaner::{clean_game_title, is_placeholder_title};
+use crate::i18n::T;
 use crate::models::{DetectedGame, GamePlatform, SourceScanOutput};
 use crate::vdf::{parse_vdf, VdfValue};
 use std::collections::HashSet;
@@ -77,7 +78,10 @@ fn normalize_windows_path(raw: &str) -> PathBuf {
 pub fn parse_library_folders_vdf(content: &str) -> Result<Vec<PathBuf>, String> {
     let root = parse_vdf(content)?;
     let Some(folders_sec) = root.get_section("libraryfolders") else {
-        return Err("Sezione 'libraryfolders' mancante in libraryfolders.vdf".to_string());
+        return Err(format!(
+            "{}: libraryfolders.vdf (libraryfolders)",
+            T::InvalidManifest.s()
+        ));
     };
 
     let mut paths = Vec::new();
@@ -130,14 +134,14 @@ pub fn parse_app_manifest_acf(
 ) -> Result<Option<DetectedGame>, String> {
     let root = parse_vdf(content)?;
     let Some(app_state) = root.get_section("AppState") else {
-        return Err("Sezione 'AppState' mancante nel file .acf".to_string());
+        return Err(format!("{} (.acf): AppState", T::InvalidManifest.s()));
     };
 
     let appid = app_state
         .get_str("appid")
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| "Campo 'appid' mancante nel file .acf".to_string())?;
+        .ok_or_else(|| format!("{} (.acf): appid", T::InvalidManifest.s()))?;
 
     if EXCLUDED_STEAM_APP_IDS.contains(&appid) {
         return Ok(None);
@@ -153,7 +157,7 @@ pub fn parse_app_manifest_acf(
         .get_str("installdir")
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("Campo 'installdir' mancante per appid {appid}"))?;
+        .ok_or_else(|| format!("{} (.acf, appid {appid}): installdir", T::InvalidManifest.s()))?;
 
     let full_install_dir = library_root
         .join("steamapps")
@@ -206,7 +210,8 @@ pub fn scan_steam_from_root(steam_root: &Path) -> SourceScanOutput {
                         .push(format!("Steam VDF ({}): {err}", vdf_path.display())),
                 },
                 Err(err) => output.warnings.push(format!(
-                    "Impossibile leggere {}: {err}",
+                    "{} {}: {err}",
+                    T::CannotRead.s(),
                     vdf_path.display()
                 )),
             }
@@ -235,7 +240,8 @@ pub fn scan_steam_from_root(steam_root: &Path) -> SourceScanOutput {
             Ok(entries) => entries,
             Err(err) => {
                 output.warnings.push(format!(
-                    "Impossibile leggere la libreria Steam {}: {err}",
+                    "{} {}: {err}",
+                    T::CannotRead.s(),
                     steamapps_dir.display()
                 ));
                 continue;
@@ -269,7 +275,7 @@ pub fn scan_steam_from_root(steam_root: &Path) -> SourceScanOutput {
                 },
                 Err(err) => output
                     .warnings
-                    .push(format!("Impossibile leggere {}: {err}", path.display())),
+                    .push(format!("{} {}: {err}", T::CannotRead.s(), path.display())),
             }
         }
     }

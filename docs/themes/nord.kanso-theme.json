@@ -1,0 +1,27 @@
+{
+  "kansoTheme": 1,
+  "name": "Nord",
+  "author": "Kanso",
+  "description": "Arctic blue-grey palette.",
+  "colorScheme": "dark",
+  "colors": {
+    "background": "#2e3440",
+    "surface": "#3b4252",
+    "elevated": "#434c5e",
+    "border": "#4c566a",
+    "borderStrong": "#6b7890",
+    "text": "#eceff4",
+    "textSecondary": "#d8dee9",
+    "textMuted": "#aab4c5",
+    "textFaint": "#8a94a8",
+    "accent": "#88c0d0",
+    "accentHover": "#a3d4e2",
+    "onAccent": "#2e3440"
+  },
+  "layout": {
+    "cardMinWidth": 185,
+    "cardRadius": 10,
+    "sidebarWidth": 208
+  },
+  "fontFamily": null
+}
