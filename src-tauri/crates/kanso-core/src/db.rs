@@ -48,21 +48,30 @@ const MIGRATIONS: &[&str] = &["
         WHERE short_description IS NOT NULL OR genres <> '[]';
     UPDATE games SET metadata_attempted_at = 0;
 ",
+    // v3: Steam community tags and the playtime recorded by the game's client; one more lookup
+    // for every game so the tags arrive without waiting for the daily retry.
+    "
+    ALTER TABLE games ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE games ADD COLUMN tags_lang TEXT;
+    ALTER TABLE games ADD COLUMN playtime_minutes INTEGER;
+    UPDATE games SET metadata_attempted_at = 0;
+",
 ];
 
 const GAME_COLUMNS: &str = "id, title, clean_title, platform, platform_app_id, install_dir, \
     executable_path, launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, \
     is_favorite, is_hidden, metadata_synced, custom_override, title_provisional, \
-    metadata_attempted_at, last_played_at, play_count, updated_at, metadata_lang";
+    metadata_attempted_at, last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, \
+    playtime_minutes";
 
 const UPSERT_GAME_SQL: &str = "
     INSERT INTO games (
         id, title, clean_title, platform, platform_app_id, install_dir, executable_path,
         launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, is_favorite,
         is_hidden, metadata_synced, custom_override, title_provisional, metadata_attempted_at,
-        last_played_at, play_count, updated_at, metadata_lang
+        last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, playtime_minutes
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-              ?19, ?20, ?21, ?22, ?23)
+              ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
     ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         clean_title = excluded.clean_title,
@@ -85,7 +94,10 @@ const UPSERT_GAME_SQL: &str = "
         last_played_at = excluded.last_played_at,
         play_count = excluded.play_count,
         updated_at = excluded.updated_at,
-        metadata_lang = excluded.metadata_lang";
+        metadata_lang = excluded.metadata_lang,
+        tags = excluded.tags,
+        tags_lang = excluded.tags_lang,
+        playtime_minutes = excluded.playtime_minutes";
 
 /// Shape of the `library.json` file written by Kanso before the SQLite store existed.
 #[derive(Debug, Default, Deserialize)]
@@ -296,6 +308,7 @@ pub fn sort_games_by_title(games: &mut [DetectedGame]) {
 
 fn execute_upsert(conn: &Connection, game: &DetectedGame) -> rusqlite::Result<usize> {
     let genres_json = serde_json::to_string(&game.genres).unwrap_or_else(|_| "[]".to_string());
+    let tags_json = serde_json::to_string(&game.tags).unwrap_or_else(|_| "[]".to_string());
     conn.execute(
         UPSERT_GAME_SQL,
         params![
@@ -322,6 +335,9 @@ fn execute_upsert(conn: &Connection, game: &DetectedGame) -> rusqlite::Result<us
             i64::from(game.play_count),
             to_db_int(game.updated_at),
             game.metadata_lang,
+            tags_json,
+            game.tags_lang,
+            game.playtime_minutes.map(i64::from),
         ],
     )
 }
@@ -329,6 +345,7 @@ fn execute_upsert(conn: &Connection, game: &DetectedGame) -> rusqlite::Result<us
 fn game_from_row(row: &Row<'_>) -> rusqlite::Result<DetectedGame> {
     let platform_raw: String = row.get("platform")?;
     let genres_json: String = row.get("genres")?;
+    let tags_json: String = row.get("tags")?;
 
     Ok(DetectedGame {
         id: row.get("id")?,
@@ -357,6 +374,11 @@ fn game_from_row(row: &Row<'_>) -> rusqlite::Result<DetectedGame> {
         play_count: u32::try_from(row.get::<_, i64>("play_count")?).unwrap_or(0),
         updated_at: from_db_int(row.get("updated_at")?),
         metadata_lang: row.get("metadata_lang")?,
+        tags: serde_json::from_str(&tags_json).unwrap_or_default(),
+        tags_lang: row.get("tags_lang")?,
+        playtime_minutes: row
+            .get::<_, Option<i64>>("playtime_minutes")?
+            .and_then(|minutes| u32::try_from(minutes).ok()),
     })
 }
 
@@ -411,6 +433,9 @@ mod tests {
         full.last_played_at = Some(1_731_600_000_000);
         full.play_count = 7;
         full.metadata_lang = Some("ru".to_string());
+        full.tags = vec!["Мир открытый".to_string(), "Souls-like".to_string()];
+        full.tags_lang = Some("ru".to_string());
+        full.playtime_minutes = Some(7_260);
         full.updated_at = 1_731_700_000_000;
 
         let bare = sample("steam:10", "alpha");

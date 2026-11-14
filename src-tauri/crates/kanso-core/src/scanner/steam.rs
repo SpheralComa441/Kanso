@@ -2,7 +2,7 @@ use crate::cleaner::{clean_game_title, is_placeholder_title};
 use crate::i18n::T;
 use crate::models::{DetectedGame, GamePlatform, SourceScanOutput};
 use crate::vdf::{parse_vdf, VdfValue};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -280,7 +280,92 @@ pub fn scan_steam_from_root(steam_root: &Path) -> SourceScanOutput {
         }
     }
 
+    // Hours played and last session, straight from the Steam client's own records
+    let play_stats = read_steam_play_stats(steam_root);
+    for game in &mut output.games {
+        let Some(stats) = game
+            .platform_app_id
+            .as_deref()
+            .and_then(|appid| play_stats.get(appid))
+        else {
+            continue;
+        };
+        game.playtime_minutes = Some(stats.playtime_minutes);
+        if stats.last_played_secs > 0 {
+            game.last_played_at = Some(stats.last_played_secs.saturating_mul(1000));
+        }
+    }
+
     output
+}
+
+/// What the Steam client recorded about one app for an account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SteamPlayStats {
+    pub playtime_minutes: u32,
+    /// Unix time of the last session, `0` when never played.
+    pub last_played_secs: u64,
+}
+
+/// Parses a Steam `localconfig.vdf`: under `UserLocalConfigStore/Software/Valve/Steam/apps`
+/// every app the account owns has `Playtime` (minutes) and `LastPlayed` (Unix seconds).
+pub fn parse_local_config_play_stats(content: &str) -> HashMap<String, SteamPlayStats> {
+    let Ok(root) = parse_vdf(content) else {
+        return HashMap::new();
+    };
+    let apps = ["UserLocalConfigStore", "Software", "Valve", "Steam", "apps"]
+        .into_iter()
+        .try_fold(&root, |section, key| section.get_section(key));
+    let Some(apps) = apps else {
+        return HashMap::new();
+    };
+
+    apps.entries
+        .iter()
+        .filter_map(|(appid, value)| {
+            let VdfValue::Section(app) = value else {
+                return None;
+            };
+            let number = |key: &str| app.get_str(key).and_then(|raw| raw.trim().parse::<u64>().ok());
+            let playtime = number("Playtime");
+            let last_played = number("LastPlayed");
+            if playtime.is_none() && last_played.is_none() {
+                return None;
+            }
+            Some((
+                appid.trim().to_string(),
+                SteamPlayStats {
+                    playtime_minutes: u32::try_from(playtime.unwrap_or(0)).unwrap_or(u32::MAX),
+                    last_played_secs: last_played.unwrap_or(0),
+                },
+            ))
+        })
+        .collect()
+}
+
+/// Play statistics by appid for the Steam account used most recently on this PC.
+///
+/// Steam keeps them in `userdata/<account>/config/localconfig.vdf`, so they are available
+/// without signing in anywhere, and they include time played before Kanso was installed or
+/// outside of it. Empty when the file is missing or unreadable.
+pub fn read_steam_play_stats(steam_root: &Path) -> HashMap<String, SteamPlayStats> {
+    let Ok(accounts) = fs::read_dir(steam_root.join("userdata")) else {
+        return HashMap::new();
+    };
+    let newest = accounts
+        .flatten()
+        .map(|account| account.path().join("config").join("localconfig.vdf"))
+        .filter_map(|path| {
+            let modified = fs::metadata(&path).ok()?.modified().ok()?;
+            Some((modified, path))
+        })
+        .max_by_key(|(modified, _)| *modified);
+
+    newest
+        .and_then(|(_, path)| fs::read(path).ok())
+        // Friend names and the like are not always valid UTF-8
+        .map(|bytes| parse_local_config_play_stats(&String::from_utf8_lossy(&bytes)))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -461,5 +546,109 @@ mod tests {
         let ids: HashSet<_> = scan.games.iter().map(|g| g.id.as_str()).collect();
         assert!(ids.contains("steam:1091500"));
         assert!(ids.contains("steam:1245620"));
+    }
+
+    const LOCAL_CONFIG: &str = r#"
+"UserLocalConfigStore"
+{
+	"friends"
+	{
+		"PersonaName"		"Quote \" and brace } in a name"
+	}
+	"Software"
+	{
+		"Valve"
+		{
+			"Steam"
+			{
+				"apps"
+				{
+					"1321440"
+					{
+						"LastPlayed"		"1731000000"
+						"Playtime"		"754"
+						"cloud"
+						{
+							"last_sync_state"		"synchronized"
+						}
+					}
+					"1145360"
+					{
+						"LastPlayed"		"1700000000"
+						"Playtime2wks"		"12"
+					}
+					"413150"
+					{
+						"cloud"
+						{
+							"quota_bytes"		"1000"
+						}
+					}
+				}
+			}
+		}
+	}
+}
+"#;
+
+    #[test]
+    fn reads_playtime_and_last_session_from_the_steam_local_config() {
+        let stats = parse_local_config_play_stats(LOCAL_CONFIG);
+        assert_eq!(
+            stats.get("1321440"),
+            Some(&SteamPlayStats { playtime_minutes: 754, last_played_secs: 1_731_000_000 })
+        );
+        // Played, but Steam wrote no total: counted as zero minutes rather than dropped
+        assert_eq!(
+            stats.get("1145360"),
+            Some(&SteamPlayStats { playtime_minutes: 0, last_played_secs: 1_700_000_000 })
+        );
+        assert!(!stats.contains_key("413150"), "an app with no play data says nothing");
+
+        // The key casing differs between Steam versions
+        let lower = LOCAL_CONFIG.replace("\"Software\"", "\"software\"").replace("\"apps\"", "\"Apps\"");
+        assert_eq!(parse_local_config_play_stats(&lower).len(), 2);
+
+        assert!(parse_local_config_play_stats("not a vdf {").is_empty());
+        assert!(parse_local_config_play_stats("\"Other\" { }").is_empty());
+    }
+
+    #[test]
+    fn scan_attaches_the_play_stats_of_the_most_recent_steam_account() {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let steamapps = root.join("steamapps");
+        fs::create_dir_all(steamapps.join("common").join("CassetteBeasts")).unwrap();
+        fs::create_dir_all(steamapps.join("common").join("Hades")).unwrap();
+        let manifest = |appid: &str, name: &str, dir: &str| {
+            format!("\"AppState\"\n{{\n\t\"appid\"\t\"{appid}\"\n\t\"name\"\t\"{name}\"\n\t\"installdir\"\t\"{dir}\"\n}}\n")
+        };
+        fs::write(steamapps.join("appmanifest_1321440.acf"), manifest("1321440", "Cassette Beasts", "CassetteBeasts")).unwrap();
+        fs::write(steamapps.join("appmanifest_1145360.acf"), manifest("1145360", "Hades", "Hades")).unwrap();
+
+        // No userdata at all: the scan still works, without play data
+        let bare = scan_steam_from_root(root);
+        assert_eq!(bare.games.len(), 2);
+        assert!(bare.games.iter().all(|g| g.playtime_minutes.is_none() && g.last_played_at.is_none()));
+
+        // Two accounts: an old one, and the one used last
+        let old_account = root.join("userdata").join("111").join("config");
+        let current_account = root.join("userdata").join("222").join("config");
+        fs::create_dir_all(&old_account).unwrap();
+        fs::create_dir_all(&current_account).unwrap();
+        fs::write(old_account.join("localconfig.vdf"), LOCAL_CONFIG.replace("\"754\"", "\"9999\"")).unwrap();
+        let old_file = fs::File::open(old_account.join("localconfig.vdf")).unwrap();
+        old_file
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(86_400))
+            .unwrap();
+        fs::write(current_account.join("localconfig.vdf"), LOCAL_CONFIG).unwrap();
+
+        let scanned = scan_steam_from_root(root);
+        let cassette = scanned.games.iter().find(|g| g.id == "steam:1321440").unwrap();
+        assert_eq!(cassette.playtime_minutes, Some(754));
+        assert_eq!(cassette.last_played_at, Some(1_731_000_000_000), "stored in milliseconds");
+        let hades = scanned.games.iter().find(|g| g.id == "steam:1145360").unwrap();
+        assert_eq!(hades.playtime_minutes, Some(0));
+        assert_eq!(hades.last_played_at, Some(1_700_000_000_000));
     }
 }

@@ -51,9 +51,14 @@ impl LibraryStore {
                 scanned.is_hidden = cached.is_hidden;
                 scanned.metadata_synced = cached.metadata_synced;
                 scanned.metadata_attempted_at = cached.metadata_attempted_at;
-                scanned.last_played_at = cached.last_played_at;
+                // The scan brings what the game's client recorded (Steam); a launch from
+                // Kanso may be more recent than that
+                scanned.last_played_at = scanned.last_played_at.max(cached.last_played_at);
+                scanned.playtime_minutes = scanned.playtime_minutes.or(cached.playtime_minutes);
                 scanned.play_count = cached.play_count;
                 scanned.metadata_lang = cached.metadata_lang.clone();
+                scanned.tags = cached.tags.clone();
+                scanned.tags_lang = cached.tags_lang.clone();
                 scanned.custom_override = cached.custom_override;
                 scanned.updated_at = cached.updated_at;
 
@@ -121,6 +126,7 @@ impl LibraryStore {
         // User-owned state may have changed while the HTTP requests were in flight
         enriched.is_favorite = existing.is_favorite;
         enriched.last_played_at = existing.last_played_at;
+        enriched.playtime_minutes = existing.playtime_minutes;
         enriched.play_count = existing.play_count;
         enriched.is_hidden = existing.is_hidden || auto_hide;
         self.upsert_game(enriched.clone());
@@ -481,6 +487,36 @@ mod tests {
         assert!(merged.is_hidden);
         assert_eq!(merged.play_count, 2);
         assert_eq!(merged.last_played_at, Some(2_000));
+
+        // Steam's own record of the game arrives with a scan: its playtime is taken, and the
+        // later of the two "last played" times wins
+        let mut from_steam = scanned_steam("1091500", "Cyberpunk 2077", false);
+        from_steam.playtime_minutes = Some(754);
+        from_steam.last_played_at = Some(1_500);
+        let merged = rescan(&mut store, from_steam);
+        assert_eq!(merged.playtime_minutes, Some(754));
+        assert_eq!(merged.last_played_at, Some(2_000), "the launch from Kanso is more recent");
+
+        let mut from_steam = scanned_steam("1091500", "Cyberpunk 2077", false);
+        from_steam.playtime_minutes = Some(800);
+        from_steam.last_played_at = Some(9_000);
+        let merged = rescan(&mut store, from_steam);
+        assert_eq!(merged.playtime_minutes, Some(800));
+        assert_eq!(merged.last_played_at, Some(9_000), "played from Steam since then");
+
+        // Tags found by a sync survive rescans; a scan without Steam's records (the file
+        // could not be read this time) does not forget the playtime
+        let mut synced = store.games[0].clone();
+        synced.tags = vec!["Mondo aperto".to_string(), "Cyberpunk".to_string()];
+        synced.tags_lang = Some("it".to_string());
+        synced.playtime_minutes = None;
+        let committed = store.commit_enriched_game(synced, false).unwrap();
+        assert_eq!(committed.playtime_minutes, Some(800), "playtime belongs to the scan");
+        let merged = rescan(&mut store, scanned_steam("1091500", "Cyberpunk 2077", false));
+        assert_eq!(merged.tags, vec!["Mondo aperto", "Cyberpunk"]);
+        assert_eq!(merged.tags_lang.as_deref(), Some("it"));
+        assert_eq!(merged.playtime_minutes, Some(800));
+        assert_eq!(merged.last_played_at, Some(9_000));
 
         // The user shows it again while another sync is in flight: stays visible...
         let in_flight = store.games[0].clone();

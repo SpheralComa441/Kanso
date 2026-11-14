@@ -124,7 +124,8 @@ pub struct DetectedGame {
     /// When automatic metadata lookup was last attempted (ms); `0` = never. Drives retry back-off.
     #[serde(default)]
     pub metadata_attempted_at: u64,
-    /// When the game was last launched from Kanso (ms).
+    /// When the game was last played (ms): the latest between a launch from Kanso and what
+    /// the game's own client recorded (Steam).
     #[serde(default)]
     pub last_played_at: Option<u64>,
     /// How many times the game was launched from Kanso.
@@ -133,6 +134,16 @@ pub struct DetectedGame {
     /// Language (`it`, `en`, ...) the cached description and genres were fetched in.
     #[serde(default)]
     pub metadata_lang: Option<String>,
+    /// Steam community tags ("Souls-like", "Co-op online", ...), most relevant first.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Language the tags were fetched in; `None` until a lookup got an answer (even an empty one).
+    #[serde(default)]
+    pub tags_lang: Option<String>,
+    /// Total playtime in minutes as recorded by the game's own client (Steam); `None` when
+    /// unknown.
+    #[serde(default)]
+    pub playtime_minutes: Option<u32>,
     /// Last metadata/cover update timestamp in ms (also used for UI image cache busting).
     #[serde(default)]
     pub updated_at: u64,
@@ -174,6 +185,9 @@ impl DetectedGame {
             last_played_at: None,
             play_count: 0,
             metadata_lang: None,
+            tags: Vec::new(),
+            tags_lang: None,
+            playtime_minutes: None,
             updated_at: now_timestamp_ms(),
         }
     }

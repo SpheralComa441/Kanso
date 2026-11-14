@@ -3,9 +3,11 @@ use crate::i18n::{Lang, T};
 use crate::models::{now_timestamp_ms, DetectedGame, GamePlatform, SgdbGameMatch};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 const DEFAULT_SGDB_BASE_URL: &str = "https://www.steamgriddb.com/api/v2";
@@ -48,6 +50,9 @@ pub struct EnrichOutcome {
     pub warning: Option<String>,
 }
 
+/// How many of a game's Steam community tags are kept, most relevant first.
+const MAX_GAME_TAGS: usize = 15;
+
 /// How long to wait before automatically retrying a game whose metadata is still incomplete.
 pub const METADATA_RETRY_INTERVAL_MS: u64 = 24 * 60 * 60 * 1000;
 
@@ -64,8 +69,8 @@ const NON_GAME_APP_TYPES: &[&str] = &[
 
 /// `true` while automatic lookup still has something to find for `game`: a cover (Steam games
 /// can always get Steam's own artwork, other stores need a SteamGridDB key), description and
-/// genres, the official name behind a provisional title, the store type of a Steam app, or
-/// texts cached in a language other than `lang`. Hidden games are left alone.
+/// genres, the official name behind a provisional title, the store type of a Steam app, its
+/// community tags, or texts cached in a language other than `lang`. Hidden games are left alone.
 pub fn needs_metadata(game: &DetectedGame, has_api_key: bool, lang: Lang) -> bool {
     if game.is_hidden {
         return false;
@@ -77,6 +82,7 @@ pub fn needs_metadata(game: &DetectedGame, has_api_key: bool, lang: Lang) -> boo
         || missing_details
         || game.title_provisional
         || steam_type_unknown
+        || needs_tags(game, lang)
         || needs_translation(game, lang)
 }
 
@@ -108,6 +114,11 @@ fn needs_translation(game: &DetectedGame, lang: Lang) -> bool {
     !game.custom_override
         && (game.short_description.is_some() || !game.genres.is_empty())
         && game.metadata_lang.as_deref() != Some(lang.code())
+}
+
+/// Tags were never fetched, or are in another language.
+fn needs_tags(game: &DetectedGame, lang: Lang) -> bool {
+    game.tags_lang.as_deref() != Some(lang.code())
 }
 
 fn steam_appid_of(game: &DetectedGame) -> Option<&str> {
@@ -146,8 +157,11 @@ pub struct MetadataClient {
     steam_community_base_url: String,
     steam_api_base_url: String,
     steam_assets_base_url: String,
-    /// Language descriptions and genres are requested in.
+    /// Language descriptions, genres and tags are requested in.
     lang: Lang,
+    /// Names of Steam's community tags in `lang`, fetched once on first use (`None` inside:
+    /// the list could not be loaded).
+    tag_names: Arc<OnceLock<Option<HashMap<u64, String>>>>,
     agent: ureq::Agent,
 }
 
@@ -190,6 +204,7 @@ impl MetadataClient {
             steam_store_base_url,
             steam_community_base_url: steam_community_base_url.trim_end_matches('/').to_string(),
             lang: Lang::It,
+            tag_names: Arc::default(),
             agent,
         }
     }
@@ -197,6 +212,7 @@ impl MetadataClient {
     /// Requests descriptions and genres in `lang` from now on.
     pub fn with_language(mut self, lang: Lang) -> Self {
         self.lang = lang;
+        self.tag_names = Arc::default();
         self
     }
 
@@ -460,24 +476,9 @@ impl MetadataClient {
     /// `.../library_600x900.jpg` URL answers 404 for them.
     pub fn fetch_steam_artwork(&self, steam_appid: &str) -> Option<SteamArtwork> {
         let appid: u64 = steam_appid.trim().parse().ok()?;
-        let input = serde_json::json!({
-            "ids": [{ "appid": appid }],
-            "context": { "language": self.lang.steam_language(), "country_code": "US" },
-            "data_request": { "include_assets": true },
-        });
-        let url = format!(
-            "{}/IStoreBrowseService/GetItems/v1/?input_json={}",
-            self.steam_api_base_url,
-            percent_encode_path_segment(&input.to_string())
-        );
-
-        let root: Value = self.agent.get(&url).call().ok()?.into_json().ok()?;
-        let item = root
-            .get("response")?
-            .get("store_items")?
-            .as_array()?
-            .iter()
-            .find(|item| item.get("appid").and_then(Value::as_u64) == Some(appid))?;
+        let item = self
+            .fetch_steam_store_item(appid, serde_json::json!({ "include_assets": true }))
+            .ok()??;
         let assets = item.get("assets")?;
         // e.g. "steam/apps/3883570/${FILENAME}?t=1792307731"
         let url_format = assets.get("asset_url_format")?.as_str()?;
@@ -502,6 +503,107 @@ impl MetadataClient {
             header_url: asset_url("header"),
         };
         (artwork != SteamArtwork::default()).then_some(artwork)
+    }
+
+    /// One app as Steam's public store service describes it, with the parts `data_request`
+    /// asks for. `Ok(None)`: the service answered and has no such (visible) app. `Err`: it
+    /// could not be asked.
+    fn fetch_steam_store_item(&self, appid: u64, data_request: Value) -> Result<Option<Value>, ()> {
+        let input = serde_json::json!({
+            "ids": [{ "appid": appid }],
+            "context": { "language": self.lang.steam_language(), "country_code": "US" },
+            "data_request": data_request,
+        });
+        let url = format!(
+            "{}/IStoreBrowseService/GetItems/v1/?input_json={}",
+            self.steam_api_base_url,
+            percent_encode_path_segment(&input.to_string())
+        );
+        let root: Value = self
+            .agent
+            .get(&url)
+            .call()
+            .map_err(|_| ())?
+            .into_json()
+            .map_err(|_| ())?;
+        let items = root
+            .get("response")
+            .and_then(|response| response.get("store_items"))
+            .and_then(Value::as_array);
+        // An app the store does not show comes back as a stub with `appid: 0`
+        Ok(items.and_then(|items| {
+            items
+                .iter()
+                .find(|item| item.get("appid").and_then(Value::as_u64) == Some(appid))
+                .cloned()
+        }))
+    }
+
+    /// Names of Steam's community tags in the client's language, by tag id.
+    fn steam_tag_names(&self) -> Option<&HashMap<u64, String>> {
+        self.tag_names
+            .get_or_init(|| {
+                let url = format!(
+                    "{}/tagdata/populartags/{}",
+                    self.steam_store_base_url,
+                    self.lang.steam_language()
+                );
+                let list: Vec<Value> = self.agent.get(&url).call().ok()?.into_json().ok()?;
+                let names: HashMap<u64, String> = list
+                    .iter()
+                    .filter_map(|tag| {
+                        let id = tag.get("tagid")?.as_u64()?;
+                        let name = tag.get("name")?.as_str()?.trim();
+                        (!name.is_empty()).then(|| (id, name.to_string()))
+                    })
+                    .collect();
+                (!names.is_empty()).then_some(names)
+            })
+            .as_ref()
+    }
+
+    /// The community tags Steam users gave an app ("Souls-like", "Party Game", "Co-op", ...),
+    /// most relevant first, in the client's language. These are what the store's own genres
+    /// lack. An empty list: the app has none; `None`: Steam could not be asked.
+    pub fn fetch_steam_tags(&self, steam_appid: &str) -> Option<Vec<String>> {
+        let appid: u64 = steam_appid.trim().parse().ok()?;
+        let names = self.steam_tag_names()?;
+        let Some(item) = self
+            .fetch_steam_store_item(
+                appid,
+                serde_json::json!({ "include_tag_count": MAX_GAME_TAGS }),
+            )
+            .ok()?
+        else {
+            return Some(Vec::new());
+        };
+
+        let mut weighted: Vec<(u64, u64)> = item
+            .get("tags")
+            .and_then(Value::as_array)
+            .map(|tags| {
+                tags.iter()
+                    .filter_map(|tag| {
+                        let id = tag.get("tagid")?.as_u64()?;
+                        Some((id, tag.get("weight").and_then(Value::as_u64).unwrap_or(0)))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        weighted.sort_by_key(|&(_, weight)| std::cmp::Reverse(weight));
+
+        let mut tags: Vec<String> = Vec::new();
+        for (id, _) in weighted {
+            if let Some(name) = names.get(&id) {
+                if !tags.iter().any(|known| known.eq_ignore_ascii_case(name)) {
+                    tags.push(name.clone());
+                }
+            }
+            if tags.len() == MAX_GAME_TAGS {
+                break;
+            }
+        }
+        Some(tags)
     }
 
     fn fetch_best_grid_url(
@@ -688,6 +790,9 @@ impl MetadataClient {
         let mut needs_title = game.title_provisional && steam_appid.is_some();
         let type_unknown = steam_appid.is_some() && game.app_type.is_none();
         let translate = needs_translation(game, self.lang);
+        // What step 1 learns about the Steam store page of a non-Steam game: its appid, that
+        // there is none (`Ok(None)`), or that the store could not be asked (`Err`)
+        let mut store_app: Option<Result<Option<String>, ()>> = None;
 
         // 1. Official name, type, description & genres via the public Steam Store API. Runs
         //    before the cover lookup so a freshly resolved title also drives SteamGridDB's
@@ -700,6 +805,7 @@ impl MetadataClient {
         {
             match self.lookup_steam_store(steam_appid.as_deref(), &game.clean_title) {
                 SteamStoreLookup::Found(meta) => {
+                    store_app = Some(Ok(Some(meta.steam_appid.clone())));
                     if needs_title
                         && meta.name.as_deref().is_some_and(|n| apply_resolved_title(game, n))
                     {
@@ -738,6 +844,7 @@ impl MetadataClient {
                     }
                 }
                 SteamStoreLookup::NotListed => {
+                    store_app = Some(Ok(None));
                     if type_unknown {
                         game.app_type = Some("unlisted".to_string());
                     }
@@ -746,7 +853,7 @@ impl MetadataClient {
                         game.metadata_lang = Some(lang_code.to_string());
                     }
                 }
-                SteamStoreLookup::Unavailable => {}
+                SteamStoreLookup::Unavailable => store_app = Some(Err(())),
             }
         }
 
@@ -826,8 +933,31 @@ impl MetadataClient {
             }
         }
 
-        // Compare ignoring the bookkeeping fields this function always touches
-        outcome.changed = *game != before;
+        // 4. Community tags, never fetched or in another language. A Steam game is asked by its
+        //    appid; any other game by the store page that matched its title.
+        if !game.is_hidden && needs_tags(game, self.lang) {
+            let tag_app = match (&steam_appid, store_app) {
+                (Some(appid), _) => Ok(Some(appid.clone())),
+                (None, Some(known)) => known,
+                (None, None) => self.search_steam_store_appid(&game.clean_title),
+            };
+            let tags = match tag_app {
+                Ok(Some(appid)) => self.fetch_steam_tags(&appid),
+                Ok(None) => Some(Vec::new()),
+                Err(()) => None,
+            };
+            // An answer, even an empty one, settles the matter; no answer is retried later
+            if let Some(tags) = tags {
+                game.tags = tags;
+                game.tags_lang = Some(lang_code.to_string());
+            }
+        }
+
+        // Compare ignoring bookkeeping: the fields this function always touches, and the note
+        // that the tags were looked up
+        let mut comparable = game.clone();
+        comparable.tags_lang = before.tags_lang.clone();
+        outcome.changed = comparable != before;
         let now = now_timestamp_ms();
         game.metadata_synced = true;
         game.metadata_attempted_at = now;
@@ -1177,6 +1307,38 @@ mod tests {
                             "application/json",
                             r#"{"2344520":{"success":true,"data":{"short_description":"Action RPG oscuro a Sanctuarium.","genres":[{"id":"1","description":"Azione"},{"id":"3","description":"GDR"}]}}}"#.as_bytes().to_vec(),
                         )
+                    } else if path.starts_with("/tagdata/populartags/english") {
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"[{"tagid":29482,"name":"Souls-like"},{"tagid":4325,"name":"Turn-Based Combat"},{"tagid":122,"name":"RPG"},{"tagid":7178,"name":"Party Game"}]"#.to_vec(),
+                        )
+                    } else if path.starts_with("/tagdata/populartags/") {
+                        (
+                            "200 OK",
+                            "application/json",
+                            r#"[{"tagid":29482,"name":"Stile Souls"},{"tagid":4325,"name":"Combattimento a turni"},{"tagid":122,"name":"GDR"},{"tagid":7178,"name":"Giochi di società"}]"#.as_bytes().to_vec(),
+                        )
+                    } else if path.starts_with("/IStoreBrowseService/GetItems/v1/") && path.contains("1321440") {
+                        // Out of order, with a tag Steam has no name for and a repeated one
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"response":{"store_items":[{"appid":1321440,"success":1,"tags":[{"tagid":122,"weight":500},{"tagid":999999,"weight":900},{"tagid":4325,"weight":501},{"tagid":122,"weight":100}]}]}}"#.to_vec(),
+                        )
+                    } else if path.starts_with("/IStoreBrowseService/GetItems/v1/") && path.contains("2344520") {
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"response":{"store_items":[{"appid":2344520,"success":1,"tags":[{"tagid":122,"weight":300},{"tagid":7178,"weight":20}]}]}}"#.to_vec(),
+                        )
+                    } else if path.starts_with("/IStoreBrowseService/GetItems/v1/") {
+                        // An app the store does not show: the real service answers with a stub
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"response":{"store_items":[{"item_type":0,"id":1,"success":15,"visible":false,"name":"","appid":0}]}}"#.to_vec(),
+                        )
                     } else {
                         ("404 Not Found", "application/json", b"{}".to_vec())
                     };
@@ -1447,6 +1609,7 @@ mod tests {
         game.short_description = Some("Descrizione.".to_string());
         game.genres = vec!["Azione".to_string()];
         game.metadata_lang = Some("it".to_string());
+        game.tags_lang = Some("it".to_string());
         game
     }
 
@@ -1561,10 +1724,12 @@ mod tests {
         game.metadata_attempted_at = now - METADATA_RETRY_INTERVAL_MS;
         assert!(is_metadata_sync_due(&game, false, Lang::It, now, false), "a day has passed");
 
-        // Complete: description and genres present, cover only matters with an API key
+        // Complete: description, genres and tags present, cover only matters with an API key
         game.short_description = Some("Descrizione.".to_string());
         game.genres = vec!["Indie".to_string()];
         game.metadata_lang = Some("it".to_string());
+        assert!(is_metadata_sync_due(&game, false, Lang::It, now, true), "tags never looked up");
+        game.tags_lang = Some("it".to_string());
         assert!(!is_metadata_sync_due(&game, false, Lang::It, now, true));
         assert!(is_metadata_sync_due(&game, true, Lang::It, now, true), "cover missing, key present");
 
@@ -1669,8 +1834,93 @@ mod tests {
         edited.cover_path = Some(cover.to_string_lossy().to_string());
         edited.custom_override = true;
         edited.short_description = Some("La mia descrizione.".to_string());
-        assert!(!needs_metadata(&edited, false, Lang::En));
+        // Only the tags, which nobody writes by hand, follow the language
+        assert!(needs_metadata(&edited, false, Lang::En));
         english.enrich_game_automatically(&mut edited, None, covers_dir.path());
         assert_eq!(edited.short_description.as_deref(), Some("La mia descrizione."));
+        assert_eq!(edited.genres, vec!["Azione"]);
+        assert_eq!(edited.tags, vec!["Turn-Based Combat", "RPG"]);
+        assert!(!needs_metadata(&edited, false, Lang::En));
+    }
+
+    #[test]
+    fn steam_tags_are_ranked_named_in_the_interface_language_and_follow_it() {
+        let (base_url, _recorded) = spawn_mock_api_server();
+        let covers_dir = tempdir().unwrap();
+        let cover = covers_dir.path().join("steam_1321440.png");
+        fs::write(&cover, b"png").unwrap();
+
+        let mut game = bare_steam_game("1321440", "Cassette Beasts");
+        game.cover_path = Some(cover.to_string_lossy().to_string());
+        game.tags_lang = None;
+        assert!(needs_metadata(&game, false, Lang::It), "tags were never fetched");
+
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let outcome = client.enrich_game_automatically(&mut game, None, covers_dir.path());
+        assert!(outcome.changed);
+        // By weight; the tag without a name and the repeated one are dropped
+        assert_eq!(game.tags, vec!["Combattimento a turni", "GDR"]);
+        assert_eq!(game.tags_lang.as_deref(), Some("it"));
+        assert!(!needs_metadata(&game, false, Lang::It));
+
+        // Another interface language: the tags are fetched again in it
+        assert!(needs_metadata(&game, false, Lang::En));
+        let english = MetadataClient::with_base_urls(&base_url, &base_url, &base_url)
+            .with_language(Lang::En);
+        english.enrich_game_automatically(&mut game, None, covers_dir.path());
+        assert_eq!(game.tags, vec!["Turn-Based Combat", "RPG"]);
+        assert_eq!(game.tags_lang.as_deref(), Some("en"));
+        assert!(!needs_metadata(&game, false, Lang::En));
+    }
+
+    #[test]
+    fn games_from_other_stores_get_the_tags_of_their_steam_store_page() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let covers_dir = tempdir().unwrap();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+
+        // Description and genres already cached: only the tags are missing
+        let mut diablo = DetectedGame::new_detected(
+            "battlenet:diablo4".to_string(),
+            "Diablo IV".to_string(),
+            "Diablo IV".to_string(),
+            GamePlatform::BattleNet,
+            Some("Diablo IV".to_string()),
+            r"C:\Games\Diablo IV".to_string(),
+            None,
+            None,
+        );
+        diablo.short_description = Some("Action RPG.".to_string());
+        diablo.genres = vec!["Azione".to_string()];
+        diablo.metadata_lang = Some("it".to_string());
+
+        client.enrich_game_automatically(&mut diablo, None, covers_dir.path());
+        assert_eq!(diablo.tags, vec!["GDR", "Giochi di società"]);
+        assert_eq!(diablo.tags_lang.as_deref(), Some("it"));
+        let paths = recorded.lock().unwrap().clone();
+        assert!(paths.iter().any(|p| p.starts_with("/actions/SearchApps/")), "{paths:?}");
+        assert!(
+            !paths.iter().any(|p| p.starts_with("/api/appdetails")),
+            "the cached texts are not fetched again: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn tags_stay_pending_while_steam_cannot_be_reached() {
+        let covers_dir = tempdir().unwrap();
+        let cover = covers_dir.path().join("steam_1.png");
+        fs::write(&cover, b"png").unwrap();
+        let mut game = bare_steam_game("1", "Offline");
+        game.cover_path = Some(cover.to_string_lossy().to_string());
+        game.tags_lang = None;
+
+        // Nothing listens here
+        let offline = "http://127.0.0.1:9";
+        let client = MetadataClient::with_base_urls(offline, offline, offline);
+        let outcome = client.enrich_game_automatically(&mut game, None, covers_dir.path());
+        assert!(!outcome.changed);
+        assert!(game.tags.is_empty());
+        assert_eq!(game.tags_lang, None, "asked again at the next retry");
+        assert!(needs_metadata(&game, false, Lang::It));
     }
 }
