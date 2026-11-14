@@ -1,4 +1,4 @@
-export type GamePlatform = "steam" | "epic" | "standalone";
+export type GamePlatform = "steam" | "epic" | "Battle.net" | "standalone";
 
 export interface DetectedGame {
   id: string;
@@ -9,12 +9,38 @@ export interface DetectedGame {
   installDir: string;
   executablePath: string | null;
   launchUri: string | null;
+  steamgriddbId: number | null;
+  coverPath: string | null;
+  shortDescription: string | null;
+  genres: string[];
+  isFavorite: boolean;
+  metadataSynced: boolean;
+  customOverride: boolean;
+  updatedAt: number;
+}
+
+export interface SgdbGameMatch {
+  id: number;
+  name: string;
+  releaseYear: number | null;
+  verified: boolean;
+  types: string[];
+}
+
+export interface GameManualUpdate {
+  id: string;
+  title: string;
+  executablePath: string | null;
+  shortDescription: string | null;
+  genres: string[];
+  isFavorite?: boolean;
 }
 
 export interface ScanReport {
   games: DetectedGame[];
   steamCount: number;
   epicCount: number;
+  battlenetCount: number;
   standaloneCount: number;
   warnings: string[];
 }

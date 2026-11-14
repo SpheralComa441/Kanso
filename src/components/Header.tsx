@@ -1,7 +1,8 @@
-import { RefreshCw, Search, Settings } from "lucide-react";
+import { LayoutGrid, List, RefreshCw, Search, Settings } from "lucide-react";
 import type { GamePlatform } from "../types/game";
 
 export type PlatformFilter = "all" | GamePlatform;
+export type ViewMode = "grid" | "list";
 
 interface HeaderProps {
   totalGames: number;
@@ -9,7 +10,10 @@ interface HeaderProps {
   onSearchChange: (value: string) => void;
   platformFilter: PlatformFilter;
   onPlatformFilterChange: (filter: PlatformFilter) => void;
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
   isScanning: boolean;
+  isSyncingMetadata: boolean;
   hasApiKey: boolean;
   onScan: () => void;
   onOpenSettings: () => void;
@@ -19,6 +23,7 @@ const FILTER_OPTIONS: { value: PlatformFilter; label: string }[] = [
   { value: "all", label: "Tutti" },
   { value: "steam", label: "Steam" },
   { value: "epic", label: "Epic" },
+  { value: "Battle.net", label: "Battle.net" },
   { value: "standalone", label: "Locale" },
 ];
 
@@ -28,7 +33,10 @@ export function Header({
   onSearchChange,
   platformFilter,
   onPlatformFilterChange,
+  viewMode,
+  onViewModeChange,
   isScanning,
+  isSyncingMetadata,
   hasApiKey,
   onScan,
   onOpenSettings,
@@ -51,11 +59,17 @@ export function Header({
             <span className="rounded-md border border-oled-border bg-oled-surface px-2 py-0.5 text-xs font-medium tabular-nums text-zinc-400">
               {totalGames} {totalGames === 1 ? "gioco" : "giochi"}
             </span>
+            {isSyncingMetadata && (
+              <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-zinc-400">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                Sincronizzazione metadata...
+              </span>
+            )}
           </div>
         </div>
 
         {/* Instant search + quick platform filters */}
-        <div className="flex flex-1 items-center justify-center gap-3 min-w-[260px] max-w-xl">
+        <div className="flex flex-1 items-center justify-center gap-3 min-w-[260px] max-w-2xl">
           <div className="relative flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
             <input
@@ -70,7 +84,7 @@ export function Header({
 
           <nav
             aria-label="Filtro piattaforma"
-            className="hidden sm:flex items-center rounded-lg border border-oled-border bg-oled-surface p-0.5"
+            className="hidden lg:flex items-center rounded-lg border border-oled-border bg-oled-surface p-0.5"
           >
             {FILTER_OPTIONS.map((opt) => {
               const active = platformFilter === opt.value;
@@ -95,6 +109,39 @@ export function Header({
 
         {/* Actions */}
         <div className="flex items-center gap-2">
+          <div
+            role="group"
+            aria-label="Modalità vista"
+            className="flex items-center rounded-lg border border-oled-border bg-oled-surface p-0.5"
+          >
+            <button
+              id="view-mode-grid"
+              type="button"
+              onClick={() => onViewModeChange("grid")}
+              title="Vista griglia copertine"
+              className={`rounded-md p-1.5 transition-colors ${
+                viewMode === "grid"
+                  ? "bg-oled-elevated text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              id="view-mode-list"
+              type="button"
+              onClick={() => onViewModeChange("list")}
+              title="Vista elenco dettagliato"
+              className={`rounded-md p-1.5 transition-colors ${
+                viewMode === "list"
+                  ? "bg-oled-elevated text-zinc-100"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <List className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
           <button
             id="scan-library-button"
             type="button"

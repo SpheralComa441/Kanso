@@ -2,11 +2,12 @@
 name = "kanso-core"
 version = "0.1.0"
 edition = "2021"
-description = "Core game discovery parsers, title cleaner, and local configuration for Kanso"
+description = "Core game discovery parsers, metadata clients, title cleaner, and local store for Kanso"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+ureq = { version = "2.12", features = ["json"] }
 walkdir = "2.5"
 
 [target.'cfg(target_os = "windows")'.dependencies]

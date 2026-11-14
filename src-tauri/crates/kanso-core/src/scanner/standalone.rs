@@ -141,17 +141,18 @@ pub fn scan_custom_folders(
             );
 
             let id = format!("standalone:{:016x}", fnv1a_64(exe_key.as_bytes()));
+            let clean = clean_game_title(&title);
 
-            output.games.push(DetectedGame {
+            output.games.push(DetectedGame::new_detected(
                 id,
-                clean_title: clean_game_title(&title),
                 title,
-                platform: GamePlatform::Standalone,
-                platform_app_id: None,
-                install_dir: install_dir.to_string_lossy().to_string(),
-                executable_path: Some(exe_str),
-                launch_uri: None,
-            });
+                clean,
+                GamePlatform::Standalone,
+                None,
+                install_dir.to_string_lossy().to_string(),
+                Some(exe_str),
+                None,
+            ));
         }
     }
 
