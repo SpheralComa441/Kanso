@@ -5,47 +5,74 @@
 - **Obiettivo:** Creare un'applicazione desktop per Windows leggera, veloce e minimalista che unifichi tutti i videogiochi installati sul PC in un'unica libreria, scaricando automaticamente copertine e metadata.
 - **Stack Tecnologico:**
   - **Framework:** Tauri v2 (Frontend in React + TypeScript + Tailwind CSS, Backend in Rust).
-  - **Database locale:** SQLite (`tauri-plugin-sql`) salvato nella directory AppData locale di Windows dell'utente.
-  - **Build & CI/CD:** Configura fin dallo Step 1 una GitHub Action (`.github/workflows/build-windows.yml`) su runner `windows-latest` che compili il binario Windows (`.exe` / `.msi`) ad ogni push su `main` e lo carichi come Artifact scaricabile.
+  - **Database locale:** SQLite gestito interamente dal backend Rust (`rusqlite`, file `library.db`) nella directory AppData locale di Windows dell'utente. È l'unica fonte di verità della libreria: nessuna copia in JSON o lato frontend. *(Step 4: sostituisce `tauri-plugin-sql` + `library.json`.)*
+  - **Build & CI/CD:** GitHub Action (`.github/workflows/build-windows.yml`) con due job: `checks` su `ubuntu-latest` (test del core, clippy, build frontend: feedback in pochi minuti) e `build-windows` su `windows-latest`, che compila il binario Windows (`.exe` / `.msi`) ad ogni push su `main` e lo carica come Artifact scaricabile.
 
 ## 2. Gestione Sicura della API Key
 - **Non utilizzare file `.env` committati nel repository.**
-- Crea una schermata/modale **Impostazioni** accessibile dall'header dell'app in cui l'utente può incollare la propria **SteamGridDB API Key** (salvata localmente nel database SQLite / `config.json` sul PC dell'utente).
+- Crea una schermata/modale **Impostazioni** accessibile dall'header dell'app in cui l'utente può incollare la propria **SteamGridDB API Key** (salvata localmente in `config.json` sul PC dell'utente, con scrittura atomica).
 - Se la chiave non è ancora stata inserita, mostra un banner discreto per configurarla, permettendo comunque la scansione e l'avvio dei giochi.
 
 ## 3. Funzionalità Core (Priorità)
 
 ### A. Auto-Discovery dei Giochi (Backend Rust)
 Implementa uno scanner per Windows che rilevi i giochi installati leggendo:
-1. **Steam:** Leggi il registro di sistema (`HKCU\Software\Valve\Steam` -> `SteamPath`) e `libraryfolders.vdf` per trovare tutte le librerie, poi parsa i file `appmanifest_*.acf` per estrarre `appid`, `name` e `installdir`.
+1. **Steam:** Leggi il registro di sistema (`HKCU\Software\Valve\Steam` -> `SteamPath`) e `libraryfolders.vdf` per trovare tutte le librerie, poi parsa i file `appmanifest_*.acf` per estrarre `appid`, `name` e `installdir`. Se `name` è il segnaposto `appid_<id>` che Steam scrive quando non ha ancora in cache le info dell'app, usa provvisoriamente il nome della cartella e risolvi il nome ufficiale durante la sync dei metadata.
 2. **Epic Games:** Leggi i file `.item` in `C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests` estraendo `DisplayName`, `InstallLocation` e `LaunchExecutable`.
-3. **Cartelle Custom / Standalone:** Permetti all'utente di aggiungere manualmente cartelle dalle Impostazioni. Scansiona gli `.exe` escludendo quelli che contengono `unins`, `crash`, `redist`, `dxsetup`, `vc_redist`, `launcher`.
-*Nota per il testing nel cloud:* Scrivi unit test in Rust con file `.acf` e `.item` mockati per verificare che il parser funzioni prima della build su GitHub Actions.
+3. **GOG:** `HKLM\SOFTWARE\WOW6432Node\GOG.com\Games\<gameID>` (`gameName`, `path`, `exe`; salta i DLC, che hanno `dependsOn`).
+4. **Ubisoft Connect:** chiavi `Uninstall\Uplay Install <id>` (`DisplayName`, `InstallLocation`) più `Ubisoft\Launcher\Installs`; avvio con `uplay://launch/<id>/0`.
+5. **EA app:** voci `Uninstall` con publisher Electronic Arts installate dall'installer EA (cartella `__Installer` o disinstallatore `EAInstaller`); eseguibile da `__Installer\installerdata.xml`.
+6. **Battle.net:** voci `Uninstall` di Blizzard/Activision, escluso il client.
+7. **Xbox app / PC Game Pass:** `<drive>:\XboxGames\<Gioco>\Content\MicrosoftGame.config` (cartella indicata da `.GamingRoot`); avvio tramite `gamelaunchhelper.exe` quando presente.
+8. **Cartelle Custom / Standalone:** Permetti all'utente di aggiungere manualmente cartelle dalle Impostazioni. Scansiona gli `.exe` escludendo quelli che contengono `unins`, `crash`, `redist`, `dxsetup`, `vc_redist`, `launcher`.
+
+Un gioco compare una sola volta: se uno store successivo segnala una cartella già rilevata da uno precedente (es. un titolo EA o Ubisoft comprato su Steam), la seconda voce viene scartata.
+
+*Nota per il testing nel cloud:* Scrivi unit test in Rust con file `.acf`, `.item`, voci di registro e `MicrosoftGame.config` mockati per verificare che i parser funzionino prima della build su GitHub Actions. La logica degli scanner non deve dipendere dal registro reale: riceve voci già lette, così gira su qualsiasi OS. La variabile `KANSO_STEAM_ROOT` permette di puntare lo scanner Steam a una cartella finta per le prove end-to-end.
 
 ### B. Metadata & Copertine (SteamGridDB + Steam Store API)
 1. Pulisci il titolo rilevato rimuovendo suffissi come `GOTY`, `Game of the Year`, `Definitive Edition`, `Remastered`, `Director's Cut` e simboli `™`/`®`.
 2. **Copertine (SteamGridDB API):**
-   - Usa l'endpoint `GET https://www.steamgriddb.com/api/v2/search/autocomplete/{titolo_pulito}` con header `Authorization: Bearer {SGDB_API_KEY}`.
+   - Per i giochi Steam usa prima la corrispondenza esatta `GET https://www.steamgriddb.com/api/v2/games/steam/{appid}`; altrimenti (e per gli altri store) `GET https://www.steamgriddb.com/api/v2/search/autocomplete/{titolo_pulito}` con header `Authorization: Bearer {SGDB_API_KEY}`.
    - Prendi il primo `id` e scarica la griglia verticale (`dimensions=600x900`) tramite `GET https://www.steamgriddb.com/api/v2/grids/game/{id}?dimensions=600x900`.
    - Salva l'immagine in locale nella cartella `covers/` dentro AppData per il caricamento offline istantaneo.
 3. **Descrizioni e Categorie (Steam Store API pubblico - nessuna key richiesta):**
    - Se è un gioco Steam usa il suo `appid`; altrimenti cerca su `https://steamcommunity.com/actions/SearchApps/{titolo_pulito}` per ottenere l'`appid`.
-   - Interroga `https://store.steampowered.com/api/appdetails?appids={appid}&l=italian` per estrarre `short_description` e `genres` (es. Azione, GDR, Indie).
+   - Interroga `https://store.steampowered.com/api/appdetails?appids={appid}&l=italian` per estrarre `name`, `type`, `short_description` e `genres` (es. Azione, GDR, Indie).
 4. **Modifica Manuale:** Permetti all'utente di modificare titolo, genere, percorso `.exe` o sostituire la copertina con un file immagine locale.
+5. **Cadenza della sync:** un gioco a cui manca ancora qualcosa (copertina, descrizione, nome ufficiale, tipo) viene riprovato in automatico al massimo una volta ogni 24 ore; subito solo se l'utente preme *Scansiona* o inserisce una nuova API key. Un tentativo che non trova nulla non riscrive il gioco né notifica la UI.
+6. **Voci che non sono giochi:** le app Steam che lo store classifica come `music`, `dlc`, `video` e simili vengono nascoste automaticamente la prima volta che vengono classificate; l'utente può sempre riportarle in libreria.
 
 ### C. Organizzazione e Avvio
-- Filtri rapidi per **Genere** (generati automaticamente dai metadata), **Piattaforma** (Steam, Epic, Locale) e **Preferiti**.
-- Avvio tramite `steam://rungameid/{appid}` per Steam, URI Epic o esecuzione diretta dell'`.exe` per i giochi locali, con opzione di minimizzare l'app nella system tray all'avvio di un gioco.
+- Filtri rapidi combinabili per **Genere** (generati automaticamente dai metadata), **Piattaforma** (solo quelle con giochi installati), **Preferiti**, **Giocati di recente** (ultimo avvio da Kanso, più recenti prima) e **Nascosti**.
+- Qualsiasi gioco può essere nascosto o rimostrato dalla vista dettaglio; i giochi nascosti non compaiono in nessun'altra vista né nei conteggi.
+- Avvio tramite `steam://rungameid/{appid}` per Steam, URI Epic/Ubisoft o esecuzione diretta dell'`.exe` per gli altri, con opzione di nascondere l'app nella system tray all'avvio di un gioco. Riavviare Kanso mentre è nella tray riporta in primo piano la finestra esistente (istanza singola). Ogni avvio riuscito aggiorna "giocato di recente".
+
+### D. Sicurezza
+- Il comando di avvio riceve solo l'id del gioco: percorso ed URI vengono letti dal database, mai dalla webview.
+- **CSP** restrittiva (`default-src 'self'`, immagini solo da app/asset/data, nessuno script remoto).
+- Il protocollo asset può leggere **solo** la cartella `covers/`.
 
 ## 4. Design & UI/UX
 - **Estetica:** Tema scuro profondo (`#0f0f11`) ottimizzato per schermi OLED, zero menu superflui, tipografia pulita.
-- **Layout:** Griglia di copertine verticali (aspect ratio `2:3`), barra di ricerca istantanea in alto, sidebar minimalista a scomparsa per i filtri.
+- **Layout:** Griglia di copertine verticali (aspect ratio `2:3`), barra di ricerca istantanea in alto, sidebar minimalista a scomparsa per i filtri, vista dettaglio del gioco.
 - **Personalizzazione:** Esponi colori principali, raggio bordi e dimensione minima delle card in un file `src/theme.css` tramite variabili CSS (`--bg-primary`, `--accent-color`, `--card-min-width`).
 
 ## 5. Piano di Esecuzione a Step
-Procedi un passo alla volta e fermati alla fine di ogni step per attendere la mia conferma:
-- **Step 1:** Inizializza il progetto Tauri v2 + React + Tailwind, configura il workflow GitHub Actions (`build-windows.yml`), implementa il parser Rust dei giochi (con unit test su dati mock) e una prima UI grezza che mostri l'elenco rilevato + la schermata Impostazioni per salvare la API key.
-- **Step 2:** Integra il client per SteamGridDB e Steam Store API, il salvataggio locale delle immagini in AppData e la cache su SQLite.
-- **Step 3:** Rifinisci la UI finale (griglia OLED, vista dettaglio gioco, filtri per categoria, avvio eseguibili e system tray).
+Gli Step 1–3 sono il piano originale. Gli Step 4–8 sono stati aggiunti dopo la revisione del progetto a fine Step 3 e approvati in blocco, quindi vengono eseguiti di seguito senza fermarsi tra uno e l'altro.
 
-Inizia ora dallo **Step 1**.
+- [x] **Step 1:** Inizializza il progetto Tauri v2 + React + Tailwind, configura il workflow GitHub Actions (`build-windows.yml`), implementa il parser Rust dei giochi (con unit test su dati mock) e una prima UI grezza che mostri l'elenco rilevato + la schermata Impostazioni per salvare la API key.
+- [x] **Step 2:** Integra il client per SteamGridDB e Steam Store API, il salvataggio locale delle immagini in AppData e la cache locale.
+- [x] **Step 3:** Rifinisci la UI finale (griglia OLED, vista dettaglio gioco, filtri per categoria, preferiti, avvio eseguibili e system tray). Correzione dei titoli Steam `appid_<id>`.
+- [x] **Step 4 — Store SQLite lato Rust:** `library.db` come unica fonte di verità con scritture atomiche; importazione una tantum del vecchio `library.json` (conservato come backup); rimozione di `tauri-plugin-sql` e della copia lato frontend. Un database illeggibile viene messo da parte, mai cancellato.
+- [x] **Step 5 — Sync meno insistente:** nuovo tentativo automatico al massimo ogni 24 ore per i giochi incompleti, immediato solo su richiesta dell'utente; nessuna riscrittura quando non cambia nulla.
+- [x] **Step 6 — Altri store:** scanner GOG, Ubisoft Connect, EA app e Xbox app, con deduplica tra store per cartella di installazione.
+- [x] **Step 7 — Giocati di recente e Nascosti:** storico degli avvii, vista "Giocati di recente", possibilità di nascondere voci, occultamento automatico di colonne sonore e DLC di Steam.
+- [x] **Step 8 — Sicurezza e CI:** CSP, protocollo asset limitato alle copertine, job Linux veloce per test e lint prima della build Windows.
+
+### Da verificare su un PC Windows reale
+Non verificabile dall'ambiente cloud, quindi da controllare alla prima prova dell'installer:
+- icona nella system tray e ripristino della finestra;
+- copertine visibili (CSP + protocollo asset limitato alla cartella `covers/`);
+- rilevamento reale di GOG, Ubisoft Connect, EA app e Xbox app: gli scanner sono testati solo su dati simulati;
+- nome ufficiale dei giochi `appid_<id>` dallo Steam Store e occultamento automatico delle colonne sonore.
