@@ -1,6 +1,6 @@
 use crate::i18n::{Lang, T};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -52,9 +52,44 @@ impl AccessibilityConfig {
     }
 }
 
+/// Most plugins whose state is remembered.
+const MAX_PLUGIN_STATES: usize = 64;
+/// Longest value of a plugin setting (an API key, a country code, ...).
+const MAX_PLUGIN_SETTING_CHARS: usize = 2000;
+
+/// What the user decided about one plugin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PluginState {
+    pub enabled: bool,
+    /// Whether the plugin's short label is shown on the game cards.
+    pub show_badge: bool,
+    /// Values of the settings the plugin declares (API keys included: like the SteamGridDB
+    /// key they never leave this PC except towards the plugin's own service).
+    pub settings: BTreeMap<String, String>,
+}
+
+impl Default for PluginState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            show_badge: true,
+            settings: BTreeMap::new(),
+        }
+    }
+}
+
+/// `true` for a well-formed plugin id: 2–40 lower-case letters, digits and dashes, starting
+/// with a letter or digit. Ids double as folder names, so nothing else is accepted.
+pub fn is_valid_plugin_id(id: &str) -> bool {
+    (2..=40).contains(&id.len())
+        && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !id.starts_with('-')
+}
+
 /// User configuration persisted locally inside the OS AppData directory (`config.json`).
 /// API keys are never stored in repository `.env` files.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
     /// Optional SteamGridDB API key configured by the user in Settings.
@@ -69,6 +104,25 @@ pub struct AppConfig {
     /// Id of the selected theme; `None` means the built-in default.
     pub theme_id: Option<String>,
     pub accessibility: AccessibilityConfig,
+    /// Whether Kanso measures play time for the games whose store does not expose it.
+    pub track_playtime: bool,
+    /// Per-plugin choices, by plugin id. A plugin without an entry uses its own default.
+    pub plugins: BTreeMap<String, PluginState>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            steamgriddb_api_key: String::new(),
+            custom_folders: Vec::new(),
+            minimize_to_tray_on_launch: false,
+            language: None,
+            theme_id: None,
+            accessibility: AccessibilityConfig::default(),
+            track_playtime: true,
+            plugins: BTreeMap::new(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -112,6 +166,26 @@ impl AppConfig {
                 .map(|id| id.trim().to_string())
                 .filter(|id| !id.is_empty()),
             accessibility: self.accessibility.sanitized(),
+            track_playtime: self.track_playtime,
+            plugins: self
+                .plugins
+                .into_iter()
+                .filter(|(id, _)| is_valid_plugin_id(id))
+                .take(MAX_PLUGIN_STATES)
+                .map(|(id, state)| {
+                    let settings = state
+                        .settings
+                        .into_iter()
+                        .filter(|(key, _)| !key.is_empty() && key.len() <= 40)
+                        .map(|(key, value)| {
+                            let value: String =
+                                value.trim().chars().take(MAX_PLUGIN_SETTING_CHARS).collect();
+                            (key, value)
+                        })
+                        .collect();
+                    (id, PluginState { settings, ..state })
+                })
+                .collect(),
         }
     }
 
@@ -185,6 +259,21 @@ mod tests {
                 readable_font: Some(" OpenDyslexic ".to_string()),
                 ..AccessibilityConfig::default()
             },
+            track_playtime: false,
+            plugins: BTreeMap::from([
+                (
+                    "price-history".to_string(),
+                    PluginState {
+                        enabled: true,
+                        show_badge: false,
+                        settings: BTreeMap::from([
+                            ("apiKey".to_string(), "  itad-key  ".to_string()),
+                            (String::new(), "dropped".to_string()),
+                        ]),
+                    },
+                ),
+                ("../escape".to_string(), PluginState::default()),
+            ]),
         };
 
         let saved = input.save_to_file(&cfg_path).expect("save config");
@@ -198,6 +287,15 @@ mod tests {
         assert!(saved.accessibility.high_contrast && !saved.accessibility.reduce_motion);
         assert_eq!(saved.accessibility.readable_font.as_deref(), Some("opendyslexic"));
 
+        assert!(!saved.track_playtime);
+        assert_eq!(saved.plugins.len(), 1, "ids that are not plain names are dropped");
+        let plugin = &saved.plugins["price-history"];
+        assert!(plugin.enabled && !plugin.show_badge);
+        assert_eq!(
+            plugin.settings,
+            BTreeMap::from([("apiKey".to_string(), "itad-key".to_string())])
+        );
+
         let reloaded = AppConfig::load_from_file(&cfg_path).expect("reload config");
         assert_eq!(reloaded, saved);
 
@@ -205,6 +303,8 @@ mod tests {
         fs::write(&cfg_path, r#"{"steamgriddbApiKey":"k","language":"it"}"#).unwrap();
         let old = AppConfig::load_from_file(&cfg_path).expect("old config");
         assert_eq!(old.accessibility, AccessibilityConfig::default());
+        assert!(old.track_playtime, "measuring play time is on unless switched off");
+        assert!(old.plugins.is_empty());
         let odd = AppConfig {
             accessibility: AccessibilityConfig {
                 text_scale: 10,

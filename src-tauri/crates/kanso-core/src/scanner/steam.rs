@@ -1,5 +1,6 @@
 use crate::cleaner::{clean_game_title, is_placeholder_title};
 use crate::i18n::T;
+use crate::achievements::read_achievements_from_config_dir;
 use crate::models::{DetectedGame, GamePlatform, SourceScanOutput};
 use crate::vdf::{parse_vdf, VdfValue};
 use std::collections::{HashMap, HashSet};
@@ -296,6 +297,20 @@ pub fn scan_steam_from_root(steam_root: &Path) -> SourceScanOutput {
         }
     }
 
+    // Achievement counts, from the same account's library cache
+    if let Some(config_dir) = steam_account_config_dir(steam_root) {
+        for game in &mut output.games {
+            let summary = game
+                .platform_app_id
+                .as_deref()
+                .and_then(|appid| read_achievements_from_config_dir(&config_dir, appid));
+            if let Some(achievements) = summary {
+                game.achievements_unlocked = Some(achievements.unlocked);
+                game.achievements_total = Some(achievements.total);
+            }
+        }
+    }
+
     output
 }
 
@@ -343,26 +358,33 @@ pub fn parse_local_config_play_stats(content: &str) -> HashMap<String, SteamPlay
         .collect()
 }
 
+/// `userdata/<account>/config` of the Steam account used most recently on this PC (the one
+/// whose `localconfig.vdf` changed last), where the client keeps what it knows about the
+/// account's games.
+pub fn steam_account_config_dir(steam_root: &Path) -> Option<PathBuf> {
+    fs::read_dir(steam_root.join("userdata"))
+        .ok()?
+        .flatten()
+        .map(|account| account.path().join("config"))
+        .filter_map(|config_dir| {
+            let modified = fs::metadata(config_dir.join("localconfig.vdf"))
+                .ok()?
+                .modified()
+                .ok()?;
+            Some((modified, config_dir))
+        })
+        .max_by_key(|(modified, _)| *modified)
+        .map(|(_, config_dir)| config_dir)
+}
+
 /// Play statistics by appid for the Steam account used most recently on this PC.
 ///
 /// Steam keeps them in `userdata/<account>/config/localconfig.vdf`, so they are available
 /// without signing in anywhere, and they include time played before Kanso was installed or
 /// outside of it. Empty when the file is missing or unreadable.
 pub fn read_steam_play_stats(steam_root: &Path) -> HashMap<String, SteamPlayStats> {
-    let Ok(accounts) = fs::read_dir(steam_root.join("userdata")) else {
-        return HashMap::new();
-    };
-    let newest = accounts
-        .flatten()
-        .map(|account| account.path().join("config").join("localconfig.vdf"))
-        .filter_map(|path| {
-            let modified = fs::metadata(&path).ok()?.modified().ok()?;
-            Some((modified, path))
-        })
-        .max_by_key(|(modified, _)| *modified);
-
-    newest
-        .and_then(|(_, path)| fs::read(path).ok())
+    steam_account_config_dir(steam_root)
+        .and_then(|config_dir| fs::read(config_dir.join("localconfig.vdf")).ok())
         // Friend names and the like are not always valid UTF-8
         .map(|bytes| parse_local_config_play_stats(&String::from_utf8_lossy(&bytes)))
         .unwrap_or_default()
@@ -654,5 +676,23 @@ mod tests {
         let hades = scanned.games.iter().find(|g| g.id == "steam:1145360").unwrap();
         assert_eq!(hades.playtime_minutes, Some(0));
         assert_eq!(hades.last_played_at, Some(1_700_000_000_000));
+        assert!(scanned.games.iter().all(|g| g.achievements_total.is_none()), "no cache files yet");
+
+        // Achievement counts come from the same account's library cache, never the old one's
+        let cache = |unlocked: u32| {
+            format!(r#"[["achievements",{{"version":2,"data":{{"vecHighlight":[],"vecUnachieved":[],"nTotal":128,"nAchieved":{unlocked}}}}}]]"#)
+        };
+        fs::create_dir_all(old_account.join("librarycache")).unwrap();
+        fs::write(old_account.join("librarycache").join("1321440.json"), cache(99)).unwrap();
+        fs::create_dir_all(current_account.join("librarycache")).unwrap();
+        fs::write(current_account.join("librarycache").join("1321440.json"), cache(31)).unwrap();
+        fs::write(current_account.join("librarycache").join("1145360.json"), "not json").unwrap();
+
+        let scanned = scan_steam_from_root(root);
+        let cassette = scanned.games.iter().find(|g| g.id == "steam:1321440").unwrap();
+        assert_eq!((cassette.achievements_unlocked, cassette.achievements_total), (Some(31), Some(128)));
+        let hades = scanned.games.iter().find(|g| g.id == "steam:1145360").unwrap();
+        assert_eq!(hades.achievements_total, None, "an unreadable cache file is ignored");
+        assert_eq!(steam_account_config_dir(root), Some(current_account));
     }
 }

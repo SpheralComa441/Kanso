@@ -83,6 +83,7 @@ pub fn needs_metadata(game: &DetectedGame, has_api_key: bool, lang: Lang) -> boo
         || game.title_provisional
         || steam_type_unknown
         || needs_tags(game, lang)
+        || needs_store_page(game)
         || needs_translation(game, lang)
 }
 
@@ -119,6 +120,11 @@ fn needs_translation(game: &DetectedGame, lang: Lang) -> bool {
 /// Tags were never fetched, or are in another language.
 fn needs_tags(game: &DetectedGame, lang: Lang) -> bool {
     game.tags_lang.as_deref() != Some(lang.code())
+}
+
+/// A game from another store whose Steam store page was never looked up.
+fn needs_store_page(game: &DetectedGame) -> bool {
+    game.platform != GamePlatform::Steam && game.steam_store_appid.is_none()
 }
 
 fn steam_appid_of(game: &DetectedGame) -> Option<&str> {
@@ -753,6 +759,18 @@ impl MetadataClient {
 
     /// First Steam appid matching `raw_title`; `Ok(None)` when the search has no hit,
     /// `Err` when the search itself failed.
+    /// The Steam store appid matching `title`, searched at most once per enrichment: `known`
+    /// carries what an earlier step already learned.
+    fn store_app_of(
+        &self,
+        known: &mut Option<Result<Option<String>, ()>>,
+        title: &str,
+    ) -> Result<Option<String>, ()> {
+        known
+            .get_or_insert_with(|| self.search_steam_store_appid(title))
+            .clone()
+    }
+
     fn search_steam_store_appid(&self, raw_title: &str) -> Result<Option<String>, ()> {
         let cleaned = clean_game_title(raw_title);
         if cleaned.is_empty() {
@@ -936,10 +954,9 @@ impl MetadataClient {
         // 4. Community tags, never fetched or in another language. A Steam game is asked by its
         //    appid; any other game by the store page that matched its title.
         if !game.is_hidden && needs_tags(game, self.lang) {
-            let tag_app = match (&steam_appid, store_app) {
-                (Some(appid), _) => Ok(Some(appid.clone())),
-                (None, Some(known)) => known,
-                (None, None) => self.search_steam_store_appid(&game.clean_title),
+            let tag_app = match &steam_appid {
+                Some(appid) => Ok(Some(appid.clone())),
+                None => self.store_app_of(&mut store_app, &game.clean_title),
             };
             let tags = match tag_app {
                 Ok(Some(appid)) => self.fetch_steam_tags(&appid),
@@ -953,10 +970,19 @@ impl MetadataClient {
             }
         }
 
-        // Compare ignoring bookkeeping: the fields this function always touches, and the note
-        // that the tags were looked up
+        // 5. The Steam store page of a game from another store: reviews, news and anything
+        //    else keyed by a Steam appid (plugins) can then find it. No answer is retried later.
+        if needs_store_page(game) {
+            if let Ok(found) = self.store_app_of(&mut store_app, &game.clean_title) {
+                game.steam_store_appid = Some(found.unwrap_or_default());
+            }
+        }
+
+        // Compare ignoring bookkeeping: the fields this function always touches, and the notes
+        // that the tags and the store page were looked up
         let mut comparable = game.clone();
         comparable.tags_lang = before.tags_lang.clone();
+        comparable.steam_store_appid = before.steam_store_appid.clone();
         outcome.changed = comparable != before;
         let now = now_timestamp_ms();
         game.metadata_synced = true;
@@ -1245,6 +1271,8 @@ mod tests {
                         ("200 OK", "application/json", body_str.into_bytes())
                     } else if path == "/mock-cover.png" {
                         ("200 OK", "image/png", b"\x89PNG\r\n\x1a\nmockcover".to_vec())
+                    } else if path.starts_with("/actions/SearchApps/Unknown") {
+                        ("200 OK", "application/json", b"[]".to_vec())
                     } else if path.starts_with("/actions/SearchApps/") {
                         (
                             "200 OK",
@@ -1730,6 +1758,11 @@ mod tests {
         game.metadata_lang = Some("it".to_string());
         assert!(is_metadata_sync_due(&game, false, Lang::It, now, true), "tags never looked up");
         game.tags_lang = Some("it".to_string());
+        assert!(
+            is_metadata_sync_due(&game, false, Lang::It, now, true),
+            "Steam store page never looked up"
+        );
+        game.steam_store_appid = Some(String::new());
         assert!(!is_metadata_sync_due(&game, false, Lang::It, now, true));
         assert!(is_metadata_sync_due(&game, true, Lang::It, now, true), "cover missing, key present");
 
@@ -1903,6 +1936,27 @@ mod tests {
             !paths.iter().any(|p| p.starts_with("/api/appdetails")),
             "the cached texts are not fetched again: {paths:?}"
         );
+
+        // The matched store page is remembered (one search served both steps), so reviews,
+        // news and plugins can find the game on Steam
+        assert_eq!(diablo.steam_store_id(), Some("2344520"));
+        assert_eq!(
+            paths.iter().filter(|p| p.starts_with("/actions/SearchApps/")).count(),
+            1,
+            "{paths:?}"
+        );
+        assert!(!needs_metadata(&diablo, false, Lang::It));
+
+        // A game Steam does not sell: the empty answer is remembered too
+        let mut unlisted = diablo.clone();
+        unlisted.id = "standalone:x".to_string();
+        unlisted.clean_title = "Unknown Homebrew Thing".to_string();
+        unlisted.tags_lang = None;
+        unlisted.steam_store_appid = None;
+        client.enrich_game_automatically(&mut unlisted, None, covers_dir.path());
+        assert_eq!(unlisted.steam_store_appid.as_deref(), Some(""));
+        assert_eq!(unlisted.steam_store_id(), None);
+        assert!(!needs_metadata(&unlisted, false, Lang::It));
     }
 
     #[test]

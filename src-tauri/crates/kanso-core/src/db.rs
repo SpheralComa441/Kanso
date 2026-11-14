@@ -2,9 +2,10 @@
 //! cached metadata, cover paths and everything the user customised.
 
 use crate::i18n::T;
-use crate::models::{now_timestamp_ms, DetectedGame, GamePlatform};
+use crate::models::{now_timestamp_ms, DetectedGame, GamePlatform, GameStatus, PlaySession};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -56,22 +57,57 @@ const MIGRATIONS: &[&str] = &["
     ALTER TABLE games ADD COLUMN playtime_minutes INTEGER;
     UPDATE games SET metadata_attempted_at = 0;
 ",
+    // v4: status chosen by the user, achievement counts, the Steam store page matched to games
+    // from other stores (one more lookup to find it), play sessions for the statistics, and
+    // what plugins cache and remember.
+    "
+    ALTER TABLE games ADD COLUMN status TEXT;
+    ALTER TABLE games ADD COLUMN achievements_unlocked INTEGER;
+    ALTER TABLE games ADD COLUMN achievements_total INTEGER;
+    ALTER TABLE games ADD COLUMN steam_store_appid TEXT;
+    UPDATE games SET metadata_attempted_at = 0 WHERE platform <> 'steam';
+    CREATE TABLE play_sessions (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        game_id    TEXT NOT NULL,
+        started_at INTEGER NOT NULL,
+        seconds    INTEGER NOT NULL,
+        source     TEXT NOT NULL
+    );
+    CREATE INDEX play_sessions_started_at ON play_sessions (started_at);
+    CREATE TABLE plugin_cache (
+        plugin_id  TEXT NOT NULL,
+        game_id    TEXT NOT NULL,
+        data       TEXT NOT NULL,
+        ok         INTEGER NOT NULL,
+        signature  TEXT NOT NULL,
+        fetched_at INTEGER NOT NULL,
+        expires_at INTEGER NOT NULL,
+        PRIMARY KEY (plugin_id, game_id)
+    );
+    CREATE TABLE plugin_storage (
+        plugin_id TEXT NOT NULL,
+        key       TEXT NOT NULL,
+        value     TEXT NOT NULL,
+        PRIMARY KEY (plugin_id, key)
+    );
+",
 ];
 
 const GAME_COLUMNS: &str = "id, title, clean_title, platform, platform_app_id, install_dir, \
     executable_path, launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, \
     is_favorite, is_hidden, metadata_synced, custom_override, title_provisional, \
     metadata_attempted_at, last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, \
-    playtime_minutes";
+    playtime_minutes, status, achievements_unlocked, achievements_total, steam_store_appid";
 
 const UPSERT_GAME_SQL: &str = "
     INSERT INTO games (
         id, title, clean_title, platform, platform_app_id, install_dir, executable_path,
         launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, is_favorite,
         is_hidden, metadata_synced, custom_override, title_provisional, metadata_attempted_at,
-        last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, playtime_minutes
+        last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, playtime_minutes,
+        status, achievements_unlocked, achievements_total, steam_store_appid
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-              ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)
+              ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
     ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         clean_title = excluded.clean_title,
@@ -97,7 +133,11 @@ const UPSERT_GAME_SQL: &str = "
         metadata_lang = excluded.metadata_lang,
         tags = excluded.tags,
         tags_lang = excluded.tags_lang,
-        playtime_minutes = excluded.playtime_minutes";
+        playtime_minutes = excluded.playtime_minutes,
+        status = excluded.status,
+        achievements_unlocked = excluded.achievements_unlocked,
+        achievements_total = excluded.achievements_total,
+        steam_store_appid = excluded.steam_store_appid";
 
 /// Shape of the `library.json` file written by Kanso before the SQLite store existed.
 #[derive(Debug, Default, Deserialize)]
@@ -273,6 +313,195 @@ impl LibraryDb {
         tx.commit().map_err(db_err)
     }
 
+    /// Play sessions that started at or after `since_ms`, oldest first.
+    pub fn load_play_sessions(&self, since_ms: u64) -> Result<Vec<PlaySession>, String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT game_id, started_at, seconds, source FROM play_sessions
+                 WHERE started_at >= ?1 ORDER BY started_at, id",
+            )
+            .map_err(db_err)?;
+        let sessions = stmt
+            .query_map([to_db_int(since_ms)], |row| {
+                Ok(PlaySession {
+                    game_id: row.get(0)?,
+                    started_at: from_db_int(row.get(1)?),
+                    seconds: from_db_int(row.get(2)?),
+                    source: row.get(3)?,
+                })
+            })
+            .map_err(db_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db_err)?;
+        Ok(sessions)
+    }
+
+    /// Stores a play session and returns its row id, so a session still in progress can be
+    /// extended with [`Self::set_play_session_seconds`].
+    pub fn insert_play_session(&self, session: &PlaySession) -> Result<i64, String> {
+        self.conn
+            .execute(
+                "INSERT INTO play_sessions (game_id, started_at, seconds, source)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    session.game_id,
+                    to_db_int(session.started_at),
+                    to_db_int(session.seconds),
+                    session.source
+                ],
+            )
+            .map(|_| self.conn.last_insert_rowid())
+            .map_err(|e| format!("{}: {e}", T::LibraryDbError.s()))
+    }
+
+    pub fn set_play_session_seconds(&self, session_id: i64, seconds: u64) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE play_sessions SET seconds = ?2 WHERE id = ?1",
+                params![session_id, to_db_int(seconds)],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("{}: {e}", T::LibraryDbError.s()))
+    }
+
+    /// Adds play time measured by Kanso to a game and marks it as played at `now_ms`. Returns
+    /// the game as stored, or `None` when it is no longer in the library.
+    pub fn add_playtime(
+        &self,
+        game_id: &str,
+        minutes: u32,
+        now_ms: u64,
+    ) -> Result<Option<DetectedGame>, String> {
+        self.conn
+            .execute(
+                "UPDATE games SET playtime_minutes = COALESCE(playtime_minutes, 0) + ?2,
+                                  last_played_at = MAX(COALESCE(last_played_at, 0), ?3)
+                 WHERE id = ?1",
+                params![game_id, i64::from(minutes), to_db_int(now_ms)],
+            )
+            .map_err(|e| format!("{} ({game_id}): {e}", T::LibraryDbError.s()))?;
+        self.get_game(game_id)
+    }
+
+    /// What a plugin returned for a game, as cached.
+    pub fn get_plugin_cache(
+        &self,
+        plugin_id: &str,
+        game_id: &str,
+    ) -> Result<Option<PluginCacheEntry>, String> {
+        self.conn
+            .query_row(
+                "SELECT data, ok, signature, fetched_at, expires_at FROM plugin_cache
+                 WHERE plugin_id = ?1 AND game_id = ?2",
+                [plugin_id, game_id],
+                plugin_cache_from_row,
+            )
+            .optional()
+            .map_err(|e| format!("{}: {e}", T::LibraryDbError.s()))
+    }
+
+    /// Every cached answer of a plugin, by game id.
+    pub fn list_plugin_cache(
+        &self,
+        plugin_id: &str,
+    ) -> Result<Vec<(String, PluginCacheEntry)>, String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT data, ok, signature, fetched_at, expires_at, game_id FROM plugin_cache
+                 WHERE plugin_id = ?1",
+            )
+            .map_err(db_err)?;
+        let entries = stmt
+            .query_map([plugin_id], |row| {
+                Ok((row.get::<_, String>(5)?, plugin_cache_from_row(row)?))
+            })
+            .map_err(db_err)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(db_err)?;
+        Ok(entries)
+    }
+
+    pub fn put_plugin_cache(
+        &self,
+        plugin_id: &str,
+        game_id: &str,
+        entry: &PluginCacheEntry,
+    ) -> Result<(), String> {
+        self.conn
+            .execute(
+                "INSERT INTO plugin_cache
+                    (plugin_id, game_id, data, ok, signature, fetched_at, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(plugin_id, game_id) DO UPDATE SET
+                    data = excluded.data, ok = excluded.ok, signature = excluded.signature,
+                    fetched_at = excluded.fetched_at, expires_at = excluded.expires_at",
+                params![
+                    plugin_id,
+                    game_id,
+                    entry.data,
+                    entry.ok,
+                    entry.signature,
+                    to_db_int(entry.fetched_at),
+                    to_db_int(entry.expires_at)
+                ],
+            )
+            .map(|_| ())
+            .map_err(|e| format!("{}: {e}", T::LibraryDbError.s()))
+    }
+
+    /// The key/value notes a plugin keeps between runs.
+    pub fn load_plugin_storage(&self, plugin_id: &str) -> Result<BTreeMap<String, String>, String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key, value FROM plugin_storage WHERE plugin_id = ?1")
+            .map_err(db_err)?;
+        let entries = stmt
+            .query_map([plugin_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(db_err)?
+            .collect::<Result<BTreeMap<String, String>, _>>()
+            .map_err(db_err)?;
+        Ok(entries)
+    }
+
+    /// Replaces everything a plugin had stored with `entries`.
+    pub fn save_plugin_storage(
+        &mut self,
+        plugin_id: &str,
+        entries: &BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let tx = self.conn.transaction().map_err(db_err)?;
+        tx.execute("DELETE FROM plugin_storage WHERE plugin_id = ?1", [plugin_id])
+            .map_err(db_err)?;
+        for (key, value) in entries {
+            tx.execute(
+                "INSERT INTO plugin_storage (plugin_id, key, value) VALUES (?1, ?2, ?3)",
+                [plugin_id, key.as_str(), value.as_str()],
+            )
+            .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)
+    }
+
+    /// Forgets what a plugin cached and, with `storage_too`, what it stored (on removal).
+    pub fn clear_plugin_data(&self, plugin_id: &str, storage_too: bool) -> Result<(), String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        self.conn
+            .execute("DELETE FROM plugin_cache WHERE plugin_id = ?1", [plugin_id])
+            .map_err(db_err)?;
+        if storage_too {
+            self.conn
+                .execute("DELETE FROM plugin_storage WHERE plugin_id = ?1", [plugin_id])
+                .map_err(db_err)?;
+        }
+        Ok(())
+    }
+
     /// One-time import of the pre-SQLite `library.json`. Runs only while the database is still
     /// empty; afterwards the file is renamed (`.imported`, or `.unreadable` when it could not be
     /// parsed) so it is kept as a backup but never read again. Returns how many games were imported.
@@ -294,6 +523,28 @@ impl LibraryDb {
         let _ = fs::rename(json_path, json_path.with_extension("json.imported"));
         Ok(legacy.games.len())
     }
+}
+
+/// One cached plugin answer: the JSON a plugin returned for a game (or its error message when
+/// `ok` is false), valid until `expires_at` as long as `signature` still matches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginCacheEntry {
+    pub data: String,
+    pub ok: bool,
+    /// Plugin version, settings and language the answer was computed with.
+    pub signature: String,
+    pub fetched_at: u64,
+    pub expires_at: u64,
+}
+
+fn plugin_cache_from_row(row: &Row<'_>) -> rusqlite::Result<PluginCacheEntry> {
+    Ok(PluginCacheEntry {
+        data: row.get(0)?,
+        ok: row.get(1)?,
+        signature: row.get(2)?,
+        fetched_at: from_db_int(row.get(3)?),
+        expires_at: from_db_int(row.get(4)?),
+    })
 }
 
 /// Case-insensitive alphabetical order used everywhere a library is listed.
@@ -338,6 +589,10 @@ fn execute_upsert(conn: &Connection, game: &DetectedGame) -> rusqlite::Result<us
             tags_json,
             game.tags_lang,
             game.playtime_minutes.map(i64::from),
+            game.status.map(GameStatus::as_str),
+            game.achievements_unlocked.map(i64::from),
+            game.achievements_total.map(i64::from),
+            game.steam_store_appid,
         ],
     )
 }
@@ -376,10 +631,21 @@ fn game_from_row(row: &Row<'_>) -> rusqlite::Result<DetectedGame> {
         metadata_lang: row.get("metadata_lang")?,
         tags: serde_json::from_str(&tags_json).unwrap_or_default(),
         tags_lang: row.get("tags_lang")?,
-        playtime_minutes: row
-            .get::<_, Option<i64>>("playtime_minutes")?
-            .and_then(|minutes| u32::try_from(minutes).ok()),
+        playtime_minutes: optional_count(row, "playtime_minutes")?,
+        status: row
+            .get::<_, Option<String>>("status")?
+            .as_deref()
+            .and_then(GameStatus::parse),
+        achievements_unlocked: optional_count(row, "achievements_unlocked")?,
+        achievements_total: optional_count(row, "achievements_total")?,
+        steam_store_appid: row.get("steam_store_appid")?,
     })
+}
+
+fn optional_count(row: &Row<'_>, column: &str) -> rusqlite::Result<Option<u32>> {
+    Ok(row
+        .get::<_, Option<i64>>(column)?
+        .and_then(|value| u32::try_from(value).ok()))
 }
 
 /// SQLite integers are signed 64-bit; ids and millisecond timestamps always fit.
@@ -436,6 +702,10 @@ mod tests {
         full.tags = vec!["Мир открытый".to_string(), "Souls-like".to_string()];
         full.tags_lang = Some("ru".to_string());
         full.playtime_minutes = Some(7_260);
+        full.status = Some(GameStatus::Finished);
+        full.achievements_unlocked = Some(41);
+        full.achievements_total = Some(78);
+        full.steam_store_appid = Some("292030".to_string());
         full.updated_at = 1_731_700_000_000;
 
         let bare = sample("steam:10", "alpha");
@@ -528,6 +798,109 @@ mod tests {
         assert_eq!(db.import_legacy_json(&json_path).unwrap(), 0);
         assert!(json_path.is_file());
         assert_eq!(db.game_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn upgrades_a_version_3_library_keeping_its_games() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("library.db");
+        {
+            // A library as the previous version of Kanso left it
+            let conn = Connection::open(&db_path).unwrap();
+            for migration in &MIGRATIONS[..3] {
+                conn.execute_batch(migration).unwrap();
+            }
+            conn.pragma_update(None, "user_version", 3).unwrap();
+            conn.execute_batch(
+                "INSERT INTO games (id, title, clean_title, platform, install_dir, playtime_minutes, metadata_attempted_at)
+                 VALUES ('steam:620', 'Portal 2', 'Portal 2', 'steam', '/s/Portal 2', 754, 5),
+                        ('epic:x', 'Alan Wake 2', 'Alan Wake 2', 'epic', '/e/aw2', NULL, 5);",
+            )
+            .unwrap();
+        }
+
+        let db = LibraryDb::open(&db_path).expect("upgrade");
+        let games = db.load_games().unwrap();
+        assert_eq!(games.len(), 2);
+        let portal = games.iter().find(|g| g.id == "steam:620").unwrap();
+        assert_eq!(portal.playtime_minutes, Some(754));
+        assert_eq!((portal.status, portal.achievements_total, portal.steam_store_appid.clone()), (None, None, None));
+        assert_eq!(portal.metadata_attempted_at, 5, "Steam games have nothing new to look up");
+        let alan = games.iter().find(|g| g.id == "epic:x").unwrap();
+        assert_eq!(alan.metadata_attempted_at, 0, "other stores get their Steam page looked up at once");
+        assert!(db.load_play_sessions(0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn play_sessions_are_logged_and_measured_time_adds_up() {
+        let db = LibraryDb::open_in_memory().unwrap();
+        let mut game = sample("epic:x", "Alan Wake 2");
+        game.last_played_at = Some(9_000);
+        db.upsert_game(&game).unwrap();
+
+        let session = PlaySession {
+            game_id: "epic:x".to_string(),
+            started_at: 10_000,
+            seconds: 60,
+            source: "kanso".to_string(),
+        };
+        let row = db.insert_play_session(&session).unwrap();
+        db.set_play_session_seconds(row, 600).unwrap();
+        db.insert_play_session(&PlaySession { started_at: 5_000, source: "steam".to_string(), ..session.clone() })
+            .unwrap();
+
+        let all = db.load_play_sessions(0).unwrap();
+        assert_eq!(all.len(), 2);
+        assert_eq!((all[0].started_at, all[0].source.as_str()), (5_000, "steam"), "oldest first");
+        assert_eq!(all[1].seconds, 600);
+        assert_eq!(db.load_play_sessions(6_000).unwrap().len(), 1);
+
+        // Minutes add to whatever was there (nothing, here), and "last played" only moves forward
+        let updated = db.add_playtime("epic:x", 7, 20_000).unwrap().expect("game");
+        assert_eq!((updated.playtime_minutes, updated.last_played_at), (Some(7), Some(20_000)));
+        let updated = db.add_playtime("epic:x", 3, 15_000).unwrap().expect("game");
+        assert_eq!((updated.playtime_minutes, updated.last_played_at), (Some(10), Some(20_000)));
+        assert_eq!(db.add_playtime("gone:1", 3, 1).unwrap(), None);
+    }
+
+    #[test]
+    fn plugin_cache_and_storage_are_kept_per_plugin() {
+        let mut db = LibraryDb::open_in_memory().unwrap();
+        let entry = PluginCacheEntry {
+            data: r#"{"sections":[]}"#.to_string(),
+            ok: true,
+            signature: "1.0|it|abc".to_string(),
+            fetched_at: 100,
+            expires_at: 200,
+        };
+        db.put_plugin_cache("hltb", "steam:1", &entry).unwrap();
+        db.put_plugin_cache("hltb", "steam:2", &entry).unwrap();
+        db.put_plugin_cache("news", "steam:1", &PluginCacheEntry { ok: false, ..entry.clone() }).unwrap();
+        // Writing again replaces
+        let newer = PluginCacheEntry { fetched_at: 300, expires_at: 400, ..entry.clone() };
+        db.put_plugin_cache("hltb", "steam:1", &newer).unwrap();
+
+        assert_eq!(db.get_plugin_cache("hltb", "steam:1").unwrap(), Some(newer));
+        assert_eq!(db.get_plugin_cache("hltb", "steam:9").unwrap(), None);
+        assert_eq!(db.list_plugin_cache("hltb").unwrap().len(), 2);
+        assert!(!db.get_plugin_cache("news", "steam:1").unwrap().unwrap().ok);
+
+        let notes = BTreeMap::from([("token".to_string(), "\"abc\"".to_string())]);
+        db.save_plugin_storage("hltb", &notes).unwrap();
+        db.save_plugin_storage("news", &BTreeMap::from([("n".to_string(), "1".to_string())])).unwrap();
+        assert_eq!(db.load_plugin_storage("hltb").unwrap(), notes);
+        db.save_plugin_storage("hltb", &BTreeMap::new()).unwrap();
+        assert!(db.load_plugin_storage("hltb").unwrap().is_empty());
+        db.save_plugin_storage("hltb", &notes).unwrap();
+
+        // Switching settings clears the cache only; removing the plugin clears everything of it
+        db.clear_plugin_data("hltb", false).unwrap();
+        assert!(db.list_plugin_cache("hltb").unwrap().is_empty());
+        assert_eq!(db.load_plugin_storage("hltb").unwrap(), notes);
+        db.clear_plugin_data("hltb", true).unwrap();
+        assert!(db.load_plugin_storage("hltb").unwrap().is_empty());
+        assert_eq!(db.list_plugin_cache("news").unwrap().len(), 1, "other plugins are untouched");
+        assert_eq!(db.load_plugin_storage("news").unwrap().len(), 1);
     }
 
     #[test]
