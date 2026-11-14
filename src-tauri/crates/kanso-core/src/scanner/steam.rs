@@ -132,16 +132,16 @@ pub fn parse_app_manifest_acf(
         .join("common")
         .join(installdir);
 
-    Ok(Some(DetectedGame {
-        id: format!("steam:{appid}"),
-        title: name.to_string(),
-        clean_title: clean_game_title(name),
-        platform: GamePlatform::Steam,
-        platform_app_id: Some(appid.to_string()),
-        install_dir: full_install_dir.to_string_lossy().to_string(),
-        executable_path: None,
-        launch_uri: Some(format!("steam://rungameid/{appid}")),
-    }))
+    Ok(Some(DetectedGame::new_detected(
+        format!("steam:{appid}"),
+        name.to_string(),
+        clean_game_title(name),
+        GamePlatform::Steam,
+        Some(appid.to_string()),
+        full_install_dir.to_string_lossy().to_string(),
+        None,
+        Some(format!("steam://rungameid/{appid}")),
+    )))
 }
 
 /// Scans a Steam installation root, discovering all secondary libraries in `libraryfolders.vdf`

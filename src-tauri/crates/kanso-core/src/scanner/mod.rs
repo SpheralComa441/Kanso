@@ -1,3 +1,4 @@
+pub mod battlenet;
 pub mod epic;
 pub mod standalone;
 pub mod steam;
@@ -8,7 +9,8 @@ use crate::models::{DetectedGame, ScanReport};
 /// Runs the complete game auto-discovery pipeline on the host machine:
 /// 1. Steam (Registry + `libraryfolders.vdf` + `appmanifest_*.acf`)
 /// 2. Epic Games (`C:\ProgramData\Epic\EpicGamesLauncher\Data\Manifests\*.item`)
-/// 3. User-configured Standalone / Custom folders (`*.exe` with exclusion rules)
+/// 3. Battle.net (`HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`)
+/// 4. User-configured Standalone / Custom folders (`*.exe` with exclusion rules)
 pub fn scan_all_installed_games(config: &AppConfig) -> ScanReport {
     let mut games: Vec<DetectedGame> = Vec::new();
     let mut warnings: Vec<String> = Vec::new();
@@ -31,10 +33,16 @@ pub fn scan_all_installed_games(config: &AppConfig) -> ScanReport {
         warnings.extend(epic_out.warnings);
     }
 
-    // Collect already known Steam/Epic install directories so custom folders don't duplicate them
+    // 3. Battle.net discovery
+    let bnet_out = battlenet::scan_battlenet_installed();
+    let battlenet_count = bnet_out.games.len();
+    games.extend(bnet_out.games);
+    warnings.extend(bnet_out.warnings);
+
+    // Collect already known Steam/Epic/Battle.net install directories so custom folders don't duplicate them
     let known_dirs: Vec<String> = games.iter().map(|g| g.install_dir.clone()).collect();
 
-    // 3. Custom / Standalone folders discovery
+    // 4. Custom / Standalone folders discovery
     let standalone_out = standalone::scan_custom_folders(&config.custom_folders, &known_dirs);
     let standalone_count = standalone_out.games.len();
     games.extend(standalone_out.games);
@@ -52,6 +60,7 @@ pub fn scan_all_installed_games(config: &AppConfig) -> ScanReport {
         games,
         steam_count,
         epic_count,
+        battlenet_count,
         standalone_count,
         warnings,
     }

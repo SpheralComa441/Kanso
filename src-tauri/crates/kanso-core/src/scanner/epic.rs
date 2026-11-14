@@ -91,16 +91,16 @@ pub fn parse_epic_item_manifest(content: &str) -> Result<Option<DetectedGame>, S
         app_name,
     );
 
-    Ok(Some(DetectedGame {
-        id: format!("epic:{id_suffix}"),
-        title: display_name.to_string(),
-        clean_title: clean_game_title(display_name),
-        platform: GamePlatform::Epic,
-        platform_app_id: (!app_name.is_empty()).then(|| app_name.to_string()),
-        install_dir: install_location.to_string(),
-        executable_path: Some(exe_path),
+    Ok(Some(DetectedGame::new_detected(
+        format!("epic:{id_suffix}"),
+        display_name.to_string(),
+        clean_game_title(display_name),
+        GamePlatform::Epic,
+        (!app_name.is_empty()).then(|| app_name.to_string()),
+        install_location.to_string(),
+        Some(exe_path),
         launch_uri,
-    }))
+    )))
 }
 
 fn join_install_and_executable(install_location: &str, launch_executable: &str) -> String {
