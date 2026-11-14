@@ -11,7 +11,7 @@ export function ApiKeyBanner({ onConfigure, onDismiss }: ApiKeyBannerProps) {
   return (
     <div
       role="status"
-      className="shrink-0 border-b border-oled-border bg-oled-surface/70 px-4 py-2.5"
+      className="mx-4 mb-1 shrink-0 rounded-lg border border-oled-border bg-oled-surface/70 px-4 py-2.5"
     >
       <div className="flex items-center justify-between gap-4 text-xs">
         <div className="flex items-center gap-2.5 text-zinc-300">

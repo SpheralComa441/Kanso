@@ -1,19 +1,38 @@
+@import "./fonts.css";
 @import "./theme.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* Animatable, so scrollbars can fade in and out (a pseudo-element cannot be transitioned). */
+@property --scrollbar-thumb {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: transparent;
+}
+
 @layer base {
+  html {
+    /* Everything sized in rem follows a theme's interface scale */
+    font-size: calc(16px * var(--ui-scale));
+    --scrollbar-thumb: color-mix(in srgb, var(--text-faint) 55%, transparent);
+  }
+
   html,
   body,
   #root {
     height: 100%;
-    background-color: var(--bg-primary);
     color: var(--text-primary);
     font-family: var(--font-sans);
-    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     user-select: none;
+  }
+
+  body {
+    background: var(--app-background);
+    background-color: var(--bg-primary);
+    background-attachment: fixed;
+    overflow: hidden;
   }
 
   input,
@@ -21,22 +40,354 @@
     user-select: text;
   }
 
-  /* Minimalist dark scrollbars */
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
   }
 
-  ::-webkit-scrollbar-track {
-    background: var(--bg-primary);
+  /* Scrollbars: a thin floating pill, no track */
+  ::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    background: var(--border-subtle);
+    background-color: var(--scrollbar-thumb);
+    background-clip: content-box;
+    border: 3px solid transparent;
     border-radius: 9999px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--border-strong);
+    background-color: color-mix(in srgb, var(--text-muted) 80%, transparent);
+  }
+}
+
+/*
+ * Icon geometry. Outside the Tailwind layers on purpose: the `lucide` class is added by the
+ * icon library at runtime, so Tailwind would drop a layered rule as unused. `:where` keeps
+ * it at zero specificity: utilities such as `fill-accent` (a filled star) still win, while
+ * the icons' own attributes are overridden.
+ */
+:where(svg.lucide) {
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: var(--icon-cap);
+  stroke-linejoin: var(--icon-join);
+  scale: var(--icon-scale);
+  fill: color-mix(in srgb, currentColor calc(var(--icon-fill) * 100%), transparent);
+}
+
+/* Title rules a theme switches on; above utilities, which set these per component. */
+:root[data-heading-weight] :is(h1, h2, h3) {
+  font-weight: var(--heading-weight);
+}
+
+:root[data-heading-uppercase] :is(h1, h2, h3) {
+  text-transform: uppercase;
+}
+
+:root[data-heading-spacing] :is(h1, h2, h3) {
+  letter-spacing: var(--heading-spacing);
+}
+
+@layer components {
+  /* ------------------------------------------------------------ app frame */
+
+  /* The top bar is the window's title bar: no line under it unless the theme asks for one */
+  .app-header {
+    height: var(--header-height);
+    border-bottom: var(--divider-width) solid var(--border-subtle);
+  }
+
+  .app-sidebar {
+    border-right: var(--divider-width) solid var(--border-subtle);
+  }
+
+  :root[data-sidebar-side="right"] .app-body {
+    flex-direction: row-reverse;
+  }
+
+  :root[data-sidebar-side="right"] .app-sidebar {
+    border-right: 0;
+    border-left: var(--divider-width) solid var(--border-subtle);
+  }
+
+  .app-sidebar-nav {
+    width: var(--sidebar-width);
+    /* Right padding plus the scrollbar gutter always equal the left padding */
+    padding: 1rem calc(10px - var(--scrollbar-size)) 1rem 10px;
+    scrollbar-gutter: stable;
+  }
+
+  .app-main {
+    padding: 1.25rem calc(var(--content-padding) - var(--scrollbar-size)) var(--content-padding)
+      var(--content-padding);
+    /* Space for the scrollbar is always reserved: the grid does not shift when it appears */
+    scrollbar-gutter: stable;
+  }
+
+  /* Dialogs and panels sit below the title bar, which stays usable */
+  .below-header {
+    top: var(--header-height);
+  }
+
+  /* ------------------------------------------------------- scrolling areas */
+
+  /* The scrollbar shows while the pointer (or keyboard focus) is in the area */
+  .scroll-area {
+    --scrollbar-thumb: transparent;
+    transition: --scrollbar-thumb 0.25s ease;
+  }
+
+  .scroll-area:hover,
+  .scroll-area:focus-within,
+  :root[data-scrollbars="always"] .scroll-area {
+    --scrollbar-thumb: color-mix(in srgb, var(--text-faint) 55%, transparent);
+  }
+
+  :root[data-scrollbars="hidden"] {
+    --scrollbar-size: 0px;
+  }
+
+  :root[data-scrollbars="hidden"] :is(.app-main, .app-sidebar-nav) {
+    scrollbar-gutter: auto;
+  }
+
+  /* Content scrolls out of sight under the bar above instead of being cut by a line */
+  .fade-top {
+    --fade: 1.125rem;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
+  }
+
+  /* ------------------------------------------------------------------ cards */
+
+  .game-grid {
+    display: grid;
+    gap: var(--grid-gap);
+    grid-template-columns: repeat(auto-fill, minmax(var(--card-min-width), 1fr));
+  }
+
+  .game-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: var(--card-border-width) solid var(--border-subtle);
+    border-radius: var(--card-radius);
+    background-color: var(--bg-surface);
+    box-shadow: var(--card-shadow);
+    transition:
+      transform 0.2s ease,
+      border-color 0.2s ease,
+      box-shadow 0.2s ease;
+  }
+
+  .game-card:hover,
+  .game-card:focus-within {
+    transform: translateY(var(--card-hover-lift));
+    border-color: var(--card-hover-border);
+    box-shadow: var(--card-hover-shadow);
+  }
+
+  .game-card-cover {
+    aspect-ratio: var(--cover-aspect);
+  }
+
+  .game-card-art {
+    transition: transform 0.3s ease;
+  }
+
+  .game-card:hover .game-card-art,
+  .game-card:focus-within .game-card-art {
+    transform: scale(var(--card-hover-zoom));
+  }
+
+  /*
+   * Cut corners. A clip-path removes the corners (and with them the border and any shadow),
+   * so the border is redrawn as a ring that follows the cuts.
+   */
+  :root:is([data-card-shape="cut"], [data-card-shape="slant"]) .game-card {
+    /* --cut-a: top-left and bottom-right; --cut-b: top-right and bottom-left */
+    --cut-a: var(--card-radius);
+    --cut-b: var(--card-radius);
+    --ring: var(--card-border-width);
+    --in-a: max(calc(var(--cut-a) + var(--ring) * 0.414), var(--ring));
+    --in-b: max(calc(var(--cut-b) + var(--ring) * 0.414), var(--ring));
+    border-radius: 0;
+    border-color: transparent;
+    box-shadow: none;
+    clip-path: polygon(
+      var(--cut-a) 0,
+      calc(100% - var(--cut-b)) 0,
+      100% var(--cut-b),
+      100% calc(100% - var(--cut-a)),
+      calc(100% - var(--cut-a)) 100%,
+      var(--cut-b) 100%,
+      0 calc(100% - var(--cut-b)),
+      0 var(--cut-a)
+    );
+  }
+
+  :root[data-card-shape="slant"] .game-card {
+    --cut-a: 0px;
+  }
+
+  :root:is([data-card-shape="cut"], [data-card-shape="slant"]) .game-card::after {
+    content: "";
+    position: absolute;
+    inset: calc(var(--ring) * -1);
+    z-index: 5;
+    pointer-events: none;
+    background-color: var(--border-subtle);
+    transition: background-color 0.2s ease;
+    clip-path: polygon(
+      evenodd,
+      var(--cut-a) 0,
+      calc(100% - var(--cut-b)) 0,
+      100% var(--cut-b),
+      100% calc(100% - var(--cut-a)),
+      calc(100% - var(--cut-a)) 100%,
+      var(--cut-b) 100%,
+      0 calc(100% - var(--cut-b)),
+      0 var(--cut-a),
+      var(--cut-a) 0,
+      var(--in-a) var(--ring),
+      calc(100% - var(--in-b)) var(--ring),
+      calc(100% - var(--ring)) var(--in-b),
+      calc(100% - var(--ring)) calc(100% - var(--in-a)),
+      calc(100% - var(--in-a)) calc(100% - var(--ring)),
+      var(--in-b) calc(100% - var(--ring)),
+      var(--ring) calc(100% - var(--in-b)),
+      var(--ring) var(--in-a),
+      var(--in-a) var(--ring)
+    );
+  }
+
+  :root:is([data-card-shape="cut"], [data-card-shape="slant"]) .game-card:hover::after,
+  :root:is([data-card-shape="cut"], [data-card-shape="slant"]) .game-card:focus-within::after {
+    background-color: var(--card-hover-border);
+  }
+
+  /* Caption over the cover, or no caption at all */
+  :root[data-card-caption="none"] .game-card-caption,
+  :root[data-card-caption="overlay"] .game-card-no-art .game-card-caption {
+    display: none;
+  }
+
+  :root[data-card-caption="overlay"] .game-card-caption {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    padding-top: 2.5rem;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.88), rgb(0 0 0 / 0.5) 55%, transparent);
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+
+  /* Over artwork of any color: fixed light text, independent of the theme */
+  :root[data-card-caption="overlay"] .game-card-caption h3 {
+    color: #fff;
+  }
+
+  :root[data-card-caption="overlay"] .game-card-caption p {
+    color: rgb(255 255 255 / 0.72);
+  }
+
+  /* The play button takes the caption's place while the card is hovered */
+  :root[data-card-caption="overlay"] .game-card:hover .game-card-caption,
+  :root[data-card-caption="overlay"] .game-card:focus-within .game-card-caption {
+    opacity: 0;
+  }
+
+  /* --------------------------------------------------------- window controls */
+
+  .window-controls {
+    position: relative;
+    z-index: 10;
+    display: flex;
+    align-self: stretch;
+    flex-shrink: 0;
+  }
+
+  .window-control {
+    display: grid;
+    width: 2.875rem;
+    place-items: center;
+    color: var(--text-muted);
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .window-control:hover {
+    background-color: color-mix(in srgb, var(--text-primary) 10%, transparent);
+    color: var(--text-primary);
+  }
+
+  .window-control[data-action="close"]:hover {
+    background-color: #e81123;
+    color: #fff;
+  }
+
+  .window-control svg {
+    width: 0.625rem;
+    height: 0.625rem;
+  }
+
+  /* Over the veil a dialog casts on the bar: light glyphs, whatever the theme */
+  .app-header[data-veiled] .window-control {
+    color: rgb(255 255 255 / 0.75);
+  }
+
+  .app-header[data-veiled] .window-control:hover {
+    background-color: rgb(255 255 255 / 0.14);
+    color: #fff;
+  }
+
+  .app-header[data-veiled] .window-control[data-action="close"]:hover {
+    background-color: #e81123;
+  }
+
+  /* "dots": small colored circles whose glyph appears when the pointer is near */
+  :root[data-window-controls="dots"] .window-controls {
+    align-self: center;
+    gap: 0.5rem;
+    padding: 0.375rem 0.875rem 0.375rem 0.5rem;
+  }
+
+  :root[data-window-controls="dots"] .window-control {
+    width: 0.8125rem;
+    height: 0.8125rem;
+    border-radius: 9999px;
+    background-color: var(--dot);
+    color: transparent;
+  }
+
+  :root[data-window-controls="dots"] .window-control[data-action="minimize"] {
+    --dot: #febc2e;
+  }
+
+  :root[data-window-controls="dots"] .window-control[data-action="maximize"] {
+    --dot: #28c840;
+  }
+
+  :root[data-window-controls="dots"] .window-control[data-action="close"] {
+    --dot: #ff5f57;
+  }
+
+  :root[data-window-controls="dots"] .window-controls:hover .window-control {
+    color: rgb(0 0 0 / 0.65);
+  }
+
+  :root[data-window-controls="dots"] .window-control svg {
+    width: 0.4375rem;
+    height: 0.4375rem;
   }
 }

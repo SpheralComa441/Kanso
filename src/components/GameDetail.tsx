@@ -72,7 +72,7 @@ export function GameDetail({
 
   return (
     <div
-      className="fixed inset-0 z-40 flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+      className="below-header fixed inset-x-0 bottom-0 z-40 flex items-center justify-center bg-black/75 p-6 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -117,7 +117,7 @@ export function GameDetail({
                 <span className="line-clamp-4 text-sm font-semibold text-zinc-300">
                   {game.title}
                 </span>
-                <span className="text-[11px] text-zinc-500">
+                <span className="text-2xs text-zinc-500">
                   {t("detail.noCover")}
                 </span>
               </div>
@@ -126,10 +126,10 @@ export function GameDetail({
         </div>
 
         {/* Details */}
-        <div className="relative flex min-w-0 flex-1 flex-col gap-5 overflow-y-auto p-7">
+        <div className="relative flex min-w-0 flex-1 flex-col gap-5 scroll-area overflow-y-auto p-7">
           <div className="space-y-3 pr-8">
             <span
-              className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-medium ${platformMeta.badgeClass}`}
+              className={`inline-block rounded-md border px-2 py-0.5 text-3xs font-medium ${platformMeta.badgeClass}`}
             >
               {platformLabel(game.platform, t)}
             </span>
@@ -148,7 +148,7 @@ export function GameDetail({
                       type="button"
                       onClick={() => onSelectGenre(genreKey(genre))}
                       title={t("detail.showGenre", { genre })}
-                      className="rounded-full border border-oled-border bg-oled-bg/60 px-2.5 py-0.5 text-[11px] text-zinc-300 transition-colors hover:border-accent/50 hover:text-accent"
+                      className="rounded-full border border-oled-border bg-oled-bg/60 px-2.5 py-0.5 text-2xs text-zinc-300 transition-colors hover:border-accent/50 hover:text-accent"
                     >
                       {genre}
                     </button>
@@ -166,7 +166,7 @@ export function GameDetail({
             {game.shortDescription ?? t("detail.noDescription")}
           </p>
 
-          <dl className="mt-auto space-y-2 border-t border-oled-border/70 pt-4 text-[11px]">
+          <dl className="mt-auto space-y-2 border-t border-oled-border/70 pt-4 text-2xs">
             <div className="flex gap-3">
               <dt className="w-20 shrink-0 text-zinc-500">{t("detail.folder")}</dt>
               <dd

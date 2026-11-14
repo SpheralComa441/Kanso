@@ -234,7 +234,7 @@ export function SettingsModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+      className="below-header fixed inset-x-0 bottom-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) closeWithoutSaving();
       }}
@@ -243,7 +243,7 @@ export function SettingsModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
-        className="flex max-h-[92vh] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
+        className="flex max-h-full w-full max-w-xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-oled-border px-6 py-4">
@@ -270,7 +270,7 @@ export function SettingsModal({
         <form
           id="settings-form"
           onSubmit={handleSubmit}
-          className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-5"
+          className="min-h-0 flex-1 space-y-6 scroll-area overflow-y-auto px-6 py-5"
         >
           {errorMsg && (
             <div className="select-text rounded-lg border border-red-500/30 bg-red-500/10 px-3.5 py-2.5 text-xs text-red-200">
@@ -301,7 +301,7 @@ export function SettingsModal({
                 </option>
               ))}
             </select>
-            <p className="text-[11px] text-zinc-500">{t("settings.languageHelp")}</p>
+            <p className="text-2xs text-zinc-500">{t("settings.languageHelp")}</p>
           </section>
 
           {/* Theme */}
@@ -346,7 +346,7 @@ export function SettingsModal({
                         <span className="block truncate text-xs font-medium text-zinc-100">
                           {theme.name}
                         </span>
-                        <span className="block truncate text-[10px] text-zinc-500">
+                        <span className="block truncate text-3xs text-zinc-500">
                           {builtIn
                             ? t("theme.builtin")
                             : theme.author
@@ -415,7 +415,7 @@ export function SettingsModal({
             {themeNotice && (
               <p
                 role="status"
-                className={`select-text text-[11px] ${
+                className={`select-text text-2xs ${
                   themeNotice.type === "success"
                     ? "text-emerald-300"
                     : "text-red-300"
@@ -424,7 +424,7 @@ export function SettingsModal({
                 {themeNotice.text}
               </p>
             )}
-            <p className="text-[11px] leading-relaxed text-zinc-500">
+            <p className="text-2xs leading-relaxed text-zinc-500">
               {t("theme.help")}
             </p>
           </section>
@@ -440,7 +440,7 @@ export function SettingsModal({
                 <span>SteamGridDB API Key</span>
               </label>
               <span
-                className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                className={`rounded-full px-2 py-0.5 text-2xs font-medium ${
                   keyConfigured
                     ? "bg-emerald-500/15 text-emerald-300"
                     : "bg-zinc-800 text-zinc-400"
@@ -477,7 +477,7 @@ export function SettingsModal({
                 )}
               </button>
             </div>
-            <p className="select-text text-[11px] leading-relaxed text-zinc-500">
+            <p className="select-text text-2xs leading-relaxed text-zinc-500">
               {t("settings.keyHelp", {
                 url: "steamgriddb.com/profile/preferences/api",
               })}
@@ -534,7 +534,7 @@ export function SettingsModal({
                 {t("settings.noFolders")}
               </div>
             ) : (
-              <ul className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
+              <ul className="max-h-36 space-y-1.5 scroll-area overflow-y-auto pr-1">
                 {folders.map((folder, index) => (
                   <li
                     key={`${folder}-${index}`}
@@ -559,7 +559,7 @@ export function SettingsModal({
               </ul>
             )}
 
-            <p className="text-[11px] text-zinc-500">
+            <p className="text-2xs text-zinc-500">
               {t("settings.foldersHelp", { list: SKIPPED_EXE_PATTERNS })}
             </p>
           </section>
@@ -573,7 +573,7 @@ export function SettingsModal({
               >
                 {t("settings.trayTitle")}
               </label>
-              <p className="text-[11px] text-zinc-500">{t("settings.trayHelp")}</p>
+              <p className="text-2xs text-zinc-500">{t("settings.trayHelp")}</p>
             </div>
             <input
               id="minimize-to-tray-checkbox"

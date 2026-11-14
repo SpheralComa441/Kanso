@@ -191,8 +191,6 @@ export const it = {
   "theme.import": "Importa...",
   "theme.export": "Esporta...",
   "theme.openFolder": "Apri cartella temi",
-  "theme.help":
-    "Un tema è un file .json con colori e misure: crealo con Personalizza, esportalo e condividilo. I temi importati vengono validati e non possono contenere codice.",
   "theme.imported": "Tema «{name}» importato.",
   "theme.exported": "Tema esportato.",
   "theme.deleted": "Tema «{name}» eliminato.",
@@ -210,9 +208,6 @@ export const it = {
   "theme.schemeDark": "Scura",
   "theme.schemeLight": "Chiara",
   "theme.colors": "Colori",
-  "theme.layout": "Misure",
-  "theme.font": "Font (tra quelli installati)",
-  "theme.fontPlaceholder": "Predefinito di Kanso",
   "theme.saveAsNew": "Salva come nuovo tema",
   "theme.saveChanges": "Salva modifiche",
   "theme.nameRequired": "Dai un nome al tema.",
@@ -229,9 +224,22 @@ export const it = {
   "theme.color.accent": "Accento",
   "theme.color.accentHover": "Accento al passaggio",
   "theme.color.onAccent": "Testo sull'accento",
-  "theme.layout.cardMinWidth": "Larghezza minima delle card",
-  "theme.layout.cardRadius": "Raggio degli angoli",
-  "theme.layout.sidebarWidth": "Larghezza del pannello laterale",
+  "theme.help":
+    "Scegli un tema o creane uno con Personalizza (colori e font). I temi importati possono cambiare anche le forme di card e icone, le misure e lo sfondo: Esporta crea un file .json completo da modificare. Vengono validati e non possono contenere codice.",
+  "theme.editorScope":
+    "Da qui si cambiano colori e font. Forme, misure ed effetti restano quelli del file del tema: per cambiarli esporta il tema, modifica il .json e importalo.",
+  "theme.fonts": "Font",
+  "theme.fontBody": "Testo",
+  "theme.fontHeading": "Titoli",
+  "theme.fontDefault": "Predefinito di sistema",
+  "theme.fontSameAsBody": "Come il testo",
+  "theme.fontFromTheme": "nel tema",
+  "theme.fontCustom": "Altro font installato sul PC",
+  "theme.fontCustomPlaceholder": "es. Bahnschrift",
+  "window.minimize": "Riduci a icona",
+  "window.maximize": "Ingrandisci",
+  "window.restore": "Ripristina",
+  "window.close": "Chiudi",
 } as const;
 
 export type MessageKey = keyof typeof it;

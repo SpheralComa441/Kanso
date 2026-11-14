@@ -79,7 +79,7 @@ function FilterChip({ label, onRemove, icon }: FilterChipProps) {
       type="button"
       onClick={onRemove}
       title={t("filters.remove", { label })}
-      className="group inline-flex items-center gap-1.5 rounded-full border border-oled-border bg-oled-surface py-0.5 pl-2.5 pr-1.5 text-[11px] font-medium text-zinc-200 transition-colors hover:border-zinc-600"
+      className="group inline-flex items-center gap-1.5 rounded-full border border-oled-border bg-oled-surface py-0.5 pl-2.5 pr-1.5 text-2xs font-medium text-zinc-200 transition-colors hover:border-zinc-600"
     >
       {icon}
       <span>{label}</span>
@@ -405,7 +405,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const poolSize = filters.collection === "hidden" ? counts.hidden : counts.visible;
 
   return (
-    <div className="flex h-full flex-col bg-oled-bg text-zinc-100">
+    <div className="flex h-full flex-col text-zinc-100">
       <Header
         totalGames={counts.visible}
         searchQuery={searchQuery}
@@ -419,6 +419,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         isScanning={isScanning}
         isSyncingMetadata={isSyncingMetadata}
         hasApiKey={hasApiKey}
+        overlayDepth={
+          Number(Boolean(detailGame)) + Number(Boolean(editingGame)) + Number(isSettingsOpen)
+        }
+        settingsDisabled={themeEditorBase !== null}
         onScan={() => void performScan(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
@@ -430,7 +434,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         />
       )}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="app-body flex min-h-0 flex-1">
         <Sidebar
           isOpen={isSidebarOpen}
           view={mainView}
@@ -441,7 +445,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           genres={genres}
         />
 
-        <main className="min-w-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
+        <main className="app-main scroll-area fade-top min-w-0 flex-1 space-y-4 overflow-y-auto">
           {!isRunningInTauri() && (
             <div className="rounded-lg border border-oled-border bg-oled-surface/70 px-4 py-2 text-xs text-zinc-400">
               {t("app.previewNotice")}

@@ -1,5 +1,6 @@
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AppConfig,
@@ -11,6 +12,7 @@ import type {
   Theme,
 } from "../types/game";
 import { PREVIEW_MOCK_DEALS, PREVIEW_MOCK_GAMES } from "./previewData";
+import { withThemeDefaults, type ThemeInput } from "./themes";
 
 const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
 
@@ -355,7 +357,10 @@ function readPreviewThemes(): Theme[] {
   try {
     const raw = localStorage.getItem(PREVIEW_THEMES_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as Theme[]) : [];
+    // Themes saved by an earlier version lack the newer sections
+    return Array.isArray(parsed)
+      ? (parsed as ThemeInput[]).map(withThemeDefaults)
+      : [];
   } catch {
     return [];
   }
@@ -447,4 +452,37 @@ export async function openThemesFolder(): Promise<void> {
   if (isTauri()) {
     await invoke<void>("open_themes_folder");
   }
+}
+
+/* ----------------------------------------------------------------- window */
+
+export type WindowAction = "minimize" | "toggleMaximize" | "close";
+
+/** The title bar is drawn by Kanso: its buttons drive the native window. */
+export async function windowAction(action: WindowAction): Promise<void> {
+  if (!isTauri()) return;
+  const appWindow = getCurrentWindow();
+  if (action === "minimize") await appWindow.minimize();
+  else if (action === "toggleMaximize") await appWindow.toggleMaximize();
+  else await appWindow.close();
+}
+
+/**
+ * Reports whether the window is maximized, now and whenever it is resized (snapping and
+ * double-clicking the title bar maximize it without going through Kanso's button).
+ * Resolves to the function that stops watching.
+ */
+export async function watchWindowMaximized(
+  onChange: (isMaximized: boolean) => void
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const appWindow = getCurrentWindow();
+  const sync = () => {
+    appWindow
+      .isMaximized()
+      .then(onChange)
+      .catch(() => {});
+  };
+  sync();
+  return appWindow.onResized(sync);
 }

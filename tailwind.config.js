@@ -40,8 +40,19 @@ export default {
           950: themeColor("--accent-contrast"),
         },
       },
+      // The radius scale is routed through theme tokens: `rounded-lg` is "a control",
+      // `rounded-xl` "a panel", `rounded-md` "a badge". `rounded-full` stays a real circle.
       borderRadius: {
+        DEFAULT: "min(0.25rem, var(--radius-chip))",
+        md: "var(--radius-chip)",
+        lg: "var(--radius-control)",
+        xl: "var(--radius-panel)",
         card: "var(--card-radius)",
+      },
+      fontSize: {
+        // In rem (11px and 10px at the default scale) so they follow a theme's scale
+        "2xs": "0.6875rem",
+        "3xs": "0.625rem",
       },
       fontFamily: {
         sans: ["var(--font-sans)"],

@@ -65,7 +65,7 @@ function NavRow({ id, label, count, active, icon, onClick }: NavRowProps) {
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="px-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">
+    <h2 className="px-2.5 pb-1.5 text-3xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
       {children}
     </h2>
   );
@@ -119,11 +119,11 @@ export function Sidebar({
     <aside
       id="library-sidebar"
       aria-label={t("sidebar.label")}
-      className={`h-full shrink-0 overflow-hidden border-oled-border transition-[width,visibility] duration-200 ease-out ${
-        isOpen ? "visible w-[var(--sidebar-width)] border-r" : "invisible w-0"
+      className={`h-full shrink-0 overflow-hidden transition-[width,visibility] duration-200 ease-out ${
+        isOpen ? "app-sidebar visible w-[var(--sidebar-width)]" : "invisible w-0"
       }`}
     >
-      <nav className="flex h-full w-[var(--sidebar-width)] flex-col gap-5 overflow-y-auto px-2.5 py-4">
+      <nav className="app-sidebar-nav scroll-area fade-top flex h-full flex-col gap-5 overflow-y-auto">
         <NavRow
           id="nav-home"
           label={t("sidebar.home")}
@@ -206,7 +206,7 @@ export function Sidebar({
         <section className="min-h-0">
           <SectionTitle>{t("sidebar.genre")}</SectionTitle>
           {genres.length === 0 ? (
-            <p className="px-2.5 text-[11px] leading-relaxed text-zinc-500">
+            <p className="px-2.5 text-2xs leading-relaxed text-zinc-500">
               {t("sidebar.genresEmpty")}
             </p>
           ) : (
