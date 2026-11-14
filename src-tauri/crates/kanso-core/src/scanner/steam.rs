@@ -637,7 +637,11 @@ mod tests {
         fs::create_dir_all(&old_account).unwrap();
         fs::create_dir_all(&current_account).unwrap();
         fs::write(old_account.join("localconfig.vdf"), LOCAL_CONFIG.replace("\"754\"", "\"9999\"")).unwrap();
-        let old_file = fs::File::open(old_account.join("localconfig.vdf")).unwrap();
+        // Opened for writing: Windows refuses to change the times of a read-only handle
+        let old_file = fs::OpenOptions::new()
+            .write(true)
+            .open(old_account.join("localconfig.vdf"))
+            .unwrap();
         old_file
             .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(86_400))
             .unwrap();
