@@ -20,15 +20,15 @@ const TEXT = {
   continuing: { en: "Keep going", it: "Continua", es: "Continúa", ru: "Продолжить" },
   backlog: { en: "From your backlog", it: "Dal backlog", es: "De tus pendientes", ru: "Из отложенных" },
   rediscover: { en: "Rediscover", it: "Riscopri", es: "Redescubre", ru: "Вспомнить" },
-  played: { en: "played", it: "giocate", es: "jugadas", ru: "сыграно" },
+  played: { en: "{time} played", it: "{time} di gioco", es: "{time} de juego", ru: "{time} в игре" },
   neverPlayed: { en: "never played", it: "mai giocato", es: "nunca jugado", ru: "ещё не запускалась" },
   daysAgo: { en: "not opened for {n} days", it: "non lo apri da {n} giorni", es: "sin abrir desde hace {n} días", ru: "не запускалась {n} дн." },
   monthsAgo: { en: "not opened for {n} months", it: "non lo apri da {n} mesi", es: "sin abrir desde hace {n} meses", ru: "не запускалась {n} мес." },
 };
 
-function hours(minutes) {
-  const value = Math.max(1, Math.round(minutes / 60));
-  return value + " h " + kanso.t(TEXT.played);
+function played(minutes) {
+  const time = minutes < 60 ? minutes + " min" : Math.round(minutes / 60) + " h";
+  return kanso.t(TEXT.played).replace("{time}", time);
 }
 
 function idleNote(game, now) {
@@ -59,15 +59,15 @@ kanso.plugin({
         (game) => game.status !== "abandoned" && (includeFinished || game.status !== "finished")
       );
 
-      const played = (game) => (game.playtimeMinutes || 0) > 0 || game.playCount > 0;
+      const started = (game) => (game.playtimeMinutes || 0) > 0 || game.playCount > 0;
       const recent = (game) => game.lastPlayedAt && now - game.lastPlayedAt < 30 * DAY;
 
       // In progress: marked as such, or simply played in the last month
-      const continuing = games.filter((game) => game.status === "playing" || (played(game) && recent(game) && game.status !== "backlog"));
+      const continuing = games.filter((game) => game.status === "playing" || (started(game) && recent(game) && game.status !== "backlog"));
       // Waiting: marked as backlog, or never started
-      const waiting = games.filter((game) => game.status === "backlog" || !played(game));
+      const waiting = games.filter((game) => game.status === "backlog" || !started(game));
       // Forgotten: played once, untouched for two months or more
-      const forgotten = games.filter((game) => played(game) && game.lastPlayedAt && now - game.lastPlayedAt >= 60 * DAY);
+      const forgotten = games.filter((game) => started(game) && game.lastPlayedAt && now - game.lastPlayedAt >= 60 * DAY);
 
       const taken = new Set();
       const picks = [];
@@ -79,13 +79,13 @@ kanso.plugin({
         picks.push({ id: game.id, note: extra ? kanso.t(label) + " · " + extra : kanso.t(label) });
       };
 
-      add(continuing, TEXT.continuing, (game) => (game.playtimeMinutes ? hours(game.playtimeMinutes) : ""));
-      add(waiting, TEXT.backlog, (game) => (played(game) ? "" : kanso.t(TEXT.neverPlayed)));
+      add(continuing, TEXT.continuing, (game) => (game.playtimeMinutes ? played(game.playtimeMinutes) : ""));
+      add(waiting, TEXT.backlog, (game) => (started(game) ? "" : kanso.t(TEXT.neverPlayed)));
       add(forgotten, TEXT.rediscover, (game) => idleNote(game, now));
       // Small libraries: fill up to three with anything not yet suggested
       while (picks.length < 3) {
         const before = picks.length;
-        add(games, TEXT.rediscover, (game) => (game.playtimeMinutes ? hours(game.playtimeMinutes) : kanso.t(TEXT.neverPlayed)));
+        add(games, TEXT.rediscover, (game) => (game.playtimeMinutes ? played(game.playtimeMinutes) : kanso.t(TEXT.neverPlayed)));
         if (picks.length === before) break;
       }
 

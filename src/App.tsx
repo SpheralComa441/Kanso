@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EyeOff, History, Star, X } from "lucide-react";
 import { ApiKeyBanner } from "./components/ApiKeyBanner";
 import { DealsView } from "./components/DealsView";
 import { EditGameModal } from "./components/EditGameModal";
 import { GameDetail } from "./components/GameDetail";
 import { GameList } from "./components/GameList";
-import { Header, type ViewMode } from "./components/Header";
+import { Header, type PluginCommandEntry, type ViewMode } from "./components/Header";
+import {
+  PluginCommandDialog,
+  type PluginCommandRun,
+} from "./components/PluginCommandDialog";
 import { SettingsModal } from "./components/SettingsModal";
 import { Sidebar, type MainView } from "./components/Sidebar";
+import { StatsView } from "./components/StatsView";
+import { STATUS_LABEL_KEYS, StatusIcon } from "./components/StatusIcon";
 import { ThemeEditor } from "./components/ThemeEditor";
 import {
   I18nProvider,
@@ -21,14 +27,20 @@ import {
   getSettings,
   isRunningInTauri,
   launchGame,
+  listPlugins,
   listThemes,
+  pluginBadges,
+  runPluginCommand,
   saveSettings,
   saveTheme,
   scanGames,
   setGameFavorite,
   setGameHidden,
+  setGameStatus,
   subscribeToGameUpdates,
   syncLibraryMetadata,
+  watchPluginBadges,
+  watchRunningGames,
 } from "./lib/backend";
 import {
   EMPTY_FILTERS,
@@ -49,7 +61,10 @@ import { DEFAULT_ACCESSIBILITY, applyTheme, resolveTheme } from "./lib/themes";
 import type {
   AccessibilityConfig,
   AppConfig,
+  BadgeEntry,
   DetectedGame,
+  GameStatus,
+  PluginInfo,
   ScanReport,
   Theme,
 } from "./types/game";
@@ -61,6 +76,8 @@ const INITIAL_CONFIG: AppConfig = {
   language: null,
   themeId: null,
   accessibility: DEFAULT_ACCESSIBILITY,
+  trackPlaytime: true,
+  plugins: {},
 };
 
 const SIDEBAR_PREF_KEY = "kanso.ui.sidebar";
@@ -160,7 +177,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY_FILTERS);
   const [mainView, setMainView] = useState<MainView>(() =>
-    readUiPreference(MAIN_VIEW_PREF_KEY, ["home", "library"], "library")
+    readUiPreference(MAIN_VIEW_PREF_KEY, ["home", "library", "stats"], "library")
   );
   const [isSidebarOpen, setIsSidebarOpen] = useState(
     () => readUiPreference(SIDEBAR_PREF_KEY, ["open", "closed"], "open") === "open"
@@ -177,6 +194,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   /** Accessibility choices being tried in Settings, before they are saved. */
   const [previewAccessibility, setPreviewAccessibility] =
     useState<AccessibilityConfig | null>(null);
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [pluginWarnings, setPluginWarnings] = useState<string[]>([]);
+  /** Short labels plugins have for the game cards, by game id. */
+  const [badges, setBadges] = useState<Record<string, BadgeEntry[]>>({});
+  const [runningIds, setRunningIds] = useState<ReadonlySet<string>>(new Set());
+  const [commandRun, setCommandRun] = useState<PluginCommandRun | null>(null);
 
   /* ------------------------------------------------------------------ theme */
 
@@ -201,6 +224,94 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   useEffect(() => {
     applyTheme(previewTheme ?? savedTheme, previewAccessibility ?? config.accessibility);
   }, [previewTheme, savedTheme, previewAccessibility, config.accessibility]);
+
+  /* ---------------------------------------------------------------- plugins */
+
+  const reloadBadges = useCallback(async () => {
+    try {
+      setBadges(await pluginBadges());
+    } catch {
+      // Labels are a nicety: the library works without them
+    }
+  }, []);
+
+  const reloadPlugins = useCallback(async () => {
+    try {
+      const listed = await listPlugins();
+      setPlugins(listed.plugins);
+      setPluginWarnings(listed.warnings);
+    } catch {
+      setPlugins([]);
+    }
+    await reloadBadges();
+  }, [reloadBadges]);
+
+  // Plugin names are in the interface language: read them again when it changes
+  useEffect(() => {
+    if (settingsLoaded) void reloadPlugins();
+  }, [settingsLoaded, lang, reloadPlugins]);
+
+  // Labels arrive one game at a time while plugins catch up in the background
+  const badgeTimer = useRef<number | null>(null);
+  useEffect(() => {
+    let active = true;
+    let stop: (() => void) | null = null;
+    void watchPluginBadges(() => {
+      if (badgeTimer.current !== null) window.clearTimeout(badgeTimer.current);
+      badgeTimer.current = window.setTimeout(() => void reloadBadges(), 400);
+    }).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    });
+    return () => {
+      active = false;
+      stop?.();
+      if (badgeTimer.current !== null) window.clearTimeout(badgeTimer.current);
+    };
+  }, [reloadBadges]);
+
+  useEffect(() => {
+    let active = true;
+    let stop: (() => void) | null = null;
+    void watchRunningGames((ids) => {
+      if (active) setRunningIds(new Set(ids));
+    }).then((unlisten) => {
+      if (active) stop = unlisten;
+      else unlisten();
+    });
+    return () => {
+      active = false;
+      stop?.();
+    };
+  }, []);
+
+  const startCommand = useCallback(
+    async (command: Pick<PluginCommandRun, "pluginId" | "commandId" | "title">) => {
+      setCommandRun((previous) => ({
+        ...command,
+        // Running the same command again keeps its last answer on screen meanwhile
+        view:
+          previous?.pluginId === command.pluginId && previous.commandId === command.commandId
+            ? previous.view
+            : null,
+        error: null,
+        isRunning: true,
+      }));
+      try {
+        const view = await runPluginCommand(command.pluginId, command.commandId);
+        setCommandRun((current) =>
+          current && current.isRunning ? { ...current, view, isRunning: false } : current
+        );
+      } catch (err) {
+        const error = typeof err === "string" ? err : t("plugins.actionError");
+        setCommandRun((current) =>
+          current && current.isRunning ? { ...current, error, isRunning: false } : current
+        );
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   /* ---------------------------------------------------------------- library */
 
@@ -279,6 +390,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
     const saved = await saveSettings(updated);
     onConfigChange(saved);
+    // Plugins may have been switched on or off, or their labels hidden
+    void reloadPlugins();
 
     if (foldersChanged) {
       await performScan(true);
@@ -329,6 +442,16 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     }
   };
 
+  const handleSetStatus = async (game: DetectedGame, status: GameStatus | null) => {
+    upsertSingleGameInState({ ...game, status });
+    try {
+      upsertSingleGameInState(await setGameStatus(game.id, status));
+    } catch (err) {
+      upsertSingleGameInState(game);
+      setStatusMessage(typeof err === "string" ? err : t("app.statusError"));
+    }
+  };
+
   /* ------------------------------------------------------------- navigation */
 
   const showView = (view: MainView) => {
@@ -360,6 +483,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   };
 
   const closeDetail = useCallback(() => setDetailGameId(null), []);
+  const closeCommand = useCallback(() => setCommandRun(null), []);
   const closeEdit = useCallback(() => setEditingGameId(null), []);
   const closeThemeEditor = useCallback(() => {
     setThemeEditorBase(null);
@@ -384,6 +508,25 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           .map((g) => g.platformAppId as string)
       ),
     [games]
+  );
+
+  const detailPlugins = useMemo(
+    () => plugins.filter((plugin) => plugin.enabled && plugin.gameDetails),
+    [plugins]
+  );
+  const pluginCommands = useMemo<PluginCommandEntry[]>(
+    () =>
+      plugins
+        .filter((plugin) => plugin.enabled)
+        .flatMap((plugin) =>
+          plugin.commands.map((command) => ({
+            pluginId: plugin.id,
+            commandId: command.id,
+            title: command.title,
+            description: command.description,
+          }))
+        ),
+    [plugins]
   );
 
   // A genre filter whose last game was edited or uninstalled would show an empty library
@@ -440,11 +583,16 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         isSyncingMetadata={isSyncingMetadata}
         hasApiKey={hasApiKey}
         overlayDepth={
-          Number(Boolean(detailGame)) + Number(Boolean(editingGame)) + Number(isSettingsOpen)
+          Number(Boolean(detailGame)) +
+          Number(Boolean(editingGame)) +
+          Number(isSettingsOpen) +
+          Number(Boolean(commandRun))
         }
         settingsDisabled={themeEditorBase !== null}
         onScan={() => void performScan(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        pluginCommands={pluginCommands}
+        onRunPluginCommand={(command) => void startCommand(command)}
       />
 
       {settingsLoaded && !hasApiKey && !bannerDismissed && (
@@ -459,6 +607,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           isOpen={isSidebarOpen}
           view={mainView}
           onOpenHome={() => showView("home")}
+          onOpenStats={() => showView("stats")}
           filters={filters}
           onFiltersChange={changeFilters}
           counts={counts}
@@ -476,6 +625,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           {mainView === "home" ? (
             <DealsView
               ownedSteamAppIds={ownedSteamAppIds}
+              onError={setStatusMessage}
+            />
+          ) : mainView === "stats" ? (
+            <StatsView
+              games={games}
+              onOpenGame={(game) => setDetailGameId(game.id)}
               onError={setStatusMessage}
             />
           ) : (
@@ -516,6 +671,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                       onRemove={() => setFilters((f) => ({ ...f, tag: null }))}
                     />
                   )}
+                  {filters.status && (
+                    <FilterChip
+                      label={t(STATUS_LABEL_KEYS[filters.status])}
+                      icon={<StatusIcon status={filters.status} className="h-3 w-3 text-zinc-400" />}
+                      onRemove={() => setFilters((f) => ({ ...f, status: null }))}
+                    />
+                  )}
                   <span className="tabular-nums">
                     {t("filters.count", {
                       shown: filteredGames.length,
@@ -545,6 +707,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                 onLaunch={handleLaunchGame}
                 onToggleFavorite={handleToggleFavorite}
                 onOpenSettings={() => setIsSettingsOpen(true)}
+                badges={badges}
+                runningIds={runningIds}
               />
             </>
           )}
@@ -563,13 +727,33 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onSelectGenre={(key) => {
           setFilters({ ...EMPTY_FILTERS, genre: key });
           setSearchQuery("");
+          showView("library");
           closeDetail();
         }}
         onSelectTag={(key) => {
           setFilters({ ...EMPTY_FILTERS, tag: key });
           setSearchQuery("");
+          showView("library");
           closeDetail();
         }}
+        isRunning={detailGame !== null && runningIds.has(detailGame.id)}
+        onSetStatus={handleSetStatus}
+        plugins={detailPlugins}
+      />
+
+      <PluginCommandDialog
+        run={commandRun}
+        games={games}
+        isTopmost={!detailGame && !editingGame && !isSettingsOpen}
+        onClose={closeCommand}
+        onRunAgain={() => {
+          if (commandRun) void startCommand(commandRun);
+        }}
+        onOpenGame={(game) => {
+          closeCommand();
+          setDetailGameId(game.id);
+        }}
+        onLaunch={handleLaunchGame}
       />
 
       {/* Errors float above every dialog: a failed launch from the detail view stays readable.
@@ -606,6 +790,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           setPreviewAccessibility(null);
           setPreviewTheme(theme);
           setThemeEditorBase(theme);
+        }}
+        plugins={plugins}
+        pluginWarnings={pluginWarnings}
+        onPluginsChanged={async (saved) => {
+          onConfigChange(saved);
+          await reloadPlugins();
         }}
       />
 

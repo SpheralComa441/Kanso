@@ -61,6 +61,10 @@ function seed(game: PreviewSeed): DetectedGame {
     tags: [],
     tagsLang: "it",
     playtimeMinutes: null,
+    status: null,
+    achievementsUnlocked: null,
+    achievementsTotal: null,
+    steamStoreAppid: null,
     updatedAt: 1700000000000,
     ...rest,
   };
@@ -69,6 +73,9 @@ function seed(game: PreviewSeed): DetectedGame {
 export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   seed({
     id: "steam:1321440",
+    status: "playing",
+    achievementsUnlocked: 31,
+    achievementsTotal: 128,
     title: "Cassette Beasts",
     tags: ["Collezione di creature", "Combattimento a turni", "Pixel art", "Co-op locale"],
     playtimeMinutes: 754,
@@ -86,6 +93,10 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   }),
   seed({
     id: "steam:1091500",
+    status: "finished",
+    achievementsUnlocked: 44,
+    achievementsTotal: 57,
+    lastPlayedAt: Date.now() - 95 * 24 * 60 * 60 * 1000,
     title: "Cyberpunk 2077",
     tags: ["Mondo aperto", "Cyberpunk", "Giocatore singolo", "Fantascienza"],
     playtimeMinutes: 4380,
@@ -102,6 +113,8 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   }),
   seed({
     id: "steam:1145360",
+    achievementsUnlocked: 49,
+    achievementsTotal: 49,
     title: "Hades",
     tags: ["Stile Rogue", "Giocatore singolo", "Hack and slash", "Difficili"],
     playtimeMinutes: 2112,
@@ -131,6 +144,8 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   }),
   seed({
     id: "gog:1207658924",
+    status: "backlog",
+    steamStoreAppid: "292030",
     title: "The Witcher 3: Wild Hunt",
     tags: ["Mondo aperto", "Giocatore singolo", "Fantasy", "Ricchi di storia"],
     platform: "gog",
@@ -158,6 +173,9 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   }),
   seed({
     id: "steam:413150",
+    status: "abandoned",
+    achievementsUnlocked: 2,
+    achievementsTotal: 49,
     title: "Stardew Valley",
     tags: ["Simulatore di fattoria", "Pixel art", "Co-op online", "Rilassanti"],
     playtimeMinutes: 35,
@@ -197,6 +215,9 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   }),
   seed({
     id: "epic:dc9d2e595d0e4650b35d659f90d41059",
+    playtimeMinutes: 380,
+    lastPlayedAt: Date.now() - 6 * 24 * 60 * 60 * 1000,
+    steamStoreAppid: "",
     title: "Alan Wake 2 Deluxe Edition",
     cleanTitle: "Alan Wake 2",
     platform: "epic",
@@ -211,6 +232,10 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   }),
   seed({
     id: "standalone:8f31c9a04d2e11b7",
+    status: "finished",
+    playtimeMinutes: 2460,
+    lastPlayedAt: Date.now() - 40 * 24 * 60 * 60 * 1000,
+    steamStoreAppid: "367520",
     title: "Hollow Knight",
     tags: ["Metroidvania", "Stile Souls", "Difficili", "Giocatore singolo"],
     platform: "standalone",

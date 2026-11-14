@@ -1,8 +1,9 @@
-import { EyeOff, History, Home, Library, Star } from "lucide-react";
+import { ChartNoAxesColumn, EyeOff, History, Home, Library, Star } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import {
   EMPTY_FILTERS,
+  GAME_STATUSES,
   hasActiveFilters,
   type GenreSummary,
   type LibraryCollection,
@@ -10,13 +11,15 @@ import {
   type LibraryFilters,
 } from "../lib/library";
 import { PLATFORM_ORDER, platformLabel } from "../lib/platforms";
+import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
-export type MainView = "home" | "library";
+export type MainView = "home" | "library" | "stats";
 
 interface SidebarProps {
   isOpen: boolean;
   view: MainView;
   onOpenHome: () => void;
+  onOpenStats: () => void;
   filters: LibraryFilters;
   /** Changing a filter always shows the library. */
   onFiltersChange: (next: LibraryFilters) => void;
@@ -85,6 +88,7 @@ export function Sidebar({
   isOpen,
   view,
   onOpenHome,
+  onOpenStats,
   filters,
   onFiltersChange,
   counts,
@@ -122,6 +126,10 @@ export function Sidebar({
     ? tags
     : tags.filter((tag, index) => index < TAGS_SHOWN_AT_FIRST || tag.key === filters.tag);
 
+  // Statuses are set by hand: the section appears once the user has started using them
+  const statusesInUse =
+    filters.status !== null || GAME_STATUSES.some((status) => counts.byStatus[status] > 0);
+
   const platformsWithGames = PLATFORM_ORDER.filter(
     (platform) =>
       counts.byPlatform[platform] > 0 || filters.platform === platform
@@ -136,13 +144,23 @@ export function Sidebar({
       }`}
     >
       <nav className="app-sidebar-nav scroll-area fade-top flex h-full flex-col gap-5 overflow-y-auto">
-        <NavRow
-          id="nav-home"
-          label={t("sidebar.home")}
-          active={view === "home"}
-          icon={<Home className="h-3.5 w-3.5 shrink-0" />}
-          onClick={onOpenHome}
-        />
+        {/* The two pages that are not the library */}
+        <div className="space-y-0.5">
+          <NavRow
+            id="nav-home"
+            label={t("sidebar.home")}
+            active={view === "home"}
+            icon={<Home className="h-3.5 w-3.5 shrink-0" />}
+            onClick={onOpenHome}
+          />
+          <NavRow
+            id="nav-stats"
+            label={t("sidebar.stats")}
+            active={view === "stats"}
+            icon={<ChartNoAxesColumn className="h-3.5 w-3.5 shrink-0" />}
+            onClick={onOpenStats}
+          />
+        </div>
 
         <section>
           <SectionTitle>{t("sidebar.library")}</SectionTitle>
@@ -190,6 +208,30 @@ export function Sidebar({
           </div>
         </section>
 
+        {statusesInUse && (
+          <section>
+            <SectionTitle>{t("sidebar.status")}</SectionTitle>
+            <div className="space-y-0.5">
+              {GAME_STATUSES.map((status) => {
+                const active = inLibrary && filters.status === status;
+                return (
+                  <NavRow
+                    key={status}
+                    id={`filter-status-${status}`}
+                    label={t(STATUS_LABEL_KEYS[status])}
+                    count={counts.byStatus[status]}
+                    active={active}
+                    icon={<StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />}
+                    onClick={() =>
+                      onFiltersChange(withVisiblePool({ status: active ? null : status }))
+                    }
+                  />
+                );
+              })}
+            </div>
+          </section>
+        )}
+
         {platformsWithGames.length > 0 && (
           <section>
             <SectionTitle>{t("sidebar.platform")}</SectionTitle>
@@ -215,7 +257,7 @@ export function Sidebar({
           </section>
         )}
 
-        <section className="min-h-0">
+        <section>
           <SectionTitle>{t("sidebar.genre")}</SectionTitle>
           {genres.length === 0 ? (
             <p className="px-2.5 text-2xs leading-relaxed text-zinc-500">

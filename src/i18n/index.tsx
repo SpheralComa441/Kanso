@@ -80,6 +80,8 @@ export interface I18n {
   money: (amount: number, currency: string) => string;
   /** A playtime: "35 min", "12 h", "12 h 34 min". */
   duration: (minutes: number) => string;
+  /** A count with the language's digit grouping, e.g. "1.234". */
+  number: (value: number, maximumFractionDigits?: number) => string;
 }
 
 const RELATIVE_STEPS: [number, Intl.RelativeTimeFormatUnit, number][] = [
@@ -130,6 +132,8 @@ export function createI18n(lang: LanguageCode): I18n {
       ];
       return parts.filter(Boolean).join(" ");
     },
+    number: (value, maximumFractionDigits = 0) =>
+      new Intl.NumberFormat(lang, { maximumFractionDigits }).format(value),
     money: (amount, currency) => {
       try {
         return new Intl.NumberFormat(lang, { style: "currency", currency }).format(amount);

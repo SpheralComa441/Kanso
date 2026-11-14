@@ -154,12 +154,19 @@ fn play_tonight_suggests_one_to_continue_one_from_the_backlog_and_one_to_redisco
         assert_eq!(
             picks,
             [
-                ("gog:playing", "Continua · 10 h giocate"),
+                ("gog:playing", "Continua · 10 h di gioco"),
                 ("gog:never", "Dal backlog · mai giocato"),
                 ("gog:old", "Riscopri · non lo apri da 6 mesi"),
             ]
         );
     }
+
+    // A game played only for minutes says so instead of rounding up to an hour
+    let mut brief = other_game("gog:brief", "Appena provato");
+    brief.playtime_minutes = Some(2);
+    brief.last_played_at = Some(now - day);
+    let view = bench.command(&plugin, &config, &[brief], now);
+    assert_eq!(view.games[0].note.as_deref(), Some("Continua · 2 min di gioco"));
 
     // Finished games come back into play only when asked for
     let with_finished = config_with("play-tonight", &[("includeFinished", "true")]);

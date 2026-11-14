@@ -4,14 +4,30 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AppConfig,
+  BadgeEntry,
   DealsReport,
   DetectedGame,
+  GameAchievements,
+  GameDataAnswer,
   GameManualUpdate,
+  GameStatus,
+  PlaySession,
+  PluginInfo,
+  PluginPreview,
+  PluginState,
+  PluginView,
   ScanReport,
   SgdbGameMatch,
   Theme,
 } from "../types/game";
 import { PREVIEW_MOCK_DEALS, PREVIEW_MOCK_GAMES } from "./previewData";
+import {
+  previewAchievements,
+  previewCommand,
+  previewGameData,
+  previewPlugins,
+  previewSessions,
+} from "./previewExtras";
 import {
   DEFAULT_ACCESSIBILITY,
   withAccessibilityDefaults,
@@ -30,7 +46,25 @@ const DEFAULT_CONFIG: AppConfig = {
   language: null,
   themeId: null,
   accessibility: DEFAULT_ACCESSIBILITY,
+  trackPlaytime: true,
+  plugins: {},
 };
+
+/** Keeps only well-formed per-plugin choices (the preview reads them from localStorage). */
+function withPluginDefaults(raw: unknown): Record<string, PluginState> {
+  if (!raw || typeof raw !== "object") return {};
+  const states: Record<string, PluginState> = {};
+  for (const [id, value] of Object.entries(raw as Record<string, Partial<PluginState>>)) {
+    if (!value || typeof value !== "object") continue;
+    states[id] = {
+      enabled: Boolean(value.enabled),
+      showBadge: value.showBadge !== false,
+      settings:
+        value.settings && typeof value.settings === "object" ? { ...value.settings } : {},
+    };
+  }
+  return states;
+}
 
 // Same ordering the desktop backend applies to a real scan
 let previewGamesState: DetectedGame[] = [...PREVIEW_MOCK_GAMES].sort((a, b) =>
@@ -83,6 +117,8 @@ export async function getSettings(): Promise<AppConfig> {
       language: typeof parsed.language === "string" ? parsed.language : null,
       themeId: typeof parsed.themeId === "string" ? parsed.themeId : null,
       accessibility: withAccessibilityDefaults(parsed.accessibility),
+      trackPlaytime: parsed.trackPlaytime !== false,
+      plugins: withPluginDefaults(parsed.plugins),
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -99,6 +135,8 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     language: config.language,
     themeId: config.themeId,
     accessibility: withAccessibilityDefaults(config.accessibility),
+    trackPlaytime: config.trackPlaytime,
+    plugins: withPluginDefaults(config.plugins),
   };
 
   if (isTauri()) {
@@ -269,6 +307,22 @@ export async function setGameHidden(
   const idx = previewGamesState.findIndex((g) => g.id === gameId);
   if (idx === -1) throw new Error("Gioco non trovato.");
   const updated: DetectedGame = { ...previewGamesState[idx], isHidden };
+  previewGamesState[idx] = updated;
+  return updated;
+}
+
+/** Sets where the user stands with a game, or clears it with `null`. */
+export async function setGameStatus(
+  gameId: string,
+  status: GameStatus | null
+): Promise<DetectedGame> {
+  if (isTauri()) {
+    return invoke<DetectedGame>("set_game_status", { gameId, status });
+  }
+
+  const idx = previewGamesState.findIndex((g) => g.id === gameId);
+  if (idx === -1) throw new Error("Gioco non trovato.");
+  const updated: DetectedGame = { ...previewGamesState[idx], status };
   previewGamesState[idx] = updated;
   return updated;
 }
@@ -493,4 +547,155 @@ export async function watchWindowMaximized(
   };
   sync();
   return appWindow.onResized(sync);
+}
+
+/* ------------------------------------------------- play time & achievements */
+
+/** Play sessions that started at or after `sinceMs`, oldest first. */
+export async function getPlaySessions(sinceMs: number): Promise<PlaySession[]> {
+  if (isTauri()) {
+    return invoke<PlaySession[]>("get_play_sessions", { sinceMs });
+  }
+  return previewSessions(previewGamesState).filter((s) => s.startedAt >= sinceMs);
+}
+
+/** The achievements Steam lists for a game; `null` when there is nothing to show. */
+export async function getGameAchievements(
+  game: DetectedGame
+): Promise<GameAchievements | null> {
+  if (isTauri()) {
+    return invoke<GameAchievements | null>("get_game_achievements", { gameId: game.id });
+  }
+  return previewAchievements(game);
+}
+
+/**
+ * Reports the ids of the games Kanso sees running, now and whenever that changes. Resolves
+ * to the function that stops watching.
+ */
+export async function watchRunningGames(
+  onChange: (gameIds: string[]) => void
+): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  const unlisten = await listen<string[]>("playtime:running", (ev) => onChange(ev.payload));
+  invoke<string[]>("get_running_games")
+    .then(onChange)
+    .catch(() => {});
+  return unlisten;
+}
+
+/* ---------------------------------------------------------------- plugins */
+
+/** Every available plugin, plus a warning per folder that is not a valid plugin. */
+export async function listPlugins(): Promise<{
+  plugins: PluginInfo[];
+  warnings: string[];
+}> {
+  if (isTauri()) {
+    return invoke<{ plugins: PluginInfo[]; warnings: string[] }>("list_plugins");
+  }
+  const config = await getSettings();
+  return { plugins: previewPlugins(config.plugins), warnings: [] };
+}
+
+/**
+ * Lets the user pick a plugin's `plugin.json` and reads it without installing, so they can
+ * see what it is and which hosts it contacts first. `null` if the dialog was cancelled.
+ */
+export async function pickPluginToInstall(): Promise<
+  { path: string; preview: PluginPreview } | null
+> {
+  if (!isTauri()) return null;
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    filters: [{ name: "Kanso plugin (plugin.json)", extensions: ["json"] }],
+  });
+  if (typeof selected !== "string" || !selected.trim()) return null;
+  const preview = await invoke<PluginPreview>("inspect_plugin", { path: selected });
+  return { path: selected, preview };
+}
+
+/** Installs the plugin at `path` and switches it on. Resolves to the settings as saved. */
+export async function installPlugin(path: string): Promise<AppConfig> {
+  return invoke<AppConfig>("install_plugin", { path });
+}
+
+/** Removes a plugin the user installed. Resolves to the settings as saved. */
+export async function removePlugin(id: string): Promise<AppConfig> {
+  return invoke<AppConfig>("remove_plugin", { id });
+}
+
+export async function openPluginsFolder(): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_plugins_folder");
+  }
+}
+
+/** What a plugin shows in a game's sheet; `force` asks again instead of using the cache. */
+export async function pluginGameData(
+  pluginId: string,
+  game: DetectedGame,
+  force = false
+): Promise<GameDataAnswer> {
+  if (isTauri()) {
+    return invoke<GameDataAnswer>("plugin_game_data", {
+      pluginId,
+      gameId: game.id,
+      force,
+    });
+  }
+  return previewGameData(pluginId, game);
+}
+
+/** The labels plugins have for the game cards, by game id. */
+export async function pluginBadges(): Promise<Record<string, BadgeEntry[]>> {
+  if (isTauri()) {
+    return invoke<Record<string, BadgeEntry[]>>("plugin_badges");
+  }
+  const config = await getSettings();
+  const labelled = previewPlugins(config.plugins).filter((p) => p.enabled && p.showBadge);
+  const badges: Record<string, BadgeEntry[]> = {};
+  for (const game of previewGamesState) {
+    const entries = labelled.flatMap((plugin) => {
+      const badge = previewGameData(plugin.id, game).data?.badge;
+      return badge
+        ? [
+            {
+              pluginId: plugin.id,
+              pluginName: plugin.name,
+              text: badge.text,
+              tooltip: badge.tooltip ?? null,
+            },
+          ]
+        : [];
+    });
+    if (entries.length > 0) badges[game.id] = entries;
+  }
+  return badges;
+}
+
+/** Calls `onChange` whenever a plugin produced a new label. Resolves to the unsubscriber. */
+export async function watchPluginBadges(onChange: () => void): Promise<() => void> {
+  if (!isTauri()) return () => {};
+  return listen("plugins:badges-updated", () => onChange());
+}
+
+export async function runPluginCommand(
+  pluginId: string,
+  commandId: string
+): Promise<PluginView> {
+  if (isTauri()) {
+    return invoke<PluginView>("run_plugin_command", { pluginId, commandId });
+  }
+  return previewCommand(previewGamesState);
+}
+
+/** Opens a link shown by a plugin in the default browser (`https` only). */
+export async function openPluginLink(url: string): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_plugin_link", { url });
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }

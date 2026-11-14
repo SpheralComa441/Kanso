@@ -51,6 +51,11 @@ Un gioco compare una sola volta: se uno store successivo segnala una cartella gi
 - Qualsiasi gioco può essere nascosto o rimostrato dalla vista dettaglio; i giochi nascosti non compaiono in nessun'altra vista né nei conteggi.
 - Avvio tramite `steam://rungameid/{appid}` per Steam, URI Epic/Ubisoft o esecuzione diretta dell'`.exe` per gli altri, con opzione di nascondere l'app nella system tray all'avvio di un gioco. Riavviare Kanso mentre è nella tray riporta in primo piano la finestra esistente (istanza singola). Ogni avvio riuscito aggiorna "giocato di recente".
 
+- **Stato dei giochi:** ogni gioco può essere segnato a mano come *Da giocare*, *In corso*, *Finito* o *Abbandonato* dalla sua scheda (un clic lo imposta, un altro lo toglie). Lo stato è un filtro del pannello laterale, un'icona sulla card e un dato per le statistiche e per i plugin; scansioni e sincronizzazioni non lo toccano mai.
+- **Ore di gioco misurate da Kanso:** gli altri store non espongono le ore. Mentre Kanso è aperto (anche nella tray) controlla ogni 15 secondi i processi in esecuzione e riconosce i giochi non Steam dalla cartella di installazione da cui gira l'eseguibile; il tempo viene accreditato controllo per controllo (un PC in sospensione non aggiunge ore), in minuti interi. Una cartella condivisa da più giochi o la radice di un disco riconoscono solo l'eseguibile esatto. I giochi Steam restano a Steam. Disattivabile dalle Impostazioni.
+- **Obiettivi di Steam senza login:** il client Steam tiene in `userdata/<account>/config/librarycache/<appid>.json` (sezione `achievements`) i totali esatti e gli obiettivi che mostra nella pagina del gioco. Kanso ne legge i conteggi a ogni scansione e l'elenco quando l'utente lo apre nella scheda. L'elenco può essere parziale (Steam vi mette quelli sbloccati e una selezione di quelli da sbloccare) ed è aggiornato all'ultima volta che il gioco è stato aperto nella libreria di Steam: la scheda lo dice.
+- **Statistiche:** pagina con ore totali, ore degli ultimi 30 giorni, giochi giocati, obiettivi sbloccati, ore per settimana (ultime 12), giochi più giocati, ore per piattaforma e per genere, giochi per stato. Lo storico nasce dalle sessioni misurate da Kanso e, per Steam, dalla crescita del contatore di Steam tra una scansione e l'altra: parte quindi da quando Kanso ha iniziato a registrare.
+
 ### D. Home con le offerte
 - Vista **Home** che elenca le offerte in corso prese dalle API pubbliche (senza chiave) dei negozi: giochi gratis di Epic (`freeGamesPromotions`, attuali e annunciati), sconti di Steam (`featuredcategories`) e sconti di GOG (`catalog`), con prezzi nella valuta del paese dell'utente.
 - Clic su un'offerta: apre la pagina del negozio nel browser. Sono ammessi solo indirizzi `https` sui domini dei tre negozi.
@@ -64,10 +69,20 @@ Un gioco compare una sola volta: se uno store successivo segnala una cartella gi
 ### F. Accessibilità
 Impostazioni che valgono con qualsiasi tema e prevalgono su di esso: dimensione di testo e controlli (90–150%), contrasto elevato (testi e bordi più marcati), riduzione delle animazioni (rispetta già l'impostazione di Windows), font ad alta leggibilità al posto di quelli del tema (Atkinson Hyperlegible per l'ipovisione, OpenDyslexic per la dislessia), barre di scorrimento sempre visibili, contorno evidente sull'elemento selezionato da tastiera. Ogni scelta si vede subito e viene salvata solo con *Salva*.
 
-### G. Sicurezza
+### G. Plugin
+La community può estendere Kanso senza toccarne il codice. Guida completa: [`docs/PLUGINS.md`](docs/PLUGINS.md).
+- **Che cos'è:** una cartella con `plugin.json` (identità, host che può contattare, impostazioni, comandi) e `main.js`. Si installa da *Impostazioni → Plugin* scegliendo il `plugin.json`: prima di installare Kanso mostra nome, autore e l'elenco degli host.
+- **Che cosa può fare:** aggiungere sezioni alla scheda di un gioco (`gameDetails`), un'etichetta breve sulle card, e comandi nel menu *Plugin* che lavorano sulla libreria visibile. Restituisce solo dati (statistiche, testo, elenchi, link, barre, avvisi): è Kanso a disegnarli, con il tema dell'utente.
+- **Isolamento:** il codice non gira nella webview ma in un interprete JavaScript (QuickJS) incorporato nel backend, ricreato a ogni chiamata, con limiti di memoria, profondità, tempo (30 s) e numero di richieste. Non ha DOM, file, timer né accesso a impostazioni e chiavi di Kanso. Dei giochi vede titolo, piattaforma, generi, tag, ore, stato e obiettivi: mai cartelle o eseguibili.
+- **Rete:** solo `https`, solo verso gli host dichiarati nel manifest, porta predefinita, niente credenziali nell'indirizzo; i reindirizzamenti non vengono seguiti. Un plugin senza host non ha rete.
+- **Cache:** le risposte sono salvate per gioco nel database e riusate per il tempo dichiarato; cambiano firma (e quindi vengono richieste di nuovo) se cambiano codice, versione, impostazioni o lingua. I plugin che etichettano le card vengono interrogati in background, un gioco ogni pochi secondi.
+- **Plugin ufficiali** (in `plugins/`, inclusi nell'app): *HowLongToBeat*, *Recensioni* (utenti Steam + Metacritic), *Novità e note delle patch*, *PCGamingWiki*, *Storico dei prezzi* (IsThereAnyDeal, con la chiave API dell'utente), *Cosa gioco stasera?*. Sono attivi dall'inizio solo quelli che non contattano servizi nuovi (Steam, o nessuna rete); gli altri li attiva l'utente. Un plugin installato con lo stesso id sostituisce quello incluso.
+
+### H. Sicurezza
 - Il comando di avvio riceve solo l'id del gioco: percorso ed URI vengono letti dal database, mai dalla webview.
 - **CSP** restrittiva (`default-src 'self'`, immagini solo da app/asset/data, nessuno script remoto).
 - Il protocollo asset può leggere **solo** la cartella `covers/`.
+- I plugin non entrano mai nella webview: vedi la sezione G. I link che mostrano si aprono nel browser solo se `https`.
 
 ## 4. Design & UI/UX
 - **Estetica:** Tema scuro profondo (`#0f0f11`) ottimizzato per schermi OLED, zero menu superflui, tipografia pulita.
@@ -101,6 +116,12 @@ Gli Step 1–3 sono il piano originale. Gli Step 4–8 sono stati aggiunti dopo 
 - [x] **Step 16 — Tag di Steam:** categorie fini (Souls-like, Party Game, Co-op...) come filtro nel pannello laterale, nella scheda del gioco e nella ricerca.
 - [x] **Step 17 — Ore di gioco di Steam:** tempo di gioco e ultima sessione letti dai file locali di Steam, senza login; "Giocati di recente" limitato agli ultimi 30 giorni.
 - [x] **Step 18 — Accessibilità:** dimensione del testo, contrasto elevato, meno animazioni, font ad alta leggibilità, barre di scorrimento sempre visibili, fuoco da tastiera evidente.
+- [x] **Step 19 — Obiettivi di Steam:** conteggi e elenco letti dalla cache locale del client Steam, senza login, mostrati nella scheda del gioco.
+- [x] **Step 20 — Ore misurate da Kanso:** tempo di gioco dei giochi non Steam rilevato dai processi in esecuzione; storico delle sessioni per tutti gli store; indicatore "In esecuzione".
+- [x] **Step 21 — Stato dei giochi:** da giocare, in corso, finito, abbandonato; filtro nel pannello laterale e icona sulle card.
+- [x] **Step 22 — Statistiche:** pagina con ore, attività per settimana, giochi più giocati, piattaforme, generi, stati e obiettivi.
+- [x] **Step 23 — Plugin:** formato `plugin.json` + `main.js`, esecuzione isolata con rete limitata agli host dichiarati, risultati dichiarativi, cache, installazione con conferma, menu dei comandi.
+- [x] **Step 24 — Plugin ufficiali e guida:** HowLongToBeat, Recensioni, Novità, PCGamingWiki, Storico dei prezzi, Cosa gioco stasera?; `docs/PLUGINS.md`.
 
 ### Da verificare su un PC Windows reale
 Non verificabile dall'ambiente cloud, quindi da controllare alla prima prova dell'installer:
@@ -113,4 +134,8 @@ Non verificabile dall'ambiente cloud, quindi da controllare alla prima prova del
 - finestra senza cornice di sistema: ridimensionamento dai bordi, trascinamento dalla barra, doppio clic sulla barra per ingrandire, aggancio ai bordi dello schermo, ombra e angoli della finestra (il menu dei layout di Windows 11 sul pulsante ingrandisci non è disponibile con pulsanti disegnati dall'app);
 - barre di scorrimento a comparsa e dissolvenza del contenuto sotto la barra in WebView2;
 - tag di Steam dopo la prima sincronizzazione (compaiono nel pannello laterale e nella scheda);
-- ore di gioco lette dal vero `localconfig.vdf` di Steam: il formato è noto e coperto da test su un file di esempio, non verificato su un'installazione reale.
+- ore di gioco lette dal vero `localconfig.vdf` di Steam: il formato è noto e coperto da test su un file di esempio, non verificato su un'installazione reale;
+- obiettivi di Steam: il formato è preso da un file reale, ma va verificato che conteggi ed elenco coincidano con quelli mostrati da Steam, anche per un gioco con obiettivi già sbloccati;
+- ore misurate da Kanso: avviare un gioco non Steam (da Kanso e da fuori) e controllare che compaia "In esecuzione" e che i minuti crescano; l'elenco dei processi è verificato su Windows solo dal test automatico della CI;
+- plugin che contattano servizi esterni: *HowLongToBeat*, *PCGamingWiki* e *Storico dei prezzi* sono provati solo contro risposte simulate (i loro siti non sono raggiungibili dall'ambiente cloud). HowLongToBeat non ha un'API ufficiale e segue il protocollo dei client open source: è il più esposto a cambiamenti del sito;
+- installazione di un plugin da file (finestra di sistema) e apertura della cartella dei plugin.

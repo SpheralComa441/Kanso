@@ -1,4 +1,4 @@
-import type { DetectedGame, GamePlatform } from "../types/game";
+import type { DetectedGame, GamePlatform, GameStatus } from "../types/game";
 import { PLATFORM_ORDER } from "./platforms";
 
 /**
@@ -15,6 +15,7 @@ export interface LibraryFilters {
   genre: string | null;
   /** Normalized key of a Steam community tag. */
   tag: string | null;
+  status: GameStatus | null;
 }
 
 export const EMPTY_FILTERS: LibraryFilters = {
@@ -22,7 +23,16 @@ export const EMPTY_FILTERS: LibraryFilters = {
   platform: null,
   genre: null,
   tag: null,
+  status: null,
 };
+
+/** The statuses in the order they are listed everywhere. */
+export const GAME_STATUSES: readonly GameStatus[] = [
+  "backlog",
+  "playing",
+  "finished",
+  "abandoned",
+];
 
 /** "Recently played" means within this many days. */
 const RECENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -48,6 +58,7 @@ export interface LibraryCounts {
   recent: number;
   hidden: number;
   byPlatform: Record<GamePlatform, number>;
+  byStatus: Record<GameStatus, number>;
 }
 
 export function hasActiveFilters(filters: LibraryFilters): boolean {
@@ -55,7 +66,8 @@ export function hasActiveFilters(filters: LibraryFilters): boolean {
     filters.collection !== "all" ||
     filters.platform !== null ||
     filters.genre !== null ||
-    filters.tag !== null
+    filters.tag !== null ||
+    filters.status !== null
   );
 }
 
@@ -64,7 +76,8 @@ export function activeFilterCount(filters: LibraryFilters): number {
     Number(filters.collection !== "all") +
     Number(filters.platform !== null) +
     Number(filters.genre !== null) +
-    Number(filters.tag !== null)
+    Number(filters.tag !== null) +
+    Number(filters.status !== null)
   );
 }
 
@@ -139,6 +152,7 @@ export function countLibrary(games: DetectedGame[]): LibraryCounts {
     recent: 0,
     hidden: 0,
     byPlatform,
+    byStatus: { backlog: 0, playing: 0, finished: 0, abandoned: 0 },
   };
   for (const game of games) {
     if (game.isHidden) {
@@ -148,6 +162,7 @@ export function countLibrary(games: DetectedGame[]): LibraryCounts {
     counts.visible += 1;
     if (game.isFavorite) counts.favorites += 1;
     if (isRecentlyPlayed(game)) counts.recent += 1;
+    if (game.status) counts.byStatus[game.status] += 1;
     byPlatform[game.platform] = (byPlatform[game.platform] ?? 0) + 1;
   }
   return counts;
@@ -166,6 +181,7 @@ export function applyLibraryFilters(
     if (filters.collection === "favorites" && !g.isFavorite) return false;
     if (filters.collection === "recent" && !isRecentlyPlayed(g)) return false;
     if (filters.platform && g.platform !== filters.platform) return false;
+    if (filters.status && g.status !== filters.status) return false;
     if (
       filters.genre &&
       !g.genres.some((genre) => genreKey(genre) === filters.genre)

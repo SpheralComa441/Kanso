@@ -1,11 +1,14 @@
+mod playtime;
+mod plugins;
+
 use kanso_core::deals::is_allowed_store_url;
 use kanso_core::theme::{
     delete_user_theme, export_theme_file, import_theme_file, list_user_themes, save_user_theme,
 };
 use kanso_core::{
     current_language, is_metadata_sync_due, now_timestamp_ms, scan_all_installed_games,
-    set_language, AppConfig, DealsClient, DealsReport, DetectedGame, GameManualUpdate, Lang,
-    LibraryDb, LibraryStore, MetadataClient, ScanReport, SgdbGameMatch, Theme, T,
+    set_language, AppConfig, DealsClient, DealsReport, DetectedGame, GameManualUpdate, GameStatus,
+    Lang, LibraryDb, LibraryStore, MetadataClient, ScanReport, SgdbGameMatch, Theme, T,
 };
 use serde::Serialize;
 use std::fs;
@@ -17,11 +20,11 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
-const GAME_UPDATED_EVENT: &str = "library:game-updated";
+pub(crate) const GAME_UPDATED_EVENT: &str = "library:game-updated";
 
 /// Shared handle to the library database; commands lock it only around reads and writes,
 /// never across network requests.
-type SharedDb = Arc<Mutex<LibraryDb>>;
+pub(crate) type SharedDb = Arc<Mutex<LibraryDb>>;
 
 /// How long fetched deals are reused before the stores are asked again.
 const DEALS_CACHE_TTL_MS: u64 = 30 * 60 * 1000;
@@ -32,28 +35,39 @@ struct CachedDeals {
     report: DealsReport,
 }
 
-struct AppState {
-    db: SharedDb,
+pub(crate) struct AppState {
+    pub(crate) db: SharedDb,
     /// Problems found while opening the library at startup, reported with the first scan.
     startup_warnings: Mutex<Vec<String>>,
     deals_cache: Arc<Mutex<Option<CachedDeals>>>,
+    /// Games Kanso currently sees running, kept by the play time tracker.
+    pub(crate) running_games: Arc<Mutex<Vec<String>>>,
+    pub(crate) plugins: Arc<plugins::PluginHost>,
 }
 
 /// Language used when none is configured yet (the UI picks one from the OS on first run).
-const FALLBACK_LANGUAGE: Lang = Lang::En;
+pub(crate) const FALLBACK_LANGUAGE: Lang = Lang::En;
 
-fn lock_db(db: &SharedDb) -> MutexGuard<'_, LibraryDb> {
+pub(crate) fn lock_db(db: &SharedDb) -> MutexGuard<'_, LibraryDb> {
     db.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn resolve_app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn resolve_app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_local_data_dir()
         .map_err(|e| format!("{}: {e}", T::AppDataUnavailable.s()))
 }
 
-fn resolve_config_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn resolve_config_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_app_data_dir(app)?.join("config.json"))
+}
+
+/// The saved settings, or the defaults when they cannot be read.
+pub(crate) fn load_config(app: &AppHandle) -> AppConfig {
+    resolve_config_path(app)
+        .ok()
+        .and_then(|path| AppConfig::load_from_file(&path).ok())
+        .unwrap_or_default()
 }
 
 fn resolve_covers_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -64,7 +78,7 @@ fn resolve_themes_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(resolve_app_data_dir(app)?.join("themes"))
 }
 
-fn game_not_found(game_id: &str) -> String {
+pub(crate) fn game_not_found(game_id: &str) -> String {
     format!("{}: {game_id}", T::GameNotFound.s())
 }
 
@@ -84,10 +98,16 @@ fn get_settings(app: AppHandle) -> Result<AppConfig, String> {
 }
 
 #[tauri::command]
-fn save_settings(app: AppHandle, config: AppConfig) -> Result<AppConfig, String> {
+fn save_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    config: AppConfig,
+) -> Result<AppConfig, String> {
     let config_path = resolve_config_path(&app)?;
     let saved = config.save_to_file(&config_path)?;
     apply_language(&app, saved.lang().unwrap_or(FALLBACK_LANGUAGE));
+    // A plugin may have been switched on, or its settings changed
+    state.plugins.wake_background_fill();
     Ok(saved)
 }
 
@@ -118,8 +138,19 @@ async fn scan_games(app: AppHandle, state: State<'_, AppState>) -> Result<ScanRe
 
         let mut db = lock_db(&db);
         let mut store = LibraryStore::load(&db)?;
+        let before = store.games.clone();
         let mut merged = store.merge_with_scan(raw_report);
         store.save_all(&mut db)?;
+
+        // What Steam's own counters gained since the last scan becomes play history
+        let played = kanso_core::playtime::steam_sessions_between(
+            &before,
+            &merged.games,
+            now_timestamp_ms(),
+        );
+        for session in &played {
+            let _ = db.insert_play_session(session);
+        }
 
         merged.warnings.splice(0..0, startup_warnings);
         Ok(merged)
@@ -143,6 +174,7 @@ async fn sync_library_metadata(
     let config = AppConfig::load_from_file(&config_path)?;
     let db = Arc::clone(&state.db);
     let app_handle = app.clone();
+    let plugin_host = Arc::clone(&state.plugins);
 
     tauri::async_runtime::spawn_blocking(move || {
         let has_api_key = config.has_api_key();
@@ -182,6 +214,8 @@ async fn sync_library_metadata(
         }
 
         let final_store = LibraryStore::load(&lock_db(&db))?;
+        // The library is settled: plugins that label the game cards can catch up quietly
+        plugin_host.wake_background_fill();
         Ok(final_store.to_report())
     })
     .await
@@ -322,6 +356,26 @@ fn set_game_hidden(
 ) -> Result<DetectedGame, String> {
     update_stored_game(&app, &state, &game_id, |store| {
         store.set_hidden(&game_id, is_hidden)
+    })
+}
+
+/// Sets where the user stands with a game (`backlog`, `playing`, `finished`, `abandoned`), or
+/// clears it with `null`.
+#[tauri::command]
+fn set_game_status(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+    status: Option<String>,
+) -> Result<DetectedGame, String> {
+    let status = match status.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(raw) => Some(
+            GameStatus::parse(raw).ok_or_else(|| format!("{}: {raw}", T::OperationFailed.s()))?,
+        ),
+        None => None,
+    };
+    update_stored_game(&app, &state, &game_id, |store| {
+        store.set_status(&game_id, status)
     })
 }
 
@@ -592,12 +646,22 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
     set_language(configured_lang.unwrap_or(FALLBACK_LANGUAGE));
 
     let (db, startup_warnings) = LibraryDb::open_or_recover(&data_dir);
+    let db: SharedDb = Arc::new(Mutex::new(db));
+    let running_games = Arc::new(Mutex::new(Vec::new()));
+    let plugin_host = Arc::new(plugins::PluginHost::new(
+        &app.package_info().version.to_string(),
+        data_dir.join("plugins"),
+    ));
     app.manage(AppState {
-        db: Arc::new(Mutex::new(db)),
+        db: Arc::clone(&db),
         startup_warnings: Mutex::new(startup_warnings),
         deals_cache: Arc::new(Mutex::new(None)),
+        running_games: Arc::clone(&running_games),
+        plugins: Arc::clone(&plugin_host),
     });
     remove_legacy_sql_mirror(app);
+    playtime::spawn_tracker(app.clone(), Arc::clone(&db), running_games);
+    plugins::spawn_background_fill(app.clone(), db, plugin_host);
 
     // The webview may load local files from the covers folder only. The folder must exist
     // before it is allowed, so the scope also learns its canonical form.
@@ -645,7 +709,20 @@ pub fn run() {
             save_theme,
             delete_theme,
             export_theme,
-            open_themes_folder
+            open_themes_folder,
+            set_game_status,
+            playtime::get_game_achievements,
+            playtime::get_play_sessions,
+            playtime::get_running_games,
+            plugins::list_plugins,
+            plugins::inspect_plugin,
+            plugins::install_plugin,
+            plugins::remove_plugin,
+            plugins::open_plugins_folder,
+            plugins::plugin_game_data,
+            plugins::plugin_badges,
+            plugins::run_plugin_command,
+            plugins::open_plugin_link
         ])
         .run(tauri::generate_context!())
         .expect("Kanso failed to start");

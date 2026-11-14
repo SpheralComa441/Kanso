@@ -11,6 +11,7 @@ import {
   Languages,
   Palette,
   Plus,
+  Puzzle,
   SlidersHorizontal,
   Trash2,
   Upload,
@@ -39,7 +40,14 @@ import {
   isBuiltinTheme,
   resolveTheme,
 } from "../lib/themes";
-import type { AccessibilityConfig, AppConfig, Theme } from "../types/game";
+import type {
+  AccessibilityConfig,
+  AppConfig,
+  PluginInfo,
+  PluginState,
+  Theme,
+} from "../types/game";
+import { PluginsSettings } from "./PluginsSettings";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -56,6 +64,10 @@ interface SettingsModalProps {
   /** Same for accessibility choices: tried at once, kept only when saved. */
   onPreviewAccessibility: (accessibility: AccessibilityConfig | null) => void;
   onCustomizeTheme: (theme: Theme) => void;
+  plugins: PluginInfo[];
+  pluginWarnings: string[];
+  /** A plugin was installed or removed: adopt the settings the backend saved. */
+  onPluginsChanged: (saved: AppConfig) => Promise<void>;
 }
 
 const SKIPPED_EXE_PATTERNS = "unins, crash, redist, dxsetup, vc_redist, launcher";
@@ -71,6 +83,9 @@ export function SettingsModal({
   onPreviewTheme,
   onPreviewAccessibility,
   onCustomizeTheme,
+  plugins,
+  pluginWarnings,
+  onPluginsChanged,
 }: SettingsModalProps) {
   const { t } = useI18n();
   const [apiKey, setApiKey] = useState(initialConfig.steamgriddbApiKey);
@@ -84,6 +99,10 @@ export function SettingsModal({
   const [themeId, setThemeId] = useState<string | null>(initialConfig.themeId);
   const [accessibility, setAccessibility] = useState<AccessibilityConfig>(
     initialConfig.accessibility
+  );
+  const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
+  const [pluginStates, setPluginStates] = useState<Record<string, PluginState>>(
+    initialConfig.plugins
   );
   const [themeNotice, setThemeNotice] = useState<{
     type: "success" | "error";
@@ -100,6 +119,8 @@ export function SettingsModal({
       setLanguage(currentLanguage);
       setThemeId(initialConfig.themeId);
       setAccessibility(initialConfig.accessibility);
+      setTrackPlaytime(initialConfig.trackPlaytime);
+      setPluginStates(initialConfig.plugins);
       setManualFolderInput("");
       setShowKey(false);
       setErrorMsg(null);
@@ -236,6 +257,8 @@ export function SettingsModal({
         language,
         themeId: selectedTheme.id,
         accessibility,
+        trackPlaytime,
+        plugins: pluginStates,
       });
       onPreviewTheme(null);
       onPreviewAccessibility(null);
@@ -544,6 +567,22 @@ export function SettingsModal({
             </ul>
           </section>
 
+          {/* Plugins */}
+          <section id="settings-plugins" className="space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
+              <Puzzle className="h-3.5 w-3.5 text-accent" />
+              <span>{t("settings.plugins")}</span>
+            </div>
+            <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.pluginsHelp")}</p>
+            <PluginsSettings
+              plugins={plugins}
+              warnings={pluginWarnings}
+              states={pluginStates}
+              onStatesChange={setPluginStates}
+              onInstalledChanged={onPluginsChanged}
+            />
+          </section>
+
           {/* SteamGridDB API Key */}
           <section className="space-y-2">
             <div className="flex items-center justify-between">
@@ -695,6 +734,26 @@ export function SettingsModal({
               type="checkbox"
               checked={minimizeOnLaunch}
               onChange={(e) => setMinimizeOnLaunch(e.target.checked)}
+              className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+            />
+          </section>
+
+          {/* Play time */}
+          <section className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+            <div>
+              <label
+                htmlFor="track-playtime-checkbox"
+                className="block text-xs font-medium text-zinc-200"
+              >
+                {t("settings.trackTitle")}
+              </label>
+              <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.trackHelp")}</p>
+            </div>
+            <input
+              id="track-playtime-checkbox"
+              type="checkbox"
+              checked={trackPlaytime}
+              onChange={(e) => setTrackPlaytime(e.target.checked)}
               className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
             />
           </section>
