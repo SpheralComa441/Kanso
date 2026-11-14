@@ -1,0 +1,19 @@
+/*
+ * Kanso Theme Tokens
+ * Personalizza qui colori principali, raggio bordi e dimensione minima delle card.
+ */
+:root {
+  /* Deep OLED dark palette */
+  --bg-primary: #0f0f11;
+  --bg-surface: #16161a;
+  --bg-elevated: #1e1e24;
+  --border-subtle: #272730;
+
+  /* Warm minimalist Kanso amber-gold accent (no purple/neon) */
+  --accent-color: #e5a93c;
+  --accent-hover: #f0bc59;
+
+  /* Layout & card geometry */
+  --card-min-width: 185px;
+  --card-radius: 10px;
+}

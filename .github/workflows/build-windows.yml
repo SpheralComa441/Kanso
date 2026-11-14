@@ -1,0 +1,58 @@
+name: Build Windows Desktop App
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Test & Build Kanso (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify TypeScript & frontend bundle
+        run: npm run build
+
+      - name: Run Rust parser & scanner unit tests
+        run: cargo test --workspace --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Tauri Windows installers (.exe & .msi)
+        run: npx tauri build
+
+      - name: Upload Windows (.exe / .msi) Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kanso-Windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/kanso.exe
