@@ -32,13 +32,14 @@ Un gioco compare una sola volta: se uno store successivo segnala una cartella gi
 
 ### B. Metadata & Copertine (SteamGridDB + Steam Store API)
 1. Pulisci il titolo rilevato rimuovendo suffissi come `GOTY`, `Game of the Year`, `Definitive Edition`, `Remastered`, `Director's Cut` e simboli `™`/`®`.
-2. **Copertine (SteamGridDB API):**
+2. **Copertine (SteamGridDB API, poi Steam):**
    - Per i giochi Steam usa prima la corrispondenza esatta `GET https://www.steamgriddb.com/api/v2/games/steam/{appid}`; altrimenti (e per gli altri store) `GET https://www.steamgriddb.com/api/v2/search/autocomplete/{titolo_pulito}` con header `Authorization: Bearer {SGDB_API_KEY}`.
    - Prendi il primo `id` e scarica la griglia verticale (`dimensions=600x900`) tramite `GET https://www.steamgriddb.com/api/v2/grids/game/{id}?dimensions=600x900`.
    - Salva l'immagine in locale nella cartella `covers/` dentro AppData per il caricamento offline istantaneo.
+   - **Ripiego ufficiale per i giochi Steam** (unica fonte se manca la API key): chiedi a `https://api.steampowered.com/IStoreBrowseService/GetItems/v1` gli `assets` dell'app e scarica `library_capsule` (verticale) o, in mancanza, `header`. È indispensabile per i giochi recenti: le loro immagini stanno sotto percorsi con hash e il vecchio `.../library_600x900.jpg` risponde 404. Una copertina orizzontale viene mostrata intera su uno sfondo sfocato di sé stessa.
 3. **Descrizioni e Categorie (Steam Store API pubblico - nessuna key richiesta):**
    - Se è un gioco Steam usa il suo `appid`; altrimenti cerca su `https://steamcommunity.com/actions/SearchApps/{titolo_pulito}` per ottenere l'`appid`.
-   - Interroga `https://store.steampowered.com/api/appdetails?appids={appid}&l=italian` per estrarre `name`, `type`, `short_description` e `genres` (es. Azione, GDR, Indie).
+   - Interroga `https://store.steampowered.com/api/appdetails?appids={appid}&l={lingua}` (nella lingua dell'interfaccia) per estrarre `name`, `type`, `short_description` e `genres` (es. Azione, GDR, Indie).
 4. **Modifica Manuale:** Permetti all'utente di modificare titolo, genere, percorso `.exe` o sostituire la copertina con un file immagine locale.
 5. **Cadenza della sync:** un gioco a cui manca ancora qualcosa (copertina, descrizione, nome ufficiale, tipo) viene riprovato in automatico al massimo una volta ogni 24 ore; subito solo se l'utente preme *Scansiona* o inserisce una nuova API key. Un tentativo che non trova nulla non riscrive il gioco né notifica la UI.
 6. **Voci che non sono giochi:** le app Steam che lo store classifica come `music`, `dlc`, `video` e simili vengono nascoste automaticamente la prima volta che vengono classificate; l'utente può sempre riportarle in libreria.
@@ -48,7 +49,17 @@ Un gioco compare una sola volta: se uno store successivo segnala una cartella gi
 - Qualsiasi gioco può essere nascosto o rimostrato dalla vista dettaglio; i giochi nascosti non compaiono in nessun'altra vista né nei conteggi.
 - Avvio tramite `steam://rungameid/{appid}` per Steam, URI Epic/Ubisoft o esecuzione diretta dell'`.exe` per gli altri, con opzione di nascondere l'app nella system tray all'avvio di un gioco. Riavviare Kanso mentre è nella tray riporta in primo piano la finestra esistente (istanza singola). Ogni avvio riuscito aggiorna "giocato di recente".
 
-### D. Sicurezza
+### D. Home con le offerte
+- Vista **Home** che elenca le offerte in corso prese dalle API pubbliche (senza chiave) dei negozi: giochi gratis di Epic (`freeGamesPromotions`, attuali e annunciati), sconti di Steam (`featuredcategories`) e sconti di GOG (`catalog`), con prezzi nella valuta del paese dell'utente.
+- Clic su un'offerta: apre la pagina del negozio nel browser. Sono ammessi solo indirizzi `https` sui domini dei tre negozi.
+- Le offerte Steam di giochi già in libreria sono contrassegnate. Un negozio irraggiungibile non nasconde gli altri; i risultati vengono riusati per 30 minuti.
+
+### E. Lingue
+- Interfaccia in **italiano, inglese, spagnolo e russo**, selezionabile dalle Impostazioni; al primo avvio segue la lingua del sistema (inglese se non supportata).
+- Tradotti anche i messaggi del backend e il menu della system tray. Descrizioni e generi vengono riscaricati nella nuova lingua quando la si cambia; i testi modificati a mano non vengono toccati.
+- Ogni lingua è un dizionario in `src/i18n/`: il compilatore rifiuta un dizionario a cui manca una chiave.
+
+### F. Sicurezza
 - Il comando di avvio riceve solo l'id del gioco: percorso ed URI vengono letti dal database, mai dalla webview.
 - **CSP** restrittiva (`default-src 'self'`, immagini solo da app/asset/data, nessuno script remoto).
 - Il protocollo asset può leggere **solo** la cartella `covers/`.
@@ -56,7 +67,8 @@ Un gioco compare una sola volta: se uno store successivo segnala una cartella gi
 ## 4. Design & UI/UX
 - **Estetica:** Tema scuro profondo (`#0f0f11`) ottimizzato per schermi OLED, zero menu superflui, tipografia pulita.
 - **Layout:** Griglia di copertine verticali (aspect ratio `2:3`), barra di ricerca istantanea in alto, sidebar minimalista a scomparsa per i filtri, vista dettaglio del gioco.
-- **Personalizzazione:** Esponi colori principali, raggio bordi e dimensione minima delle card in un file `src/theme.css` tramite variabili CSS (`--bg-primary`, `--accent-color`, `--card-min-width`).
+- **Personalizzazione:** Esponi colori, raggio bordi e dimensione minima delle card in `src/theme.css` tramite variabili CSS (`--bg-primary`, `--accent-color`, `--card-min-width`), inclusi i colori del testo, così che un tema possa essere anche chiaro.
+- **Temi della community:** un tema è un file `.json` (formato in `docs/THEMES.md`) con 12 colori, 3 misure e un font. Si crea dall'editor integrato con anteprima dal vivo, si esporta e si importa da file o copiandolo nella cartella `themes/`. Ogni valore viene validato dal backend: un tema non può contenere CSS, script o risorse remote.
 
 ## 5. Piano di Esecuzione a Step
 Gli Step 1–3 sono il piano originale. Gli Step 4–8 sono stati aggiunti dopo la revisione del progetto a fine Step 3 e approvati in blocco, quindi vengono eseguiti di seguito senza fermarsi tra uno e l'altro.
@@ -69,10 +81,16 @@ Gli Step 1–3 sono il piano originale. Gli Step 4–8 sono stati aggiunti dopo 
 - [x] **Step 6 — Altri store:** scanner GOG, Ubisoft Connect, EA app e Xbox app, con deduplica tra store per cartella di installazione.
 - [x] **Step 7 — Giocati di recente e Nascosti:** storico degli avvii, vista "Giocati di recente", possibilità di nascondere voci, occultamento automatico di colonne sonore e DLC di Steam.
 - [x] **Step 8 — Sicurezza e CI:** CSP, protocollo asset limitato alle copertine, job Linux veloce per test e lint prima della build Windows.
+- [x] **Step 9 — Copertine ufficiali Steam:** ripiego sulle immagini ufficiali di Steam quando SteamGridDB non ha il gioco o manca la chiave (caso reale: Invokyr e The Old Flesh of Nuraga).
+- [x] **Step 10 — Lingue:** italiano, inglese, spagnolo e russo per interfaccia, messaggi del backend, tray e metadata.
+- [x] **Step 11 — Temi della community:** temi completi in `.json`, editor con anteprima dal vivo, importazione ed esportazione, temi integrati (OLED, Grafite, Nord, Carta).
+- [x] **Step 12 — Home con le offerte:** sconti e giochi gratis da Steam, Epic Games e GOG.
 
 ### Da verificare su un PC Windows reale
 Non verificabile dall'ambiente cloud, quindi da controllare alla prima prova dell'installer:
 - icona nella system tray e ripristino della finestra;
 - copertine visibili (CSP + protocollo asset limitato alla cartella `covers/`);
 - rilevamento reale di GOG, Ubisoft Connect, EA app e Xbox app: gli scanner sono testati solo su dati simulati;
-- nome ufficiale dei giochi `appid_<id>` dallo Steam Store e occultamento automatico delle colonne sonore.
+- nome ufficiale dei giochi `appid_<id>` dallo Steam Store e occultamento automatico delle colonne sonore;
+- immagini delle offerte nella Home (arrivano dai CDN dei negozi, ammessi dalla CSP solo come immagini) e apertura della pagina del negozio nel browser;
+- finestre di sistema per importare/esportare un tema e apertura della cartella temi.
