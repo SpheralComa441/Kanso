@@ -251,6 +251,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     if (settingsLoaded) void reloadPlugins();
   }, [settingsLoaded, lang, reloadPlugins]);
 
+  // A plugin folder may have been dropped in by hand since the last look
+  useEffect(() => {
+    if (isSettingsOpen) void reloadPlugins();
+  }, [isSettingsOpen, reloadPlugins]);
+
   // Labels arrive one game at a time while plugins catch up in the background
   const badgeTimer = useRef<number | null>(null);
   useEffect(() => {
