@@ -1,12 +1,8 @@
-import {
-  AlertTriangle,
-  FolderOpen,
-  Gamepad2,
-  Pencil,
-  Play,
-} from "lucide-react";
+import { AlertTriangle, FolderOpen, Gamepad2, Play, Star } from "lucide-react";
 import { resolveCoverUrl } from "../lib/backend";
-import type { DetectedGame, GamePlatform } from "../types/game";
+import { PLATFORM_META } from "../lib/platforms";
+import { useBrokenCovers } from "../lib/useBrokenCovers";
+import type { DetectedGame } from "../types/game";
 import type { ViewMode } from "./Header";
 
 interface GameListProps {
@@ -16,32 +12,39 @@ interface GameListProps {
   isScanning: boolean;
   launchingId: string | null;
   warnings: string[];
+  onOpenDetail: (game: DetectedGame) => void;
   onLaunch: (game: DetectedGame) => void;
-  onEdit: (game: DetectedGame) => void;
+  onToggleFavorite: (game: DetectedGame) => void;
   onOpenSettings: () => void;
 }
 
-const PLATFORM_STYLES: Record<
-  GamePlatform,
-  { label: string; badgeClass: string }
-> = {
-  steam: {
-    label: "Steam",
-    badgeClass: "border-sky-500/30 bg-sky-500/15 text-sky-300",
-  },
-  epic: {
-    label: "Epic Games",
-    badgeClass: "border-zinc-500/30 bg-zinc-500/20 text-zinc-200",
-  },
-  "Battle.net": {
-    label: "Battle.net",
-    badgeClass: "border-blue-500/35 bg-blue-500/15 text-blue-300",
-  },
-  standalone: {
-    label: "Locale",
-    badgeClass: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300",
-  },
-};
+interface FavoriteButtonProps {
+  game: DetectedGame;
+  onToggle: (game: DetectedGame) => void;
+  className?: string;
+}
+
+function FavoriteButton({ game, onToggle, className = "" }: FavoriteButtonProps) {
+  const label = game.isFavorite
+    ? `Rimuovi ${game.title} dai preferiti`
+    : `Aggiungi ${game.title} ai preferiti`;
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(game)}
+      aria-pressed={game.isFavorite}
+      aria-label={label}
+      title={game.isFavorite ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti"}
+      className={className}
+    >
+      <Star
+        className={`h-3.5 w-3.5 ${
+          game.isFavorite ? "fill-accent text-accent" : ""
+        }`}
+      />
+    </button>
+  );
+}
 
 export function GameList({
   games,
@@ -50,10 +53,13 @@ export function GameList({
   isScanning,
   launchingId,
   warnings,
+  onOpenDetail,
   onLaunch,
-  onEdit,
+  onToggleFavorite,
   onOpenSettings,
 }: GameListProps) {
+  const { usableCover, markBroken } = useBrokenCovers();
+
   if (isScanning && totalDetected === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -108,7 +114,7 @@ export function GameList({
       ) : games.length === 0 ? (
         <div className="rounded-xl border border-oled-border bg-oled-surface/40 px-6 py-12 text-center">
           <p className="text-sm text-zinc-400">
-            Nessun gioco corrisponde ai filtri di ricerca attuali.
+            Nessun gioco corrisponde alla ricerca o ai filtri attivi.
           </p>
         </div>
       ) : viewMode === "grid" ? (
@@ -120,73 +126,68 @@ export function GameList({
           }}
         >
           {games.map((game) => {
-            const platformMeta = PLATFORM_STYLES[game.platform];
+            const platformMeta = PLATFORM_META[game.platform];
             const isLaunching = launchingId === game.id;
-            const coverUrl = resolveCoverUrl(game.coverPath, game.updatedAt);
+            const coverUrl = usableCover(
+              resolveCoverUrl(game.coverPath, game.updatedAt)
+            );
 
             return (
               <article
                 key={game.id}
-                className="group relative flex flex-col overflow-hidden rounded-card border border-oled-border bg-oled-surface transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-600/80"
+                className="group relative flex flex-col overflow-hidden rounded-card border border-oled-border bg-oled-surface transition-all duration-200 focus-within:border-zinc-600/80 hover:-translate-y-0.5 hover:border-zinc-600/80"
               >
-                {/* 2:3 Vertical Cover */}
+                {/* 2:3 vertical cover */}
                 <div className="relative aspect-[2/3] w-full overflow-hidden bg-oled-bg">
                   {coverUrl ? (
                     <img
                       src={coverUrl}
-                      alt={game.title}
+                      alt=""
                       loading="lazy"
+                      draggable={false}
+                      onError={() => markBroken(coverUrl)}
                       className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                     />
                   ) : (
-                    <div className="flex h-full w-full flex-col justify-between p-4 bg-gradient-to-b from-oled-elevated/50 to-oled-bg">
-                      <span
-                        className={`self-start rounded-md border px-2 py-0.5 text-[10px] font-medium ${platformMeta.badgeClass}`}
-                      >
-                        {platformMeta.label}
-                      </span>
-                      <div className="space-y-1">
-                        <p className="line-clamp-3 text-sm font-semibold leading-snug text-zinc-200">
-                          {game.title}
-                        </p>
-                        {game.genres.length > 0 && (
-                          <p className="truncate text-[11px] text-zinc-500">
-                            {game.genres.slice(0, 2).join(" · ")}
-                          </p>
-                        )}
-                      </div>
+                    <div className="flex h-full w-full flex-col justify-end bg-gradient-to-b from-oled-elevated/50 to-oled-bg p-4">
+                      <p className="line-clamp-4 text-sm font-semibold leading-snug text-zinc-300">
+                        {game.title}
+                      </p>
                     </div>
                   )}
 
-                  {/* Platform pill overlay when cover image is present */}
-                  {coverUrl && (
-                    <span
-                      className={`absolute left-2.5 top-2.5 rounded-md border px-2 py-0.5 text-[10px] font-medium backdrop-blur-md ${platformMeta.badgeClass}`}
-                    >
-                      {platformMeta.label}
-                    </span>
-                  )}
-
-                  {/* Edit button in top-right corner */}
-                  <button
-                    id={`edit-grid-${game.id}`}
-                    type="button"
-                    onClick={() => onEdit(game)}
-                    title={`Modifica ${game.title}`}
-                    aria-label={`Modifica ${game.title}`}
-                    className="absolute right-2.5 top-2.5 rounded-lg border border-white/10 bg-black/65 p-1.5 text-zinc-300 opacity-0 backdrop-blur-md transition-opacity hover:bg-black/85 hover:text-white focus:opacity-100 group-hover:opacity-100"
+                  <span
+                    className={`absolute left-2.5 top-2.5 rounded-md border px-2 py-0.5 text-[10px] font-medium backdrop-blur-md ${platformMeta.badgeClass}`}
                   >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </button>
+                    {platformMeta.label}
+                  </span>
+
+                  {/* Whole cover opens the detail view */}
+                  <button
+                    id={`open-detail-${game.id}`}
+                    type="button"
+                    onClick={() => onOpenDetail(game)}
+                    aria-label={`Apri dettagli di ${game.title}`}
+                    className="absolute inset-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+                  />
+
+                  <FavoriteButton
+                    game={game}
+                    onToggle={onToggleFavorite}
+                    className={`absolute right-2.5 top-2.5 rounded-lg border border-white/10 bg-black/65 p-1.5 text-zinc-300 backdrop-blur-md transition-opacity hover:bg-black/85 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 ${
+                      game.isFavorite ? "opacity-100" : "opacity-0"
+                    }`}
+                  />
 
                   {/* Hover play bar */}
-                  <div className="absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/90 via-black/55 to-transparent p-3 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/90 via-black/55 to-transparent p-3 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     <button
                       id={`launch-grid-${game.id}`}
                       type="button"
                       onClick={() => onLaunch(game)}
                       disabled={isLaunching}
-                      className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-xs font-semibold text-zinc-950 shadow-lg transition-colors hover:bg-accent-hover disabled:opacity-60"
+                      aria-label={`Avvia ${game.title}`}
+                      className="pointer-events-auto inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-xs font-semibold text-zinc-950 shadow-lg transition-colors hover:bg-accent-hover disabled:opacity-60"
                     >
                       <Play className="h-3.5 w-3.5 fill-current" />
                       <span>{isLaunching ? "Avvio..." : "Avvia"}</span>
@@ -195,27 +196,18 @@ export function GameList({
                 </div>
 
                 {/* Card caption */}
-                <div className="flex flex-1 flex-col justify-between gap-1 px-3 py-2.5">
+                <div className="space-y-1 px-3 py-2.5">
                   <h3
                     className="truncate text-xs font-medium text-zinc-100"
                     title={game.title}
                   >
                     {game.title}
                   </h3>
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-zinc-500">
-                    <span className="truncate">
-                      {game.genres.length > 0
-                        ? game.genres.slice(0, 2).join(", ")
-                        : platformMeta.label}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => onEdit(game)}
-                      className="shrink-0 text-zinc-400 hover:text-zinc-200 sm:hidden"
-                    >
-                      Modifica
-                    </button>
-                  </div>
+                  <p className="truncate text-[11px] text-zinc-500">
+                    {game.genres.length > 0
+                      ? game.genres.slice(0, 2).join(", ")
+                      : platformMeta.label}
+                  </p>
                 </div>
               </article>
             );
@@ -225,68 +217,62 @@ export function GameList({
         <div className="overflow-hidden rounded-xl border border-oled-border bg-oled-surface/50">
           <ul className="divide-y divide-oled-border">
             {games.map((game) => {
-              const platformMeta = PLATFORM_STYLES[game.platform];
+              const platformMeta = PLATFORM_META[game.platform];
               const isLaunching = launchingId === game.id;
-              const coverUrl = resolveCoverUrl(game.coverPath, game.updatedAt);
+              const coverUrl = usableCover(
+                resolveCoverUrl(game.coverPath, game.updatedAt)
+              );
 
               return (
                 <li
                   key={game.id}
-                  className="flex flex-col justify-between gap-3 px-4 py-3 transition-colors hover:bg-oled-elevated/60 sm:flex-row sm:items-center"
+                  className="flex items-center justify-between gap-3 px-4 py-2.5 transition-colors hover:bg-oled-elevated/60"
                 >
-                  <div className="flex min-w-0 flex-1 items-center gap-3.5">
-                    <div className="h-14 w-10 shrink-0 overflow-hidden rounded border border-oled-border bg-oled-bg">
-                      {coverUrl ? (
+                  <button
+                    id={`open-detail-${game.id}`}
+                    type="button"
+                    onClick={() => onOpenDetail(game)}
+                    aria-label={`Apri dettagli di ${game.title}`}
+                    className="flex min-w-0 flex-1 items-center gap-3.5 rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                  >
+                    <div className="h-14 w-[38px] shrink-0 overflow-hidden rounded border border-oled-border bg-oled-bg">
+                      {coverUrl && (
                         <img
                           src={coverUrl}
-                          alt={game.title}
+                          alt=""
+                          loading="lazy"
+                          draggable={false}
+                          onError={() => markBroken(coverUrl)}
                           className="h-full w-full object-cover"
                         />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-[10px] font-semibold text-zinc-600">
-                          2:3
-                        </div>
                       )}
                     </div>
 
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex items-center gap-2">
                         <span className="truncate text-sm font-medium text-zinc-100">
                           {game.title}
                         </span>
                         <span
-                          className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${platformMeta.badgeClass}`}
+                          className={`shrink-0 rounded-md border px-2 py-0.5 text-[10px] font-medium ${platformMeta.badgeClass}`}
                         >
                           {platformMeta.label}
                         </span>
-                        {game.genres.length > 0 && (
-                          <span className="text-[11px] text-zinc-400">
-                            {game.genres.slice(0, 3).join(" · ")}
-                          </span>
-                        )}
                       </div>
-
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-zinc-500">
-                        <span
-                          className="truncate font-mono text-[11px]"
-                          title={game.executablePath ?? game.installDir}
-                        >
-                          {game.executablePath ?? game.installDir}
-                        </span>
-                      </div>
+                      <p className="truncate text-[11px] text-zinc-500">
+                        {game.genres.length > 0
+                          ? game.genres.slice(0, 4).join(" · ")
+                          : (game.executablePath ?? game.installDir)}
+                      </p>
                     </div>
-                  </div>
+                  </button>
 
                   <div className="flex shrink-0 items-center gap-2">
-                    <button
-                      id={`edit-list-${game.id}`}
-                      type="button"
-                      onClick={() => onEdit(game)}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-elevated px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-600"
-                    >
-                      <Pencil className="h-3.5 w-3.5 text-zinc-400" />
-                      <span>Modifica</span>
-                    </button>
+                    <FavoriteButton
+                      game={game}
+                      onToggle={onToggleFavorite}
+                      className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-oled-elevated hover:text-zinc-200"
+                    />
                     <button
                       id={`launch-list-${game.id}`}
                       type="button"

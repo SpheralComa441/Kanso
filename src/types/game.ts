@@ -1,4 +1,12 @@
-export type GamePlatform = "steam" | "epic" | "Battle.net" | "standalone";
+export type GamePlatform =
+  | "steam"
+  | "epic"
+  | "gog"
+  | "ea"
+  | "ubisoft"
+  | "xbox"
+  | "Battle.net"
+  | "standalone";
 
 export interface DetectedGame {
   id: string;
@@ -16,6 +24,17 @@ export interface DetectedGame {
   isFavorite: boolean;
   metadataSynced: boolean;
   customOverride: boolean;
+  /** Title is a local guess (Steam manifest had `appid_<id>`); sync will replace it. */
+  titleProvisional: boolean;
+  /** Steam store classification (`game`, `music`, `dlc`, ...), `null` until looked up. */
+  appType: string | null;
+  /** Shown only in the "Nascosti" view. */
+  isHidden: boolean;
+  /** Last automatic metadata attempt (ms since epoch), `0` if never. */
+  metadataAttemptedAt: number;
+  /** Last launch from Kanso (ms since epoch). */
+  lastPlayedAt: number | null;
+  playCount: number;
   updatedAt: number;
 }
 
@@ -38,10 +57,6 @@ export interface GameManualUpdate {
 
 export interface ScanReport {
   games: DetectedGame[];
-  steamCount: number;
-  epicCount: number;
-  battlenetCount: number;
-  standaloneCount: number;
   warnings: string[];
 }
 

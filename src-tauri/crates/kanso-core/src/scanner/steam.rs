@@ -1,4 +1,4 @@
-use crate::cleaner::clean_game_title;
+use crate::cleaner::{clean_game_title, is_placeholder_title};
 use crate::models::{DetectedGame, GamePlatform, SourceScanOutput};
 use crate::vdf::{parse_vdf, VdfValue};
 use std::collections::HashSet;
@@ -9,9 +9,22 @@ use std::path::{Path, PathBuf};
 /// (`228980` = Steamworks Common Redistributables).
 const EXCLUDED_STEAM_APP_IDS: &[&str] = &["228980"];
 
+/// Environment variable that points Kanso at a specific Steam folder, bypassing the registry.
+/// Meant for development and end-to-end tests (it also works on non-Windows hosts, where
+/// there is no registry to read) and for unusual portable Steam setups.
+pub const STEAM_ROOT_OVERRIDE_ENV: &str = "KANSO_STEAM_ROOT";
+
 /// Reads the Steam installation path from the Windows Registry:
 /// `HKCU\Software\Valve\Steam` -> `SteamPath`, with fallbacks to `HKLM` and standard paths.
+/// A valid directory in [`STEAM_ROOT_OVERRIDE_ENV`] takes precedence over all of them.
 pub fn detect_steam_root() -> Option<PathBuf> {
+    if let Some(overridden) = std::env::var_os(STEAM_ROOT_OVERRIDE_ENV) {
+        let candidate = PathBuf::from(overridden);
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+
     #[cfg(target_os = "windows")]
     {
         use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
@@ -90,8 +103,27 @@ pub fn parse_library_folders_vdf(content: &str) -> Result<Vec<PathBuf>, String> 
     Ok(paths)
 }
 
+/// Builds a readable stand-in title from a Steam `installdir` (`Slay_the_Spire` -> `Slay the Spire`),
+/// used only while the manifest's own `name` is an `appid_<id>` placeholder.
+fn provisional_title_from_installdir(installdir: &str) -> String {
+    let leaf = installdir
+        .rsplit(['\\', '/'])
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or(installdir);
+    let spaced = if leaf.contains(' ') {
+        leaf.to_string()
+    } else {
+        leaf.replace('_', " ")
+    };
+    spaced.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Parses a single Steam `appmanifest_*.acf` file and extracts `appid`, `name`, and `installdir`.
 /// Returns `Ok(None)` if the manifest belongs to an excluded redistributable tool.
+///
+/// When `name` is missing or is Steam's `appid_<id>` placeholder, the game is still returned:
+/// its title falls back to the install folder name and `title_provisional` is set so that
+/// metadata sync can replace it with the official name.
 pub fn parse_app_manifest_acf(
     content: &str,
     library_root: &Path,
@@ -111,13 +143,9 @@ pub fn parse_app_manifest_acf(
         return Ok(None);
     }
 
-    let name = app_state
-        .get_str("name")
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("Campo 'name' mancante per appid {appid}"))?;
+    let raw_name = app_state.get_str("name").map(str::trim).unwrap_or_default();
 
-    if name.eq_ignore_ascii_case("Steamworks Common Redistributables") {
+    if raw_name.eq_ignore_ascii_case("Steamworks Common Redistributables") {
         return Ok(None);
     }
 
@@ -132,16 +160,26 @@ pub fn parse_app_manifest_acf(
         .join("common")
         .join(installdir);
 
-    Ok(Some(DetectedGame::new_detected(
+    let name_is_placeholder = is_placeholder_title(raw_name) || raw_name == appid;
+    let title = if name_is_placeholder {
+        provisional_title_from_installdir(installdir)
+    } else {
+        raw_name.to_string()
+    };
+
+    let mut game = DetectedGame::new_detected(
         format!("steam:{appid}"),
-        name.to_string(),
-        clean_game_title(name),
+        title.clone(),
+        clean_game_title(&title),
         GamePlatform::Steam,
         Some(appid.to_string()),
         full_install_dir.to_string_lossy().to_string(),
         None,
         Some(format!("steam://rungameid/{appid}")),
-    )))
+    );
+    game.title_provisional = name_is_placeholder;
+
+    Ok(Some(game))
 }
 
 /// Scans a Steam installation root, discovering all secondary libraries in `libraryfolders.vdf`
@@ -281,6 +319,61 @@ mod tests {
             parsed.launch_uri.as_deref(),
             Some("steam://rungameid/292030")
         );
+    }
+
+    #[test]
+    fn placeholder_appid_name_falls_back_to_installdir_and_is_flagged_provisional() {
+        // Real-world manifest written by Steam before it cached the app info
+        let placeholder_acf = r#"
+"AppState"
+{
+	"appid"		"1321440"
+	"Universe"		"1"
+	"name"		"appid_1321440"
+	"StateFlags"		"4"
+	"installdir"		"Cassette Beasts"
+}
+"#;
+        let parsed = parse_app_manifest_acf(placeholder_acf, Path::new("/mock/SteamLibrary"))
+            .expect("valid acf")
+            .expect("game must still be listed");
+
+        assert_eq!(parsed.id, "steam:1321440");
+        assert_eq!(parsed.title, "Cassette Beasts");
+        assert_eq!(parsed.clean_title, "Cassette Beasts");
+        assert!(parsed.title_provisional);
+        assert_eq!(parsed.platform_app_id.as_deref(), Some("1321440"));
+
+        // A manifest with no `name` at all is handled the same way instead of being dropped
+        let nameless_acf = r#"
+"AppState"
+{
+	"appid"		"646570"
+	"installdir"		"Slay_the_Spire"
+}
+"#;
+        let nameless = parse_app_manifest_acf(nameless_acf, Path::new("/mock/SteamLibrary"))
+            .expect("valid acf")
+            .expect("game must still be listed");
+        assert_eq!(nameless.title, "Slay the Spire");
+        assert!(nameless.title_provisional);
+    }
+
+    #[test]
+    fn regular_manifest_names_are_not_provisional() {
+        let acf = r#"
+"AppState"
+{
+	"appid"		"1091500"
+	"name"		"Cyberpunk 2077"
+	"installdir"		"Cyberpunk 2077"
+}
+"#;
+        let parsed = parse_app_manifest_acf(acf, Path::new("/mock/Steam"))
+            .expect("valid acf")
+            .expect("listed");
+        assert_eq!(parsed.title, "Cyberpunk 2077");
+        assert!(!parsed.title_provisional);
     }
 
     #[test]

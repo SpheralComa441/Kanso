@@ -7,11 +7,14 @@ description = "Core game discovery parsers, metadata clients, title cleaner, and
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+rusqlite = { version = "0.42", features = ["bundled"] }
 ureq = { version = "2.12", features = ["json"] }
 walkdir = "2.5"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
+# Same version winreg already pulls in; used to enumerate fixed drives for the Xbox scanner
+windows-sys = { version = "0.48", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile = "3.14"

@@ -69,7 +69,11 @@ impl AppConfig {
         }
         let serialized = serde_json::to_string_pretty(&clean)
             .map_err(|e| format!("Errore di serializzazione config.json: {e}"))?;
-        fs::write(path, serialized)
+        // Write to a sibling file and rename over the target: a crash mid-write can no longer
+        // leave a truncated config.json (and with it a lost API key) behind
+        let tmp_path = path.with_extension("json.tmp");
+        fs::write(&tmp_path, serialized)
+            .and_then(|()| fs::rename(&tmp_path, path))
             .map_err(|e| format!("Impossibile salvare config.json in {}: {e}", path.display()))?;
         Ok(clean)
     }

@@ -1,7 +1,6 @@
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import Database from "@tauri-apps/plugin-sql";
 import type {
   AppConfig,
   DetectedGame,
@@ -9,6 +8,7 @@ import type {
   ScanReport,
   SgdbGameMatch,
 } from "../types/game";
+import { PREVIEW_MOCK_GAMES } from "./previewData";
 
 const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
 
@@ -18,88 +18,10 @@ const DEFAULT_CONFIG: AppConfig = {
   minimizeToTrayOnLaunch: false,
 };
 
-const PREVIEW_MOCK_GAMES: DetectedGame[] = [
-  {
-    id: "steam:1091500",
-    title: "Cyberpunk 2077",
-    cleanTitle: "Cyberpunk 2077",
-    platform: "steam",
-    platformAppId: "1091500",
-    installDir:
-      "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077",
-    executablePath: null,
-    launchUri: "steam://rungameid/1091500",
-    steamgriddbId: 5276290,
-    coverPath: null,
-    shortDescription:
-      "Cyberpunk 2077 è un GDR d'azione e avventura open-world ambientato a Night City.",
-    genres: ["Azione", "GDR"],
-    isFavorite: false,
-    metadataSynced: true,
-    customOverride: false,
-    updatedAt: 1700000000000,
-  },
-  {
-    id: "battlenet:fenris",
-    title: "Diablo® IV",
-    cleanTitle: "Diablo IV",
-    platform: "Battle.net",
-    platformAppId: "Fenris",
-    installDir: "C:\\Program Files (x86)\\Diablo IV",
-    executablePath:
-      "C:\\Program Files (x86)\\Diablo IV\\Diablo IV Launcher.exe",
-    launchUri: null,
-    steamgriddbId: null,
-    coverPath: null,
-    shortDescription:
-      "Unisciti alla lotta infinita tra gli Alti Cieli e gli Inferi Fiammeggianti.",
-    genres: ["Azione", "GDR"],
-    isFavorite: false,
-    metadataSynced: true,
-    customOverride: false,
-    updatedAt: 1700000000000,
-  },
-  {
-    id: "epic:dc9d2e595d0e4650b35d659f90d41059",
-    title: "Alan Wake 2 Deluxe Edition",
-    cleanTitle: "Alan Wake 2",
-    platform: "epic",
-    platformAppId: "dc9d2e595d0e4650b35d659f90d41059",
-    installDir: "D:\\Epic Games\\AlanWake2",
-    executablePath: "D:\\Epic Games\\AlanWake2\\Binaries\\Win64\\AlanWake2.exe",
-    launchUri:
-      "com.epicgames.launcher://apps/da155068a9034375839136b4697593c1%3A235b28b9c6e2469da792fbabbc2fd25e%3Adc9d2e595d0e4650b35d659f90d41059?action=launch&silent=true",
-    steamgriddbId: null,
-    coverPath: null,
-    shortDescription: "Un thriller psicologico survival horror.",
-    genres: ["Azione", "Avventura"],
-    isFavorite: false,
-    metadataSynced: true,
-    customOverride: false,
-    updatedAt: 1700000000000,
-  },
-  {
-    id: "standalone:8f31c9a04d2e11b7",
-    title: "Hollow Knight",
-    cleanTitle: "Hollow Knight",
-    platform: "standalone",
-    platformAppId: null,
-    installDir: "E:\\Games\\Hollow Knight",
-    executablePath: "E:\\Games\\Hollow Knight\\hollow_knight.exe",
-    launchUri: null,
-    steamgriddbId: null,
-    coverPath: null,
-    shortDescription:
-      "Forgia il tuo cammino in Hollow Knight! Un'epica avventura d'azione in un vasto regno in rovina.",
-    genres: ["Azione", "Avventura", "Indie"],
-    isFavorite: false,
-    metadataSynced: true,
-    customOverride: false,
-    updatedAt: 1700000000000,
-  },
-];
-
-let previewGamesState: DetectedGame[] = [...PREVIEW_MOCK_GAMES];
+// Same ordering the desktop backend applies to a real scan
+let previewGamesState: DetectedGame[] = [...PREVIEW_MOCK_GAMES].sort((a, b) =>
+  a.title.toLowerCase().localeCompare(b.title.toLowerCase())
+);
 
 export function isRunningInTauri(): boolean {
   return isTauri();
@@ -127,47 +49,6 @@ export function resolveCoverUrl(
   const assetUrl = convertFileSrc(coverPath);
   const sep = assetUrl.includes("?") ? "&" : "?";
   return `${assetUrl}${sep}v=${updatedAt || 1}`;
-}
-
-async function mirrorGamesToSqlite(games: DetectedGame[]): Promise<void> {
-  if (!isTauri()) return;
-  try {
-    const db = await Database.load("sqlite:kanso.db");
-    for (const g of games) {
-      await db.execute(
-        `INSERT INTO games (
-          id, title, clean_title, platform, platform_app_id, install_dir,
-          executable_path, launch_uri, cover_path, short_description, genres, is_favorite, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP)
-        ON CONFLICT(id) DO UPDATE SET
-          title = excluded.title,
-          clean_title = excluded.clean_title,
-          platform = excluded.platform,
-          executable_path = excluded.executable_path,
-          cover_path = excluded.cover_path,
-          short_description = excluded.short_description,
-          genres = excluded.genres,
-          is_favorite = excluded.is_favorite,
-          updated_at = CURRENT_TIMESTAMP`,
-        [
-          g.id,
-          g.title,
-          g.cleanTitle,
-          g.platform,
-          g.platformAppId,
-          g.installDir,
-          g.executablePath,
-          g.launchUri,
-          g.coverPath,
-          g.shortDescription,
-          JSON.stringify(g.genres),
-          g.isFavorite ? 1 : 0,
-        ]
-      );
-    }
-  } catch {
-    // Non-fatal: primary JSON store in AppData remains intact
-  }
 }
 
 export async function getSettings(): Promise<AppConfig> {
@@ -201,21 +82,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
   };
 
   if (isTauri()) {
-    const saved = await invoke<AppConfig>("save_settings", {
-      config: sanitized,
-    });
-    try {
-      const db = await Database.load("sqlite:kanso.db");
-      await db.execute(
-        `INSERT INTO settings (key, value, updated_at)
-         VALUES ('has_sgdb_key', $1, CURRENT_TIMESTAMP)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-        [saved.steamgriddbApiKey ? "true" : "false"]
-      );
-    } catch {
-      // Non-fatal
-    }
-    return saved;
+    return invoke<AppConfig>("save_settings", { config: sanitized });
   }
 
   localStorage.setItem(BROWSER_STORAGE_KEY, JSON.stringify(sanitized));
@@ -224,34 +91,22 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
 
 export async function scanGames(): Promise<ScanReport> {
   if (isTauri()) {
-    const report = await invoke<ScanReport>("scan_games");
-    void mirrorGamesToSqlite(report.games);
-    return report;
+    return invoke<ScanReport>("scan_games");
   }
 
-  return {
-    games: [...previewGamesState],
-    steamCount: previewGamesState.filter((g) => g.platform === "steam").length,
-    epicCount: previewGamesState.filter((g) => g.platform === "epic").length,
-    battlenetCount: previewGamesState.filter(
-      (g) => g.platform === "Battle.net"
-    ).length,
-    standaloneCount: previewGamesState.filter(
-      (g) => g.platform === "standalone"
-    ).length,
-    warnings: [],
-  };
+  return { games: [...previewGamesState], warnings: [] };
 }
 
+/**
+ * Fills in missing covers, descriptions and names. Games still incomplete after an attempt are
+ * retried once a day at most, unless `retryNow` (the user explicitly asked for a scan, or just
+ * configured an API key).
+ */
 export async function syncLibraryMetadata(
-  forceRefresh = false
+  retryNow = false
 ): Promise<ScanReport> {
   if (isTauri()) {
-    const report = await invoke<ScanReport>("sync_library_metadata", {
-      forceRefresh,
-    });
-    void mirrorGamesToSqlite(report.games);
-    return report;
+    return invoke<ScanReport>("sync_library_metadata", { retryNow });
   }
 
   return scanGames();
@@ -265,7 +120,6 @@ export async function subscribeToGameUpdates(
   }
   const unlisten = await listen<DetectedGame>("library:game-updated", (ev) => {
     onUpdate(ev.payload);
-    void mirrorGamesToSqlite([ev.payload]);
   });
   return unlisten;
 }
@@ -303,13 +157,11 @@ export async function applySteamGridDbMatch(
   matchedName: string
 ): Promise<DetectedGame> {
   if (isTauri()) {
-    const updated = await invoke<DetectedGame>("apply_steamgriddb_match", {
+    return invoke<DetectedGame>("apply_steamgriddb_match", {
       gameId,
       sgdbGameId,
       matchedName,
     });
-    void mirrorGamesToSqlite([updated]);
-    return updated;
   }
 
   const idx = previewGamesState.findIndex((g) => g.id === gameId);
@@ -322,6 +174,7 @@ export async function applySteamGridDbMatch(
     cleanTitle: matchedName,
     steamgriddbId: sgdbGameId,
     customOverride: true,
+    titleProvisional: false,
     updatedAt: Date.now(),
   };
   previewGamesState[idx] = updated;
@@ -332,11 +185,9 @@ export async function updateGameDetails(
   payload: GameManualUpdate
 ): Promise<DetectedGame> {
   if (isTauri()) {
-    const updated = await invoke<DetectedGame>("update_game_details", {
+    return invoke<DetectedGame>("update_game_details", {
       payload,
     });
-    void mirrorGamesToSqlite([updated]);
-    return updated;
   }
 
   const idx = previewGamesState.findIndex((g) => g.id === payload.id);
@@ -349,6 +200,7 @@ export async function updateGameDetails(
     genres: payload.genres,
     isFavorite: payload.isFavorite ?? previewGamesState[idx].isFavorite,
     customOverride: true,
+    titleProvisional: false,
     updatedAt: Date.now(),
   };
   previewGamesState[idx] = updated;
@@ -360,19 +212,51 @@ export async function setGameLocalCover(
   imagePath: string
 ): Promise<DetectedGame> {
   if (isTauri()) {
-    const updated = await invoke<DetectedGame>("set_game_local_cover", {
+    return invoke<DetectedGame>("set_game_local_cover", {
       gameId,
       imagePath,
     });
-    void mirrorGamesToSqlite([updated]);
-    return updated;
   }
   throw new Error("Selezione file locale disponibile nell'app Windows.");
 }
 
+export async function setGameFavorite(
+  gameId: string,
+  isFavorite: boolean
+): Promise<DetectedGame> {
+  if (isTauri()) {
+    return invoke<DetectedGame>("set_game_favorite", {
+      gameId,
+      isFavorite,
+    });
+  }
+
+  const idx = previewGamesState.findIndex((g) => g.id === gameId);
+  if (idx === -1) throw new Error("Gioco non trovato.");
+  const updated: DetectedGame = { ...previewGamesState[idx], isFavorite };
+  previewGamesState[idx] = updated;
+  return updated;
+}
+
+export async function setGameHidden(
+  gameId: string,
+  isHidden: boolean
+): Promise<DetectedGame> {
+  if (isTauri()) {
+    return invoke<DetectedGame>("set_game_hidden", { gameId, isHidden });
+  }
+
+  const idx = previewGamesState.findIndex((g) => g.id === gameId);
+  if (idx === -1) throw new Error("Gioco non trovato.");
+  const updated: DetectedGame = { ...previewGamesState[idx], isHidden };
+  previewGamesState[idx] = updated;
+  return updated;
+}
+
 export async function launchGame(game: DetectedGame): Promise<void> {
   if (isTauri()) {
-    await invoke<void>("launch_game", { game });
+    // The backend launches what is stored for this id, not what the webview sends
+    await invoke<void>("launch_game", { gameId: game.id });
     return;
   }
 

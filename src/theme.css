@@ -16,4 +16,6 @@
   /* Layout & card geometry */
   --card-min-width: 185px;
   --card-radius: 10px;
+  --sidebar-width: 208px;
+  --header-height: 52px;
 }
