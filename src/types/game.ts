@@ -32,11 +32,17 @@ export interface DetectedGame {
   isHidden: boolean;
   /** Last automatic metadata attempt (ms since epoch), `0` if never. */
   metadataAttemptedAt: number;
-  /** Last launch from Kanso (ms since epoch). */
+  /** Last time played (ms since epoch): a launch from Kanso or what Steam recorded. */
   lastPlayedAt: number | null;
+  /** Launches from Kanso. */
   playCount: number;
   /** Language the cached description and genres were fetched in. */
   metadataLang: string | null;
+  /** Steam community tags ("Souls-like", "Co-op online", ...), most relevant first. */
+  tags: string[];
+  tagsLang: string | null;
+  /** Total playtime recorded by the game's client (Steam), in minutes; `null` if unknown. */
+  playtimeMinutes: number | null;
   updatedAt: number;
 }
 
@@ -62,6 +68,18 @@ export interface ScanReport {
   warnings: string[];
 }
 
+/** Preferences that apply on top of any theme (Settings → Accessibility). */
+export interface AccessibilityConfig {
+  /** Size of text and controls, in percent of the theme's own size. */
+  textScale: number;
+  highContrast: boolean;
+  reduceMotion: boolean;
+  /** A font chosen for legibility instead of the theme's fonts. */
+  readableFont: "atkinson" | "opendyslexic" | null;
+  alwaysShowScrollbars: boolean;
+  strongFocus: boolean;
+}
+
 export interface AppConfig {
   steamgriddbApiKey: string;
   customFolders: string[];
@@ -70,6 +88,7 @@ export interface AppConfig {
   language: string | null;
   /** Selected theme (`builtin:<name>` or an installed theme's id); `null` = default. */
   themeId: string | null;
+  accessibility: AccessibilityConfig;
 }
 
 export type DealStore = "steam" | "epic" | "gog";

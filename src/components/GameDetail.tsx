@@ -19,6 +19,7 @@ interface GameDetailProps {
   onToggleHidden: (game: DetectedGame) => void;
   onEdit: (game: DetectedGame) => void;
   onSelectGenre: (genreKey: string) => void;
+  onSelectTag: (tagKey: string) => void;
 }
 
 /** Describes how the game will be started, shown as a small technical footnote. */
@@ -41,8 +42,9 @@ export function GameDetail({
   onToggleHidden,
   onEdit,
   onSelectGenre,
+  onSelectTag,
 }: GameDetailProps) {
-  const { t, plural, relativePast } = useI18n();
+  const { t, plural, relativePast, duration } = useI18n();
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const { usableCover, markBroken } = useBrokenCovers();
   const gameId = game?.id ?? null;
@@ -156,6 +158,24 @@ export function GameDetail({
                 ))}
               </ul>
             )}
+
+            {/* Steam community tags: finer than genres ("Souls-like", "Co-op online") */}
+            {game.tags.length > 0 && (
+              <ul className="flex flex-wrap gap-x-2.5 gap-y-1" aria-label={t("detail.tags")}>
+                {game.tags.map((tag) => (
+                  <li key={tag}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectTag(genreKey(tag))}
+                      title={t("detail.showTag", { tag })}
+                      className="text-2xs text-zinc-400 underline-offset-2 transition-colors hover:text-accent hover:underline"
+                    >
+                      {tag}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <p
@@ -168,7 +188,7 @@ export function GameDetail({
 
           <dl className="mt-auto space-y-2 border-t border-oled-border/70 pt-4 text-2xs">
             <div className="flex gap-3">
-              <dt className="w-20 shrink-0 text-zinc-500">{t("detail.folder")}</dt>
+              <dt className="w-24 shrink-0 text-zinc-500">{t("detail.folder")}</dt>
               <dd
                 className="min-w-0 select-text truncate font-mono text-zinc-400"
                 title={game.installDir}
@@ -177,7 +197,7 @@ export function GameDetail({
               </dd>
             </div>
             <div className="flex gap-3">
-              <dt className="w-20 shrink-0 text-zinc-500">{t("detail.launch")}</dt>
+              <dt className="w-24 shrink-0 text-zinc-500">{t("detail.launch")}</dt>
               <dd
                 className="min-w-0 select-text truncate font-mono text-zinc-400"
                 title={launchTarget(game, t)}
@@ -185,9 +205,19 @@ export function GameDetail({
                 {launchTarget(game, t)}
               </dd>
             </div>
+            {game.playtimeMinutes !== null && (
+              <div className="flex gap-3">
+                <dt className="w-24 shrink-0 text-zinc-500">{t("detail.playtime")}</dt>
+                <dd id="detail-playtime" className="min-w-0 truncate text-zinc-400">
+                  {game.playtimeMinutes > 0
+                    ? duration(game.playtimeMinutes)
+                    : t("detail.neverPlayed")}
+                </dd>
+              </div>
+            )}
             {game.lastPlayedAt !== null && (
               <div className="flex gap-3">
-                <dt className="w-20 shrink-0 text-zinc-500">{t("detail.played")}</dt>
+                <dt className="w-24 shrink-0 text-zinc-500">{t("detail.played")}</dt>
                 <dd className="min-w-0 truncate text-zinc-400">
                   {relativePast(game.lastPlayedAt)}
                   {game.playCount > 1

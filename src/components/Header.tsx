@@ -160,7 +160,13 @@ export function Header({
         isRunningInTauri() ? "" : "pr-4"
       }`}
     >
-      <div ref={contentRef} className="flex min-w-0 flex-1 items-center gap-3 pl-4">
+      {/* The right padding keeps the last action clear of the window buttons' hover area */}
+      <div
+        ref={contentRef}
+        className={`flex min-w-0 flex-1 items-center gap-3 pl-4 ${
+          isRunningInTauri() ? "pr-3" : ""
+        }`}
+      >
         {/* Sidebar toggle, brand & count */}
         <div className="flex shrink-0 items-center gap-3">
           <button

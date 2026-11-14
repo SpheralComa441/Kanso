@@ -1,5 +1,5 @@
 import { EyeOff, History, Home, Library, Star } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import {
   EMPTY_FILTERS,
@@ -22,7 +22,12 @@ interface SidebarProps {
   onFiltersChange: (next: LibraryFilters) => void;
   counts: LibraryCounts;
   genres: GenreSummary[];
+  /** Steam community tags found in the library, most common first. */
+  tags: GenreSummary[];
 }
+
+/** Tags shown before "show all": the list can run to a hundred entries. */
+const TAGS_SHOWN_AT_FIRST = 10;
 
 interface NavRowProps {
   id: string;
@@ -84,8 +89,10 @@ export function Sidebar({
   onFiltersChange,
   counts,
   genres,
+  tags,
 }: SidebarProps) {
   const { t } = useI18n();
+  const [showAllTags, setShowAllTags] = useState(false);
   const inLibrary = view === "library";
   const nothingFiltered = !hasActiveFilters(filters);
   const viewingHidden = filters.collection === "hidden";
@@ -109,6 +116,11 @@ export function Sidebar({
     collection: viewingHidden ? "all" : filters.collection,
     ...next,
   });
+
+  // The selected tag stays in sight even when it is not among the most common ones
+  const shownTags = showAllTags
+    ? tags
+    : tags.filter((tag, index) => index < TAGS_SHOWN_AT_FIRST || tag.key === filters.tag);
 
   const platformsWithGames = PLATFORM_ORDER.filter(
     (platform) =>
@@ -231,6 +243,42 @@ export function Sidebar({
             </div>
           )}
         </section>
+
+        {tags.length > 0 && (
+          <section>
+            <SectionTitle>{t("sidebar.tags")}</SectionTitle>
+            <div className="space-y-0.5">
+              {shownTags.map((tag) => {
+                const active = inLibrary && filters.tag === tag.key;
+                return (
+                  <NavRow
+                    key={tag.key}
+                    id={`filter-tag-${tag.key}`}
+                    label={tag.label}
+                    count={tag.count}
+                    active={active}
+                    onClick={() =>
+                      onFiltersChange(withVisiblePool({ tag: active ? null : tag.key }))
+                    }
+                  />
+                );
+              })}
+            </div>
+            {tags.length > TAGS_SHOWN_AT_FIRST && (
+              <button
+                id="toggle-all-tags-button"
+                type="button"
+                onClick={() => setShowAllTags((all) => !all)}
+                aria-expanded={showAllTags}
+                className="mt-1 w-full rounded-md px-2.5 py-1.5 text-left text-2xs text-zinc-500 transition-colors hover:bg-oled-surface hover:text-zinc-200"
+              >
+                {showAllTags
+                  ? t("sidebar.showFewerTags")
+                  : t("sidebar.showAllTags", { count: tags.length })}
+              </button>
+            )}
+          </section>
+        )}
       </nav>
     </aside>
   );

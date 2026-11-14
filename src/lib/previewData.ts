@@ -58,6 +58,9 @@ function seed(game: PreviewSeed): DetectedGame {
     lastPlayedAt: null,
     playCount: 0,
     metadataLang: "it",
+    tags: [],
+    tagsLang: "it",
+    playtimeMinutes: null,
     updatedAt: 1700000000000,
     ...rest,
   };
@@ -67,6 +70,8 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   seed({
     id: "steam:1321440",
     title: "Cassette Beasts",
+    tags: ["Collezione di creature", "Combattimento a turni", "Pixel art", "Co-op locale"],
+    playtimeMinutes: 754,
     platform: "steam",
     platformAppId: "1321440",
     installDir: "D:\\SteamLibrary\\steamapps\\common\\Cassette Beasts",
@@ -82,6 +87,8 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   seed({
     id: "steam:1091500",
     title: "Cyberpunk 2077",
+    tags: ["Mondo aperto", "Cyberpunk", "Giocatore singolo", "Fantascienza"],
+    playtimeMinutes: 4380,
     platform: "steam",
     platformAppId: "1091500",
     installDir:
@@ -96,6 +103,8 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   seed({
     id: "steam:1145360",
     title: "Hades",
+    tags: ["Stile Rogue", "Giocatore singolo", "Hack and slash", "Difficili"],
+    playtimeMinutes: 2112,
     platform: "steam",
     platformAppId: "1145360",
     installDir: "D:\\SteamLibrary\\steamapps\\common\\Hades",
@@ -123,6 +132,7 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   seed({
     id: "gog:1207658924",
     title: "The Witcher 3: Wild Hunt",
+    tags: ["Mondo aperto", "Giocatore singolo", "Fantasy", "Ricchi di storia"],
     platform: "gog",
     platformAppId: "1207658924",
     installDir: "E:\\GOG Games\\The Witcher 3 Wild Hunt",
@@ -149,6 +159,8 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   seed({
     id: "steam:413150",
     title: "Stardew Valley",
+    tags: ["Simulatore di fattoria", "Pixel art", "Co-op online", "Rilassanti"],
+    playtimeMinutes: 35,
     platform: "steam",
     platformAppId: "413150",
     installDir: "D:\\SteamLibrary\\steamapps\\common\\Stardew Valley",
@@ -171,6 +183,7 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   seed({
     id: "battlenet:fenris",
     title: "Diablo® IV",
+    tags: ["Hack and slash", "Co-op online", "Fantasy dark"],
     cleanTitle: "Diablo IV",
     platform: "Battle.net",
     platformAppId: "Fenris",
@@ -199,6 +212,7 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   seed({
     id: "standalone:8f31c9a04d2e11b7",
     title: "Hollow Knight",
+    tags: ["Metroidvania", "Stile Souls", "Difficili", "Giocatore singolo"],
     platform: "standalone",
     installDir: "E:\\Games\\Hollow Knight",
     executablePath: "E:\\Games\\Hollow Knight\\hollow_knight.exe",

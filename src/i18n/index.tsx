@@ -78,6 +78,8 @@ export interface I18n {
   shortDate: (timestampMs: number) => string;
   /** Localised price, e.g. "26,65 €". */
   money: (amount: number, currency: string) => string;
+  /** A playtime: "35 min", "12 h", "12 h 34 min". */
+  duration: (minutes: number) => string;
 }
 
 const RELATIVE_STEPS: [number, Intl.RelativeTimeFormatUnit, number][] = [
@@ -119,6 +121,15 @@ export function createI18n(lang: LanguageCode): I18n {
       return "";
     },
     shortDate: (timestampMs) => dayMonth.format(new Date(timestampMs)),
+    duration: (totalMinutes) => {
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = Math.round(totalMinutes % 60);
+      const parts = [
+        hours > 0 ? t("time.hours", { count: new Intl.NumberFormat(lang).format(hours) }) : "",
+        minutes > 0 || hours === 0 ? t("time.minutes", { count: minutes }) : "",
+      ];
+      return parts.filter(Boolean).join(" ");
+    },
     money: (amount, currency) => {
       try {
         return new Intl.NumberFormat(lang, { style: "currency", currency }).format(amount);

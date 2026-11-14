@@ -12,7 +12,12 @@ import type {
   Theme,
 } from "../types/game";
 import { PREVIEW_MOCK_DEALS, PREVIEW_MOCK_GAMES } from "./previewData";
-import { withThemeDefaults, type ThemeInput } from "./themes";
+import {
+  DEFAULT_ACCESSIBILITY,
+  withAccessibilityDefaults,
+  withThemeDefaults,
+  type ThemeInput,
+} from "./themes";
 
 const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
 
@@ -24,6 +29,7 @@ const DEFAULT_CONFIG: AppConfig = {
   minimizeToTrayOnLaunch: false,
   language: null,
   themeId: null,
+  accessibility: DEFAULT_ACCESSIBILITY,
 };
 
 // Same ordering the desktop backend applies to a real scan
@@ -76,6 +82,7 @@ export async function getSettings(): Promise<AppConfig> {
       minimizeToTrayOnLaunch: Boolean(parsed.minimizeToTrayOnLaunch),
       language: typeof parsed.language === "string" ? parsed.language : null,
       themeId: typeof parsed.themeId === "string" ? parsed.themeId : null,
+      accessibility: withAccessibilityDefaults(parsed.accessibility),
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -91,6 +98,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     minimizeToTrayOnLaunch: config.minimizeToTrayOnLaunch,
     language: config.language,
     themeId: config.themeId,
+    accessibility: withAccessibilityDefaults(config.accessibility),
   };
 
   if (isTauri()) {

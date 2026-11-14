@@ -240,6 +240,31 @@ export const it = {
   "window.maximize": "Ingrandisci",
   "window.restore": "Ripristina",
   "window.close": "Chiudi",
+  "sidebar.tags": "Tag",
+  "sidebar.showAllTags": "Mostra tutti ({count})",
+  "sidebar.showFewerTags": "Mostra meno",
+  "detail.tags": "Tag",
+  "detail.showTag": "Mostra tutti i giochi con il tag «{tag}»",
+  "detail.playtime": "Tempo di gioco",
+  "detail.neverPlayed": "Mai avviato",
+  "time.hours": "{count} h",
+  "time.minutes": "{count} min",
+  "a11y.section": "Accessibilità",
+  "a11y.textSize": "Dimensione del testo",
+  "a11y.readableFont": "Font ad alta leggibilità",
+  "a11y.fontTheme": "Quello del tema",
+  "a11y.fontLowVision": "per ipovisione",
+  "a11y.fontDyslexia": "per dislessia",
+  "a11y.highContrast": "Contrasto elevato",
+  "a11y.highContrastHelp": "Testi e bordi più marcati, con qualsiasi tema.",
+  "a11y.reduceMotion": "Riduci le animazioni",
+  "a11y.reduceMotionHelp":
+    "Niente transizioni né zoom delle copertine. Segue già l'impostazione di Windows.",
+  "a11y.scrollbars": "Barre di scorrimento sempre visibili",
+  "a11y.scrollbarsHelp": "Invece che solo al passaggio del mouse.",
+  "a11y.strongFocus": "Evidenzia la selezione da tastiera",
+  "a11y.strongFocusHelp":
+    "Contorno spesso attorno all'elemento attivo quando navighi con Tab.",
 } as const;
 
 export type MessageKey = keyof typeof it;

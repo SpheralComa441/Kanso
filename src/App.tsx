@@ -39,13 +39,20 @@ import {
   readUiPreference,
   sortGamesByTitle,
   summarizeGenres,
+  summarizeTags,
   writeUiPreference,
   type LibraryCollection,
   type LibraryFilters,
 } from "./lib/library";
 import { platformLabel } from "./lib/platforms";
-import { applyTheme, resolveTheme } from "./lib/themes";
-import type { AppConfig, DetectedGame, ScanReport, Theme } from "./types/game";
+import { DEFAULT_ACCESSIBILITY, applyTheme, resolveTheme } from "./lib/themes";
+import type {
+  AccessibilityConfig,
+  AppConfig,
+  DetectedGame,
+  ScanReport,
+  Theme,
+} from "./types/game";
 
 const INITIAL_CONFIG: AppConfig = {
   steamgriddbApiKey: "",
@@ -53,6 +60,7 @@ const INITIAL_CONFIG: AppConfig = {
   minimizeToTrayOnLaunch: false,
   language: null,
   themeId: null,
+  accessibility: DEFAULT_ACCESSIBILITY,
 };
 
 const SIDEBAR_PREF_KEY = "kanso.ui.sidebar";
@@ -166,6 +174,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   /** Theme shown but not saved: a selection in Settings or a draft in the editor. */
   const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
   const [themeEditorBase, setThemeEditorBase] = useState<Theme | null>(null);
+  /** Accessibility choices being tried in Settings, before they are saved. */
+  const [previewAccessibility, setPreviewAccessibility] =
+    useState<AccessibilityConfig | null>(null);
 
   /* ------------------------------------------------------------------ theme */
 
@@ -188,8 +199,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     [config.themeId, userThemes]
   );
   useEffect(() => {
-    applyTheme(previewTheme ?? savedTheme);
-  }, [previewTheme, savedTheme]);
+    applyTheme(previewTheme ?? savedTheme, previewAccessibility ?? config.accessibility);
+  }, [previewTheme, savedTheme, previewAccessibility, config.accessibility]);
 
   /* ---------------------------------------------------------------- library */
 
@@ -359,6 +370,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
   const games = report.games;
   const genres = useMemo(() => summarizeGenres(games), [games]);
+  const tags = useMemo(() => summarizeTags(games, genres), [games, genres]);
   const counts = useMemo(() => countLibrary(games), [games]);
   const filteredGames = useMemo(
     () => applyLibraryFilters(games, filters, searchQuery),
@@ -381,6 +393,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       setFilters((f) => ({ ...f, genre: null }));
     }
   }, [filters.genre, activeGenre, games.length]);
+
+  // Same for a tag (tags also change with the interface language)
+  const activeTag = tags.find((tag) => tag.key === filters.tag) ?? null;
+  useEffect(() => {
+    if (filters.tag && !activeTag && games.length > 0) {
+      setFilters((f) => ({ ...f, tag: null }));
+    }
+  }, [filters.tag, activeTag, games.length]);
 
   // Showing the last hidden game again empties that pool: go back to the library
   useEffect(() => {
@@ -443,6 +463,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           onFiltersChange={changeFilters}
           counts={counts}
           genres={genres}
+          tags={tags}
         />
 
         <main className="app-main scroll-area fade-top min-w-0 flex-1 space-y-4 overflow-y-auto">
@@ -487,6 +508,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                     <FilterChip
                       label={activeGenre.label}
                       onRemove={() => setFilters((f) => ({ ...f, genre: null }))}
+                    />
+                  )}
+                  {activeTag && (
+                    <FilterChip
+                      label={activeTag.label}
+                      onRemove={() => setFilters((f) => ({ ...f, tag: null }))}
                     />
                   )}
                   <span className="tabular-nums">
@@ -538,6 +565,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           setSearchQuery("");
           closeDetail();
         }}
+        onSelectTag={(key) => {
+          setFilters({ ...EMPTY_FILTERS, tag: key });
+          setSearchQuery("");
+          closeDetail();
+        }}
       />
 
       {/* Errors float above every dialog: a failed launch from the detail view stays readable.
@@ -567,9 +599,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onSave={handleSaveSettings}
         onThemesChanged={reloadThemes}
         onPreviewTheme={setPreviewTheme}
+        onPreviewAccessibility={setPreviewAccessibility}
         onCustomizeTheme={(theme) => {
           // The editor is a side panel: close the dialog so the app shows the draft live
           setIsSettingsOpen(false);
+          setPreviewAccessibility(null);
           setPreviewTheme(theme);
           setThemeEditorBase(theme);
         }}
