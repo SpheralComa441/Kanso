@@ -1,0 +1,17 @@
+{
+  "kansoPlugin": 1,
+  "id": "pcgamingwiki",
+  "name": "PCGamingWiki",
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "Technical facts from PCGamingWiki (ultrawide, HDR, high frame rates, controller support) and a link to the game's page, where fixes and tweaks are documented.",
+    "it": "Dati tecnici da PCGamingWiki (ultrawide, HDR, frame rate elevati, supporto controller) e il link alla pagina del gioco, dove sono documentate correzioni e modifiche.",
+    "es": "Datos técnicos de PCGamingWiki (ultrapanorámico, HDR, alta tasa de fotogramas, mandos) y enlace a la página del juego, donde se documentan correcciones y ajustes.",
+    "ru": "Технические сведения из PCGamingWiki (сверхширокий экран, HDR, высокая частота кадров, поддержка геймпадов) и ссылка на страницу игры с исправлениями и настройками."
+  },
+  "homepage": "https://www.pcgamingwiki.com",
+  "hosts": ["www.pcgamingwiki.com"],
+  "provides": { "gameDetails": true },
+  "cacheHours": 720
+}

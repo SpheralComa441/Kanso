@@ -4,6 +4,7 @@ import {
   List,
   PanelLeftClose,
   PanelLeftOpen,
+  Puzzle,
   RefreshCw,
   Search,
   Settings,
@@ -17,6 +18,14 @@ import {
 } from "../lib/backend";
 
 export type ViewMode = "grid" | "list";
+
+/** A command an enabled plugin adds to the Plugins menu. */
+export interface PluginCommandEntry {
+  pluginId: string;
+  commandId: string;
+  title: string;
+  description: string;
+}
 
 interface HeaderProps {
   totalGames: number;
@@ -38,6 +47,84 @@ interface HeaderProps {
   settingsDisabled: boolean;
   onScan: () => void;
   onOpenSettings: () => void;
+  /** Commands of the enabled plugins; the menu is hidden when there are none. */
+  pluginCommands: PluginCommandEntry[];
+  onRunPluginCommand: (command: PluginCommandEntry) => void;
+}
+
+interface PluginMenuProps {
+  commands: PluginCommandEntry[];
+  onRun: (command: PluginCommandEntry) => void;
+}
+
+/** The Plugins button and the list of commands it opens. */
+function PluginMenu({ commands, onRun }: PluginMenuProps) {
+  const { t } = useI18n();
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const closeOnOutside = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setIsOpen(false);
+    };
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsOpen(false);
+    };
+    window.addEventListener("pointerdown", closeOnOutside);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnOutside);
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isOpen]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        id="open-plugin-menu-button"
+        type="button"
+        onClick={() => setIsOpen((open) => !open)}
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        title={t("plugins.menu")}
+        aria-label={t("plugins.menu")}
+        className={`rounded-lg border border-oled-border bg-oled-surface p-2 transition-colors hover:border-zinc-700 hover:bg-oled-elevated hover:text-zinc-100 ${
+          isOpen ? "text-zinc-100" : "text-zinc-400"
+        }`}
+      >
+        <Puzzle className="h-3.5 w-3.5" />
+      </button>
+
+      {isOpen && (
+        <div
+          id="plugin-menu"
+          role="menu"
+          aria-label={t("plugins.menu")}
+          className="absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border border-oled-border bg-oled-surface p-1.5 shadow-2xl"
+        >
+          {commands.map((command) => (
+            <button
+              key={`${command.pluginId}:${command.commandId}`}
+              id={`plugin-command-${command.pluginId}-${command.commandId}`}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setIsOpen(false);
+                onRun(command);
+              }}
+              className="block w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-oled-elevated"
+            >
+              <span className="block text-xs font-medium text-zinc-100">{command.title}</span>
+              {command.description && (
+                <span className="mt-0.5 block text-2xs text-zinc-500">{command.description}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Window glyphs on a 10-unit grid, drawn with hairlines like the system ones. */
@@ -139,6 +226,8 @@ export function Header({
   settingsDisabled,
   onScan,
   onOpenSettings,
+  pluginCommands,
+  onRunPluginCommand,
 }: HeaderProps) {
   const { t, plural } = useI18n();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -160,7 +249,13 @@ export function Header({
         isRunningInTauri() ? "" : "pr-4"
       }`}
     >
-      <div ref={contentRef} className="flex min-w-0 flex-1 items-center gap-3 pl-4">
+      {/* The right padding keeps the last action clear of the window buttons' hover area */}
+      <div
+        ref={contentRef}
+        className={`flex min-w-0 flex-1 items-center gap-3 pl-4 ${
+          isRunningInTauri() ? "pr-3" : ""
+        }`}
+      >
         {/* Sidebar toggle, brand & count */}
         <div className="flex shrink-0 items-center gap-3">
           <button
@@ -248,6 +343,10 @@ export function Header({
                 </button>
               ))}
             </div>
+          )}
+
+          {pluginCommands.length > 0 && (
+            <PluginMenu commands={pluginCommands} onRun={onRunPluginCommand} />
           )}
 
           <button

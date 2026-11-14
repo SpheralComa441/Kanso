@@ -1,0 +1,50 @@
+{
+  "kansoPlugin": 1,
+  "id": "play-tonight",
+  "name": {
+    "en": "What should I play tonight?",
+    "it": "Cosa gioco stasera?",
+    "es": "¿A qué juego esta noche?",
+    "ru": "Во что поиграть сегодня?"
+  },
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "Suggests three games from your library: one to continue, one from the backlog, one to rediscover. Works offline.",
+    "it": "Propone tre giochi dalla tua libreria: uno da continuare, uno dal backlog, uno da riscoprire. Funziona offline.",
+    "es": "Propone tres juegos de tu biblioteca: uno para continuar, uno pendiente y uno para redescubrir. Funciona sin conexión.",
+    "ru": "Предлагает три игры из вашей библиотеки: продолжить, начать из отложенных и вспомнить давнюю. Работает без сети."
+  },
+  "hosts": [],
+  "enabledByDefault": true,
+  "commands": [
+    {
+      "id": "pick",
+      "title": {
+        "en": "What should I play tonight?",
+        "it": "Cosa gioco stasera?",
+        "es": "¿A qué juego esta noche?",
+        "ru": "Во что поиграть сегодня?"
+      },
+      "description": {
+        "en": "Three suggestions from your library",
+        "it": "Tre proposte dalla tua libreria",
+        "es": "Tres propuestas de tu biblioteca",
+        "ru": "Три предложения из вашей библиотеки"
+      }
+    }
+  ],
+  "settings": [
+    {
+      "key": "includeFinished",
+      "type": "toggle",
+      "default": false,
+      "label": {
+        "en": "Also suggest games marked as finished",
+        "it": "Proponi anche i giochi segnati come finiti",
+        "es": "Proponer también los juegos marcados como terminados",
+        "ru": "Предлагать и пройденные игры"
+      }
+    }
+  ]
+}

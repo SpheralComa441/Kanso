@@ -2,11 +2,13 @@ import { useEffect, useRef } from "react";
 import { Eye, EyeOff, Pencil, Play, Star, X } from "lucide-react";
 import { useI18n, type I18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
-import { genreKey } from "../lib/library";
+import { GAME_STATUSES, genreKey } from "../lib/library";
 import { PLATFORM_META, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
-import type { DetectedGame } from "../types/game";
+import type { DetectedGame, GameStatus, PluginInfo } from "../types/game";
 import { Cover } from "./Cover";
+import { AchievementsSection, GamePluginSections } from "./GameExtras";
+import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
 interface GameDetailProps {
   game: DetectedGame | null;
@@ -19,6 +21,12 @@ interface GameDetailProps {
   onToggleHidden: (game: DetectedGame) => void;
   onEdit: (game: DetectedGame) => void;
   onSelectGenre: (genreKey: string) => void;
+  onSelectTag: (tagKey: string) => void;
+  /** Kanso sees one of the game's processes right now. */
+  isRunning: boolean;
+  onSetStatus: (game: DetectedGame, status: GameStatus | null) => void;
+  /** Enabled plugins that add sections to the sheet. */
+  plugins: PluginInfo[];
 }
 
 /** Describes how the game will be started, shown as a small technical footnote. */
@@ -41,8 +49,12 @@ export function GameDetail({
   onToggleHidden,
   onEdit,
   onSelectGenre,
+  onSelectTag,
+  isRunning,
+  onSetStatus,
+  plugins,
 }: GameDetailProps) {
-  const { t, plural, relativePast } = useI18n();
+  const { t, plural, relativePast, duration } = useI18n();
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const { usableCover, markBroken } = useBrokenCovers();
   const gameId = game?.id ?? null;
@@ -104,7 +116,8 @@ export function GameDetail({
         </button>
 
         {/* Cover */}
-        <div className="relative hidden w-[17rem] shrink-0 self-stretch bg-oled-bg sm:block">
+        {/* Translucent: under a cover shorter than the sheet the ambient wash shows through */}
+        <div className="relative hidden w-[17rem] shrink-0 self-stretch bg-oled-bg/50 sm:block">
           <div className="relative aspect-[2/3] w-full overflow-hidden">
             {coverUrl ? (
               <Cover
@@ -125,80 +138,160 @@ export function GameDetail({
           </div>
         </div>
 
-        {/* Details */}
-        <div className="relative flex min-w-0 flex-1 flex-col gap-5 scroll-area overflow-y-auto p-7">
-          <div className="space-y-3 pr-8">
-            <span
-              className={`inline-block rounded-md border px-2 py-0.5 text-3xs font-medium ${platformMeta.badgeClass}`}
-            >
-              {platformLabel(game.platform, t)}
-            </span>
-            <h2
-              id="game-detail-title"
-              className="select-text text-2xl font-semibold leading-tight tracking-tight text-zinc-50"
-            >
-              {game.title}
-            </h2>
-
-            {game.genres.length > 0 && (
-              <ul className="flex flex-wrap gap-1.5" aria-label={t("detail.genres")}>
-                {game.genres.map((genre) => (
-                  <li key={genre}>
-                    <button
-                      type="button"
-                      onClick={() => onSelectGenre(genreKey(genre))}
-                      title={t("detail.showGenre", { genre })}
-                      className="rounded-full border border-oled-border bg-oled-bg/60 px-2.5 py-0.5 text-2xs text-zinc-300 transition-colors hover:border-accent/50 hover:text-accent"
-                    >
-                      {genre}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <p
-            className={`select-text text-sm leading-relaxed ${
-              game.shortDescription ? "text-zinc-300" : "text-zinc-500"
-            }`}
-          >
-            {game.shortDescription ?? t("detail.noDescription")}
-          </p>
-
-          <dl className="mt-auto space-y-2 border-t border-oled-border/70 pt-4 text-2xs">
-            <div className="flex gap-3">
-              <dt className="w-20 shrink-0 text-zinc-500">{t("detail.folder")}</dt>
-              <dd
-                className="min-w-0 select-text truncate font-mono text-zinc-400"
-                title={game.installDir}
+        {/* Details: everything scrolls except the actions, which stay within reach */}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div className="scroll-area flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-7 pb-5">
+            <div className="space-y-3 pr-8">
+              <div className="flex flex-wrap items-center gap-2">
+                <span
+                  className={`inline-block rounded-md border px-2 py-0.5 text-3xs font-medium ${platformMeta.badgeClass}`}
+                >
+                  {platformLabel(game.platform, t)}
+                </span>
+                {isRunning && (
+                  <span
+                    id="detail-running-badge"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-3xs font-medium text-emerald-300"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    {t("detail.running")}
+                  </span>
+                )}
+              </div>
+              <h2
+                id="game-detail-title"
+                className="select-text text-2xl font-semibold leading-tight tracking-tight text-zinc-50"
               >
-                {game.installDir}
-              </dd>
+                {game.title}
+              </h2>
+
+              {game.genres.length > 0 && (
+                <ul className="flex flex-wrap gap-1.5" aria-label={t("detail.genres")}>
+                  {game.genres.map((genre) => (
+                    <li key={genre}>
+                      <button
+                        type="button"
+                        onClick={() => onSelectGenre(genreKey(genre))}
+                        title={t("detail.showGenre", { genre })}
+                        className="rounded-full border border-oled-border bg-oled-bg/60 px-2.5 py-0.5 text-2xs text-zinc-300 transition-colors hover:border-accent/50 hover:text-accent"
+                      >
+                        {genre}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Steam community tags: finer than genres ("Souls-like", "Co-op online") */}
+              {game.tags.length > 0 && (
+                <ul className="flex flex-wrap gap-x-2.5 gap-y-1" aria-label={t("detail.tags")}>
+                  {game.tags.map((tag) => (
+                    <li key={tag}>
+                      <button
+                        type="button"
+                        onClick={() => onSelectTag(genreKey(tag))}
+                        title={t("detail.showTag", { tag })}
+                        className="text-2xs text-zinc-400 underline-offset-2 transition-colors hover:text-accent hover:underline"
+                      >
+                        {tag}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            <div className="flex gap-3">
-              <dt className="w-20 shrink-0 text-zinc-500">{t("detail.launch")}</dt>
-              <dd
-                className="min-w-0 select-text truncate font-mono text-zinc-400"
-                title={launchTarget(game, t)}
-              >
-                {launchTarget(game, t)}
-              </dd>
+
+            {/* Where the user stands with the game: one click sets it, another clears it */}
+            <div
+              role="group"
+              aria-label={t("detail.status")}
+              className="flex flex-wrap items-center gap-1.5"
+            >
+              {GAME_STATUSES.map((status) => {
+                const active = game.status === status;
+                const label = t(STATUS_LABEL_KEYS[status]);
+                return (
+                  <button
+                    key={status}
+                    id={`detail-status-${status}`}
+                    type="button"
+                    onClick={() => onSetStatus(game, active ? null : status)}
+                    aria-pressed={active}
+                    title={t(active ? "status.clear" : "status.set", { status: label })}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-2xs font-medium transition-colors ${
+                      active
+                        ? "border-accent/50 bg-accent/10 text-accent"
+                        : "border-oled-border bg-oled-bg/60 text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+                    }`}
+                  >
+                    <StatusIcon status={status} className="h-3 w-3" />
+                    <span>{label}</span>
+                  </button>
+                );
+              })}
             </div>
-            {game.lastPlayedAt !== null && (
+
+            <p
+              className={`select-text text-sm leading-relaxed ${
+                game.shortDescription ? "text-zinc-300" : "text-zinc-500"
+              }`}
+            >
+              {game.shortDescription ?? t("detail.noDescription")}
+            </p>
+
+            <AchievementsSection game={game} />
+            <GamePluginSections game={game} plugins={plugins} />
+
+            <dl className="mt-auto space-y-2 border-t border-oled-border/70 pt-4 text-2xs">
               <div className="flex gap-3">
-                <dt className="w-20 shrink-0 text-zinc-500">{t("detail.played")}</dt>
-                <dd className="min-w-0 truncate text-zinc-400">
-                  {relativePast(game.lastPlayedAt)}
-                  {game.playCount > 1
-                    ? ` · ${plural("launches", game.playCount)}`
-                    : ""}
+                <dt className="w-24 shrink-0 text-zinc-500">{t("detail.folder")}</dt>
+                <dd
+                  className="min-w-0 select-text truncate font-mono text-zinc-400"
+                  title={game.installDir}
+                >
+                  {game.installDir}
                 </dd>
               </div>
-            )}
-          </dl>
+              <div className="flex gap-3">
+                <dt className="w-24 shrink-0 text-zinc-500">{t("detail.launch")}</dt>
+                <dd
+                  className="min-w-0 select-text truncate font-mono text-zinc-400"
+                  title={launchTarget(game, t)}
+                >
+                  {launchTarget(game, t)}
+                </dd>
+              </div>
+              {game.playtimeMinutes !== null && (
+                <div className="flex gap-3">
+                  <dt className="w-24 shrink-0 text-zinc-500">{t("detail.playtime")}</dt>
+                  <dd
+                    id="detail-playtime"
+                    className="min-w-0 truncate text-zinc-400"
+                    title={t(
+                      game.platform === "steam" ? "detail.playtimeSteam" : "detail.playtimeMeasured"
+                    )}
+                  >
+                    {game.playtimeMinutes > 0
+                      ? duration(game.playtimeMinutes)
+                      : t("detail.neverPlayed")}
+                  </dd>
+                </div>
+              )}
+              {game.lastPlayedAt !== null && (
+                <div className="flex gap-3">
+                  <dt className="w-24 shrink-0 text-zinc-500">{t("detail.played")}</dt>
+                  <dd className="min-w-0 truncate text-zinc-400">
+                    {relativePast(game.lastPlayedAt)}
+                    {game.playCount > 1
+                      ? ` · ${plural("launches", game.playCount)}`
+                      : ""}
+                  </dd>
+                </div>
+              )}
+            </dl>
+          </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-oled-border/70 px-7 py-4">
             <button
               ref={playButtonRef}
               id="detail-launch-button"

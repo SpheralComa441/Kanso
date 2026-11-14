@@ -1,12 +1,95 @@
 use crate::i18n::{Lang, T};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+/// Fonts chosen for legibility that can replace a theme's fonts.
+const READABLE_FONTS: [&str; 2] = ["atkinson", "opendyslexic"];
+
+/// Preferences for people who need larger text, stronger contrast or less motion. They apply
+/// on top of whatever theme is selected.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AccessibilityConfig {
+    /// Size of text and controls, in percent of the theme's own size.
+    pub text_scale: u32,
+    /// Stronger text and border colors.
+    pub high_contrast: bool,
+    /// No transitions, zooms or other animations.
+    pub reduce_motion: bool,
+    /// `atkinson` (low vision) or `opendyslexic` instead of the theme's fonts.
+    pub readable_font: Option<String>,
+    /// Scrollbars always visible instead of only under the pointer.
+    pub always_show_scrollbars: bool,
+    /// A thick outline around the element that has keyboard focus.
+    pub strong_focus: bool,
+}
+
+impl Default for AccessibilityConfig {
+    fn default() -> Self {
+        Self {
+            text_scale: 100,
+            high_contrast: false,
+            reduce_motion: false,
+            readable_font: None,
+            always_show_scrollbars: false,
+            strong_focus: false,
+        }
+    }
+}
+
+impl AccessibilityConfig {
+    fn sanitized(self) -> Self {
+        Self {
+            text_scale: self.text_scale.clamp(80, 160),
+            readable_font: self
+                .readable_font
+                .map(|font| font.trim().to_ascii_lowercase())
+                .filter(|font| READABLE_FONTS.contains(&font.as_str())),
+            ..self
+        }
+    }
+}
+
+/// Most plugins whose state is remembered.
+const MAX_PLUGIN_STATES: usize = 64;
+/// Longest value of a plugin setting (an API key, a country code, ...).
+const MAX_PLUGIN_SETTING_CHARS: usize = 2000;
+
+/// What the user decided about one plugin.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PluginState {
+    pub enabled: bool,
+    /// Whether the plugin's short label is shown on the game cards.
+    pub show_badge: bool,
+    /// Values of the settings the plugin declares (API keys included: like the SteamGridDB
+    /// key they never leave this PC except towards the plugin's own service).
+    pub settings: BTreeMap<String, String>,
+}
+
+impl Default for PluginState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            show_badge: true,
+            settings: BTreeMap::new(),
+        }
+    }
+}
+
+/// `true` for a well-formed plugin id: 2–40 lower-case letters, digits and dashes, starting
+/// with a letter or digit. Ids double as folder names, so nothing else is accepted.
+pub fn is_valid_plugin_id(id: &str) -> bool {
+    (2..=40).contains(&id.len())
+        && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !id.starts_with('-')
+}
+
 /// User configuration persisted locally inside the OS AppData directory (`config.json`).
 /// API keys are never stored in repository `.env` files.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
     /// Optional SteamGridDB API key configured by the user in Settings.
@@ -20,6 +103,26 @@ pub struct AppConfig {
     pub language: Option<String>,
     /// Id of the selected theme; `None` means the built-in default.
     pub theme_id: Option<String>,
+    pub accessibility: AccessibilityConfig,
+    /// Whether Kanso measures play time for the games whose store does not expose it.
+    pub track_playtime: bool,
+    /// Per-plugin choices, by plugin id. A plugin without an entry uses its own default.
+    pub plugins: BTreeMap<String, PluginState>,
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            steamgriddb_api_key: String::new(),
+            custom_folders: Vec::new(),
+            minimize_to_tray_on_launch: false,
+            language: None,
+            theme_id: None,
+            accessibility: AccessibilityConfig::default(),
+            track_playtime: true,
+            plugins: BTreeMap::new(),
+        }
+    }
 }
 
 impl AppConfig {
@@ -62,6 +165,27 @@ impl AppConfig {
                 .theme_id
                 .map(|id| id.trim().to_string())
                 .filter(|id| !id.is_empty()),
+            accessibility: self.accessibility.sanitized(),
+            track_playtime: self.track_playtime,
+            plugins: self
+                .plugins
+                .into_iter()
+                .filter(|(id, _)| is_valid_plugin_id(id))
+                .take(MAX_PLUGIN_STATES)
+                .map(|(id, state)| {
+                    let settings = state
+                        .settings
+                        .into_iter()
+                        .filter(|(key, _)| !key.is_empty() && key.len() <= 40)
+                        .map(|(key, value)| {
+                            let value: String =
+                                value.trim().chars().take(MAX_PLUGIN_SETTING_CHARS).collect();
+                            (key, value)
+                        })
+                        .collect();
+                    (id, PluginState { settings, ..state })
+                })
+                .collect(),
         }
     }
 
@@ -129,6 +253,27 @@ mod tests {
             minimize_to_tray_on_launch: true,
             language: Some("EN-us".to_string()),
             theme_id: Some("  nord ".to_string()),
+            accessibility: AccessibilityConfig {
+                text_scale: 400,
+                high_contrast: true,
+                readable_font: Some(" OpenDyslexic ".to_string()),
+                ..AccessibilityConfig::default()
+            },
+            track_playtime: false,
+            plugins: BTreeMap::from([
+                (
+                    "price-history".to_string(),
+                    PluginState {
+                        enabled: true,
+                        show_badge: false,
+                        settings: BTreeMap::from([
+                            ("apiKey".to_string(), "  itad-key  ".to_string()),
+                            (String::new(), "dropped".to_string()),
+                        ]),
+                    },
+                ),
+                ("../escape".to_string(), PluginState::default()),
+            ]),
         };
 
         let saved = input.save_to_file(&cfg_path).expect("save config");
@@ -138,8 +283,38 @@ mod tests {
         assert_eq!(saved.language.as_deref(), Some("en"));
         assert_eq!(saved.lang(), Some(Lang::En));
         assert_eq!(saved.theme_id.as_deref(), Some("nord"));
+        assert_eq!(saved.accessibility.text_scale, 160, "clamped");
+        assert!(saved.accessibility.high_contrast && !saved.accessibility.reduce_motion);
+        assert_eq!(saved.accessibility.readable_font.as_deref(), Some("opendyslexic"));
+
+        assert!(!saved.track_playtime);
+        assert_eq!(saved.plugins.len(), 1, "ids that are not plain names are dropped");
+        let plugin = &saved.plugins["price-history"];
+        assert!(plugin.enabled && !plugin.show_badge);
+        assert_eq!(
+            plugin.settings,
+            BTreeMap::from([("apiKey".to_string(), "itad-key".to_string())])
+        );
 
         let reloaded = AppConfig::load_from_file(&cfg_path).expect("reload config");
         assert_eq!(reloaded, saved);
+
+        // A config written before these settings existed, and an unknown font name
+        fs::write(&cfg_path, r#"{"steamgriddbApiKey":"k","language":"it"}"#).unwrap();
+        let old = AppConfig::load_from_file(&cfg_path).expect("old config");
+        assert_eq!(old.accessibility, AccessibilityConfig::default());
+        assert!(old.track_playtime, "measuring play time is on unless switched off");
+        assert!(old.plugins.is_empty());
+        let odd = AppConfig {
+            accessibility: AccessibilityConfig {
+                text_scale: 10,
+                readable_font: Some("comic sans".to_string()),
+                ..AccessibilityConfig::default()
+            },
+            ..old
+        }
+        .sanitized();
+        assert_eq!(odd.accessibility.text_scale, 80);
+        assert_eq!(odd.accessibility.readable_font, None);
     }
 }

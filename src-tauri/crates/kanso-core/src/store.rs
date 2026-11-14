@@ -2,7 +2,9 @@ use crate::cleaner::{clean_game_title, is_placeholder_title};
 use crate::db::{sort_games_by_title, LibraryDb};
 use crate::i18n::T;
 use crate::metadata::{remove_existing_cover_variants, sanitize_filename_id};
-use crate::models::{now_timestamp_ms, DetectedGame, GameManualUpdate, ScanReport};
+use crate::models::{
+    now_timestamp_ms, DetectedGame, GameManualUpdate, GameStatus, ScanReport,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -51,9 +53,21 @@ impl LibraryStore {
                 scanned.is_hidden = cached.is_hidden;
                 scanned.metadata_synced = cached.metadata_synced;
                 scanned.metadata_attempted_at = cached.metadata_attempted_at;
-                scanned.last_played_at = cached.last_played_at;
+                // The scan brings what the game's client recorded (Steam); a launch from
+                // Kanso may be more recent than that
+                scanned.last_played_at = scanned.last_played_at.max(cached.last_played_at);
+                scanned.playtime_minutes = scanned.playtime_minutes.or(cached.playtime_minutes);
+                scanned.status = cached.status;
+                // Counts come from the Steam client's cache, which may be missing for a while
+                if scanned.achievements_total.is_none() {
+                    scanned.achievements_unlocked = cached.achievements_unlocked;
+                    scanned.achievements_total = cached.achievements_total;
+                }
+                scanned.steam_store_appid = cached.steam_store_appid.clone();
                 scanned.play_count = cached.play_count;
                 scanned.metadata_lang = cached.metadata_lang.clone();
+                scanned.tags = cached.tags.clone();
+                scanned.tags_lang = cached.tags_lang.clone();
                 scanned.custom_override = cached.custom_override;
                 scanned.updated_at = cached.updated_at;
 
@@ -121,6 +135,10 @@ impl LibraryStore {
         // User-owned state may have changed while the HTTP requests were in flight
         enriched.is_favorite = existing.is_favorite;
         enriched.last_played_at = existing.last_played_at;
+        enriched.playtime_minutes = existing.playtime_minutes;
+        enriched.status = existing.status;
+        enriched.achievements_unlocked = existing.achievements_unlocked;
+        enriched.achievements_total = existing.achievements_total;
         enriched.play_count = existing.play_count;
         enriched.is_hidden = existing.is_hidden || auto_hide;
         self.upsert_game(enriched.clone());
@@ -143,6 +161,19 @@ impl LibraryStore {
             return Err(format!("{}: {game_id}", T::GameNotFound.s()));
         };
         game.is_hidden = is_hidden;
+        Ok(game.clone())
+    }
+
+    /// Sets or clears where the user stands with a game.
+    pub fn set_status(
+        &mut self,
+        game_id: &str,
+        status: Option<GameStatus>,
+    ) -> Result<DetectedGame, String> {
+        let Some(game) = self.get_game_mut(game_id) else {
+            return Err(format!("{}: {game_id}", T::GameNotFound.s()));
+        };
+        game.status = status;
         Ok(game.clone())
     }
 
@@ -481,6 +512,58 @@ mod tests {
         assert!(merged.is_hidden);
         assert_eq!(merged.play_count, 2);
         assert_eq!(merged.last_played_at, Some(2_000));
+
+        // Steam's own record of the game arrives with a scan: its playtime is taken, and the
+        // later of the two "last played" times wins
+        let mut from_steam = scanned_steam("1091500", "Cyberpunk 2077", false);
+        from_steam.playtime_minutes = Some(754);
+        from_steam.last_played_at = Some(1_500);
+        let merged = rescan(&mut store, from_steam);
+        assert_eq!(merged.playtime_minutes, Some(754));
+        assert_eq!(merged.last_played_at, Some(2_000), "the launch from Kanso is more recent");
+
+        let mut from_steam = scanned_steam("1091500", "Cyberpunk 2077", false);
+        from_steam.playtime_minutes = Some(800);
+        from_steam.last_played_at = Some(9_000);
+        let merged = rescan(&mut store, from_steam);
+        assert_eq!(merged.playtime_minutes, Some(800));
+        assert_eq!(merged.last_played_at, Some(9_000), "played from Steam since then");
+
+        // Tags found by a sync survive rescans; a scan without Steam's records (the file
+        // could not be read this time) does not forget the playtime
+        let mut synced = store.games[0].clone();
+        synced.tags = vec!["Mondo aperto".to_string(), "Cyberpunk".to_string()];
+        synced.tags_lang = Some("it".to_string());
+        synced.playtime_minutes = None;
+        let committed = store.commit_enriched_game(synced, false).unwrap();
+        assert_eq!(committed.playtime_minutes, Some(800), "playtime belongs to the scan");
+        let merged = rescan(&mut store, scanned_steam("1091500", "Cyberpunk 2077", false));
+        assert_eq!(merged.tags, vec!["Mondo aperto", "Cyberpunk"]);
+        assert_eq!(merged.tags_lang.as_deref(), Some("it"));
+        assert_eq!(merged.playtime_minutes, Some(800));
+        assert_eq!(merged.last_played_at, Some(9_000));
+
+        // The status is the user's: scans and syncs carry it along. Achievement counts come
+        // with a scan and are kept when a later scan cannot read them.
+        store.set_status("steam:1091500", Some(GameStatus::Playing)).unwrap();
+        let mut with_achievements = scanned_steam("1091500", "Cyberpunk 2077", false);
+        with_achievements.achievements_unlocked = Some(12);
+        with_achievements.achievements_total = Some(57);
+        let merged = rescan(&mut store, with_achievements);
+        assert_eq!(merged.status, Some(GameStatus::Playing));
+        assert_eq!((merged.achievements_unlocked, merged.achievements_total), (Some(12), Some(57)));
+        let mut stale_sync = store.games[0].clone();
+        stale_sync.status = None;
+        stale_sync.achievements_total = None;
+        stale_sync.steam_store_appid = Some("1091500".to_string());
+        let committed = store.commit_enriched_game(stale_sync, false).unwrap();
+        assert_eq!(committed.status, Some(GameStatus::Playing));
+        assert_eq!(committed.achievements_total, Some(57));
+        let merged = rescan(&mut store, scanned_steam("1091500", "Cyberpunk 2077", false));
+        assert_eq!((merged.achievements_unlocked, merged.achievements_total), (Some(12), Some(57)));
+        assert_eq!(merged.steam_store_appid.as_deref(), Some("1091500"), "what a sync found is kept");
+        assert_eq!(store.set_status("steam:1091500", None).unwrap().status, None);
+        assert!(store.set_status("missing", None).is_err());
 
         // The user shows it again while another sync is in flight: stays visible...
         let in_flight = store.games[0].clone();

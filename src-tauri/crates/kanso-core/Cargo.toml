@@ -12,6 +12,12 @@ ureq = { version = "2.12", features = ["json"] }
 walkdir = "2.5"
 # Already in the dependency tree through Tauri; decodes the font files embedded in themes
 base64 = "0.22"
+# Already in the dependency tree through ureq; checks the addresses plugins ask for
+url = "2.5"
+# Lists running processes to measure play time
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
+# QuickJS: the sandbox community plugins run in (no file, network or UI access of their own)
+rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import {
+  Accessibility,
   Check,
   Download,
   Eye,
@@ -10,6 +11,7 @@ import {
   Languages,
   Palette,
   Plus,
+  Puzzle,
   SlidersHorizontal,
   Trash2,
   Upload,
@@ -33,10 +35,19 @@ import {
 import {
   BUILTIN_THEMES,
   DEFAULT_THEME,
+  READABLE_FONTS,
+  TEXT_SCALE_OPTIONS,
   isBuiltinTheme,
   resolveTheme,
 } from "../lib/themes";
-import type { AppConfig, Theme } from "../types/game";
+import type {
+  AccessibilityConfig,
+  AppConfig,
+  PluginInfo,
+  PluginState,
+  Theme,
+} from "../types/game";
+import { PluginsSettings } from "./PluginsSettings";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -50,7 +61,13 @@ interface SettingsModalProps {
   onThemesChanged: () => Promise<Theme[]>;
   /** Shows a theme right away without saving it; `null` goes back to the saved one. */
   onPreviewTheme: (theme: Theme | null) => void;
+  /** Same for accessibility choices: tried at once, kept only when saved. */
+  onPreviewAccessibility: (accessibility: AccessibilityConfig | null) => void;
   onCustomizeTheme: (theme: Theme) => void;
+  plugins: PluginInfo[];
+  pluginWarnings: string[];
+  /** A plugin was installed or removed: adopt the settings the backend saved. */
+  onPluginsChanged: (saved: AppConfig) => Promise<void>;
 }
 
 const SKIPPED_EXE_PATTERNS = "unins, crash, redist, dxsetup, vc_redist, launcher";
@@ -64,7 +81,11 @@ export function SettingsModal({
   onSave,
   onThemesChanged,
   onPreviewTheme,
+  onPreviewAccessibility,
   onCustomizeTheme,
+  plugins,
+  pluginWarnings,
+  onPluginsChanged,
 }: SettingsModalProps) {
   const { t } = useI18n();
   const [apiKey, setApiKey] = useState(initialConfig.steamgriddbApiKey);
@@ -76,6 +97,13 @@ export function SettingsModal({
   );
   const [language, setLanguage] = useState<LanguageCode>(currentLanguage);
   const [themeId, setThemeId] = useState<string | null>(initialConfig.themeId);
+  const [accessibility, setAccessibility] = useState<AccessibilityConfig>(
+    initialConfig.accessibility
+  );
+  const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
+  const [pluginStates, setPluginStates] = useState<Record<string, PluginState>>(
+    initialConfig.plugins
+  );
   const [themeNotice, setThemeNotice] = useState<{
     type: "success" | "error";
     text: string;
@@ -90,6 +118,9 @@ export function SettingsModal({
       setMinimizeOnLaunch(initialConfig.minimizeToTrayOnLaunch);
       setLanguage(currentLanguage);
       setThemeId(initialConfig.themeId);
+      setAccessibility(initialConfig.accessibility);
+      setTrackPlaytime(initialConfig.trackPlaytime);
+      setPluginStates(initialConfig.plugins);
       setManualFolderInput("");
       setShowKey(false);
       setErrorMsg(null);
@@ -101,7 +132,14 @@ export function SettingsModal({
 
   const closeWithoutSaving = () => {
     onPreviewTheme(null);
+    onPreviewAccessibility(null);
     onClose();
+  };
+
+  const changeAccessibility = (change: Partial<AccessibilityConfig>) => {
+    const next = { ...accessibility, ...change };
+    setAccessibility(next);
+    onPreviewAccessibility(next);
   };
 
   useEffect(() => {
@@ -218,8 +256,12 @@ export function SettingsModal({
         minimizeToTrayOnLaunch: minimizeOnLaunch,
         language,
         themeId: selectedTheme.id,
+        accessibility,
+        trackPlaytime,
+        plugins: pluginStates,
       });
       onPreviewTheme(null);
+      onPreviewAccessibility(null);
       onClose();
     } catch (err) {
       setErrorMsg(typeof err === "string" ? err : t("settings.saveError"));
@@ -429,6 +471,118 @@ export function SettingsModal({
             </p>
           </section>
 
+          {/* Accessibility: applies on top of any theme */}
+          <section className="space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
+              <Accessibility className="h-3.5 w-3.5 text-accent" />
+              <span>{t("a11y.section")}</span>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span id="a11y-text-scale-label" className="text-xs text-zinc-300">
+                {t("a11y.textSize")}
+              </span>
+              <div
+                role="group"
+                aria-labelledby="a11y-text-scale-label"
+                className="flex rounded-lg border border-oled-border bg-oled-bg p-0.5"
+              >
+                {TEXT_SCALE_OPTIONS.map((percent) => (
+                  <button
+                    key={percent}
+                    id={`a11y-text-scale-${percent}`}
+                    type="button"
+                    onClick={() => changeAccessibility({ textScale: percent })}
+                    aria-pressed={accessibility.textScale === percent}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium tabular-nums transition-colors ${
+                      accessibility.textScale === percent
+                        ? "bg-oled-elevated text-zinc-100"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    {percent}%
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label htmlFor="a11y-font-select" className="text-xs text-zinc-300">
+                {t("a11y.readableFont")}
+              </label>
+              <select
+                id="a11y-font-select"
+                value={accessibility.readableFont ?? ""}
+                onChange={(e) =>
+                  changeAccessibility({
+                    readableFont:
+                      e.target.value === "atkinson" || e.target.value === "opendyslexic"
+                        ? e.target.value
+                        : null,
+                  })
+                }
+                className="rounded-lg border border-oled-border bg-oled-bg px-2.5 py-1.5 text-xs text-zinc-100 focus:border-accent/60 focus:outline-none"
+              >
+                <option value="">{t("a11y.fontTheme")}</option>
+                <option value="atkinson">
+                  {READABLE_FONTS.atkinson} — {t("a11y.fontLowVision")}
+                </option>
+                <option value="opendyslexic">
+                  {READABLE_FONTS.opendyslexic} — {t("a11y.fontDyslexia")}
+                </option>
+              </select>
+            </div>
+
+            <ul className="space-y-1.5">
+              {(
+                [
+                  ["highContrast", "a11y.highContrast", "a11y.highContrastHelp"],
+                  ["reduceMotion", "a11y.reduceMotion", "a11y.reduceMotionHelp"],
+                  ["alwaysShowScrollbars", "a11y.scrollbars", "a11y.scrollbarsHelp"],
+                  ["strongFocus", "a11y.strongFocus", "a11y.strongFocusHelp"],
+                ] as const
+              ).map(([key, label, help]) => (
+                <li
+                  key={key}
+                  className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2"
+                >
+                  <div>
+                    <label
+                      htmlFor={`a11y-${key}`}
+                      className="block text-xs font-medium text-zinc-200"
+                    >
+                      {t(label)}
+                    </label>
+                    <p className="text-2xs text-zinc-500">{t(help)}</p>
+                  </div>
+                  <input
+                    id={`a11y-${key}`}
+                    type="checkbox"
+                    checked={accessibility[key]}
+                    onChange={(e) => changeAccessibility({ [key]: e.target.checked })}
+                    className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                  />
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {/* Plugins */}
+          <section id="settings-plugins" className="space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
+              <Puzzle className="h-3.5 w-3.5 text-accent" />
+              <span>{t("settings.plugins")}</span>
+            </div>
+            <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.pluginsHelp")}</p>
+            <PluginsSettings
+              plugins={plugins}
+              warnings={pluginWarnings}
+              states={pluginStates}
+              onStatesChange={setPluginStates}
+              onInstalledChanged={onPluginsChanged}
+            />
+          </section>
+
           {/* SteamGridDB API Key */}
           <section className="space-y-2">
             <div className="flex items-center justify-between">
@@ -580,6 +734,26 @@ export function SettingsModal({
               type="checkbox"
               checked={minimizeOnLaunch}
               onChange={(e) => setMinimizeOnLaunch(e.target.checked)}
+              className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+            />
+          </section>
+
+          {/* Play time */}
+          <section className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+            <div>
+              <label
+                htmlFor="track-playtime-checkbox"
+                className="block text-xs font-medium text-zinc-200"
+              >
+                {t("settings.trackTitle")}
+              </label>
+              <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.trackHelp")}</p>
+            </div>
+            <input
+              id="track-playtime-checkbox"
+              type="checkbox"
+              checked={trackPlaytime}
+              onChange={(e) => setTrackPlaytime(e.target.checked)}
               className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
             />
           </section>

@@ -1,6 +1,7 @@
 import arcadeTheme from "../../docs/themes/arcade.kanso-theme.json";
 import auroraTheme from "../../docs/themes/aurora.kanso-theme.json";
 import type {
+  AccessibilityConfig,
   Theme,
   ThemeCards,
   ThemeColors,
@@ -222,6 +223,9 @@ export const BUNDLED_FONTS: BundledFont[] = [
   { family: "Playfair Display", kind: "serif" },
   { family: "JetBrains Mono", kind: "monospace" },
   { family: "Pixelify Sans", kind: "sans-serif" },
+  // Made for legibility; Latin scripts only
+  { family: "Atkinson Hyperlegible", kind: "sans-serif" },
+  { family: "OpenDyslexic", kind: "sans-serif" },
 ];
 
 const GENERIC_FONT_FAMILIES = new Set([
@@ -287,6 +291,42 @@ function syncEmbeddedFonts(files: ThemeFontFile[]): void {
   }
 }
 
+/* ---------------------------------------------------------- accessibility */
+
+export const DEFAULT_ACCESSIBILITY: AccessibilityConfig = {
+  textScale: 100,
+  highContrast: false,
+  reduceMotion: false,
+  readableFont: null,
+  alwaysShowScrollbars: false,
+  strongFocus: false,
+};
+
+export const TEXT_SCALE_OPTIONS = [90, 100, 115, 130, 150] as const;
+
+/** Fonts offered in Settings → Accessibility, by the value stored in the configuration. */
+export const READABLE_FONTS: Record<NonNullable<AccessibilityConfig["readableFont"]>, string> = {
+  atkinson: "Atkinson Hyperlegible",
+  opendyslexic: "OpenDyslexic",
+};
+
+/** Reads accessibility preferences from stored data, tolerating missing or odd values. */
+export function withAccessibilityDefaults(input: unknown): AccessibilityConfig {
+  const raw = (input ?? {}) as Partial<Record<keyof AccessibilityConfig, unknown>>;
+  const scale = Number(raw.textScale);
+  return {
+    textScale: Number.isFinite(scale) ? Math.min(160, Math.max(80, Math.round(scale))) : 100,
+    highContrast: raw.highContrast === true,
+    reduceMotion: raw.reduceMotion === true,
+    readableFont:
+      raw.readableFont === "atkinson" || raw.readableFont === "opendyslexic"
+        ? raw.readableFont
+        : null,
+    alwaysShowScrollbars: raw.alwaysShowScrollbars === true,
+    strongFocus: raw.strongFocus === true,
+  };
+}
+
 /* ------------------------------------------------------------------ apply */
 
 const CARD_SHADOWS: Record<ThemeCards["shadow"], string> = {
@@ -304,15 +344,33 @@ const GLOW_HOVER_SHADOW =
  * few `data-` attributes for the either/or choices) on the root element. Every value was
  * validated by the backend — hex colors, numbers in range, names from fixed lists, plain font
  * names — so nothing a theme file contains reaches the page as arbitrary CSS.
+ *
+ * The user's accessibility preferences are applied on top and win over the theme: text size,
+ * contrast, legible font, motion, scrollbars.
  */
-export function applyTheme(theme: Theme): void {
+export function applyTheme(
+  theme: Theme,
+  accessibility: AccessibilityConfig = DEFAULT_ACCESSIBILITY
+): void {
   const root = document.documentElement;
   const set = (name: string, value: string) => root.style.setProperty(name, value);
   const { typography, layout, cards, shapes, icons, effects } = theme;
+  const scale = typography.scale * (accessibility.textScale / 100);
   // Pixel sizes follow the interface scale, like everything sized in rem
-  const px = (value: number) => `${Math.round(value * typography.scale * 100) / 100}px`;
+  const px = (value: number) => `${Math.round(value * scale * 100) / 100}px`;
 
-  for (const [key, cssVar] of THEME_COLOR_TOKENS) set(cssVar, theme.colors[key]);
+  // High contrast: every text and border color moves one step towards the strongest
+  const colors: ThemeColors = accessibility.highContrast
+    ? {
+        ...theme.colors,
+        textSecondary: theme.colors.text,
+        textMuted: theme.colors.textSecondary,
+        textFaint: theme.colors.textMuted,
+        border: theme.colors.borderStrong,
+        borderStrong: theme.colors.textMuted,
+      }
+    : theme.colors;
+  for (const [key, cssVar] of THEME_COLOR_TOKENS) set(cssVar, colors[key]);
   set(
     "--app-background",
     effects.backgroundGradient.length >= 2
@@ -324,11 +382,14 @@ export function applyTheme(theme: Theme): void {
 
   // Typography
   syncEmbeddedFonts(theme.fontFiles);
-  const bodyFont = cssFontStack(theme.fontFamily);
+  const readableFont = accessibility.readableFont
+    ? READABLE_FONTS[accessibility.readableFont]
+    : null;
+  const bodyFont = readableFont ? `"${readableFont}"` : cssFontStack(theme.fontFamily);
   set("--font-sans", bodyFont ? `${bodyFont}, ${SYSTEM_FONT_STACK}` : SYSTEM_FONT_STACK);
-  const headingFont = cssFontStack(typography.headingFont);
+  const headingFont = readableFont ? null : cssFontStack(typography.headingFont);
   set("--font-heading", headingFont ? `${headingFont}, var(--font-sans)` : "var(--font-sans)");
-  set("--ui-scale", String(typography.scale));
+  set("--ui-scale", String(scale));
   set("--heading-weight", String(typography.headingWeight ?? 600));
   set("--heading-spacing", `${typography.headingSpacing}em`);
   root.toggleAttribute("data-heading-weight", typography.headingWeight !== null);
@@ -344,7 +405,7 @@ export function applyTheme(theme: Theme): void {
   set("--content-padding", px(layout.contentPadding));
   set("--divider-width", layout.dividers ? "1px" : "0px");
   root.dataset.sidebarSide = layout.sidebarSide;
-  root.dataset.scrollbars = layout.scrollbars;
+  root.dataset.scrollbars = accessibility.alwaysShowScrollbars ? "always" : layout.scrollbars;
   root.dataset.windowControls = layout.windowControls;
 
   // Cards
@@ -381,6 +442,12 @@ export function applyTheme(theme: Theme): void {
   set("--icon-join", sharp ? "miter" : "round");
   set("--icon-scale", String(icons.scale));
   set("--icon-fill", String(icons.fill));
+
+  // Remaining accessibility switches; the OS-wide "reduce motion" setting counts too
+  const osReducesMotion =
+    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  root.toggleAttribute("data-reduce-motion", accessibility.reduceMotion || osReducesMotion);
+  root.toggleAttribute("data-strong-focus", accessibility.strongFocus);
 }
 
 /** `#rrggbb` for an `<input type="color">`, which cannot show alpha or short forms. */

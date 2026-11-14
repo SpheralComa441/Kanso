@@ -3,9 +3,10 @@ import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
 import { PLATFORM_META, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
-import type { DetectedGame } from "../types/game";
+import type { BadgeEntry, DetectedGame } from "../types/game";
 import { Cover } from "./Cover";
 import type { ViewMode } from "./Header";
+import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
 interface GameListProps {
   games: DetectedGame[];
@@ -18,6 +19,29 @@ interface GameListProps {
   onLaunch: (game: DetectedGame) => void;
   onToggleFavorite: (game: DetectedGame) => void;
   onOpenSettings: () => void;
+  /** Short labels plugins have for the games, by game id. */
+  badges: Record<string, BadgeEntry[]>;
+  /** Games Kanso sees running right now. */
+  runningIds: ReadonlySet<string>;
+}
+
+/** The plugins' labels for a game, e.g. "27 h · 89%", each explained by its tooltip. */
+function PluginBadges({ entries }: { entries: BadgeEntry[] | undefined }) {
+  if (!entries || entries.length === 0) return null;
+  return (
+    <span className="flex shrink-0 items-center gap-1.5 tabular-nums text-zinc-400">
+      {entries.map((entry, index) => (
+        <span
+          key={entry.pluginId}
+          data-badge={entry.pluginId}
+          title={entry.tooltip ?? entry.pluginName}
+          className={index > 0 ? "border-l border-oled-border pl-1.5" : ""}
+        >
+          {entry.text}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 interface FavoriteButtonProps {
@@ -59,6 +83,8 @@ export function GameList({
   onLaunch,
   onToggleFavorite,
   onOpenSettings,
+  badges,
+  runningIds,
 }: GameListProps) {
   const { t } = useI18n();
   const { usableCover, markBroken } = useBrokenCovers();
@@ -143,10 +169,30 @@ export function GameList({
                     </div>
                   )}
 
-                  {/* Over artwork of any color: fixed dark chip, independent of the theme */}
-                  <span className="absolute left-2.5 top-2.5 rounded-md border border-white/15 bg-black/60 px-2 py-0.5 text-3xs font-medium text-white backdrop-blur-md">
-                    {label}
-                  </span>
+                  {/* Over artwork of any color: fixed dark chips, independent of the theme */}
+                  <div className="absolute left-2.5 top-2.5 flex max-w-[calc(100%-3.25rem)] items-center gap-1">
+                    <span className="truncate rounded-md border border-white/15 bg-black/60 px-2 py-0.5 text-3xs font-medium text-white backdrop-blur-md">
+                      {label}
+                    </span>
+                    {game.status && (
+                      <span
+                        data-status={game.status}
+                        title={t("game.statusBadge", { status: t(STATUS_LABEL_KEYS[game.status]) })}
+                        className="shrink-0 rounded-md border border-white/15 bg-black/60 p-1 text-white backdrop-blur-md"
+                      >
+                        <StatusIcon status={game.status} className="h-3 w-3" />
+                      </span>
+                    )}
+                    {runningIds.has(game.id) && (
+                      <span
+                        data-running={game.id}
+                        title={t("detail.running")}
+                        className="shrink-0 rounded-md border border-emerald-400/40 bg-black/60 p-[0.3125rem] backdrop-blur-md"
+                      >
+                        <span className="block h-2 w-2 rounded-full bg-emerald-400" />
+                      </span>
+                    )}
+                  </div>
 
                   {/* Whole cover opens the detail view */}
                   <button
@@ -191,11 +237,14 @@ export function GameList({
                   >
                     {game.title}
                   </h3>
-                  <p className="truncate text-2xs text-zinc-500">
-                    {game.genres.length > 0
-                      ? game.genres.slice(0, 2).join(", ")
-                      : label}
-                  </p>
+                  <div className="flex items-center justify-between gap-2 text-2xs text-zinc-500">
+                    <p className="min-w-0 truncate">
+                      {game.genres.length > 0
+                        ? game.genres.slice(0, 2).join(", ")
+                        : label}
+                    </p>
+                    <PluginBadges entries={badges[game.id]} />
+                  </div>
                 </div>
               </article>
             );
@@ -239,6 +288,24 @@ export function GameList({
                         >
                           {platformLabel(game.platform, t)}
                         </span>
+                        {game.status && (
+                          <span
+                            data-status={game.status}
+                            className="inline-flex shrink-0 items-center gap-1 text-3xs text-zinc-400"
+                          >
+                            <StatusIcon status={game.status} className="h-3 w-3" />
+                            {t(STATUS_LABEL_KEYS[game.status])}
+                          </span>
+                        )}
+                        {runningIds.has(game.id) && (
+                          <span
+                            data-running={game.id}
+                            className="inline-flex shrink-0 items-center gap-1 text-3xs text-emerald-300"
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                            {t("detail.running")}
+                          </span>
+                        )}
                       </div>
                       <p className="truncate text-2xs text-zinc-500">
                         {game.genres.length > 0
@@ -249,6 +316,9 @@ export function GameList({
                   </button>
 
                   <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-2xs">
+                      <PluginBadges entries={badges[game.id]} />
+                    </span>
                     <FavoriteButton
                       game={game}
                       onToggle={onToggleFavorite}

@@ -1,0 +1,51 @@
+{
+  "kansoPlugin": 1,
+  "id": "price-history",
+  "name": {
+    "en": "Price history",
+    "it": "Storico dei prezzi",
+    "es": "Historial de precios",
+    "ru": "История цен"
+  },
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "Best current price and all-time low across the stores, from IsThereAnyDeal. Needs your own free API key, which stays on this PC.",
+    "it": "Miglior prezzo attuale e minimo storico tra i vari store, da IsThereAnyDeal. Richiede la tua chiave API gratuita, che resta su questo PC.",
+    "es": "Mejor precio actual y mínimo histórico entre las tiendas, de IsThereAnyDeal. Necesita tu propia clave API gratuita, que se queda en este PC.",
+    "ru": "Лучшая текущая цена и исторический минимум по магазинам от IsThereAnyDeal. Нужен ваш бесплатный ключ API, который остаётся на этом ПК."
+  },
+  "homepage": "https://isthereanydeal.com",
+  "hosts": ["api.isthereanydeal.com"],
+  "provides": { "gameDetails": true },
+  "cacheHours": 12,
+  "settings": [
+    {
+      "key": "apiKey",
+      "type": "secret",
+      "label": {
+        "en": "IsThereAnyDeal API key",
+        "it": "Chiave API di IsThereAnyDeal",
+        "es": "Clave API de IsThereAnyDeal",
+        "ru": "Ключ API IsThereAnyDeal"
+      },
+      "help": {
+        "en": "Free: sign in on isthereanydeal.com, open “My apps”, register an app and copy its API key.",
+        "it": "Gratuita: accedi a isthereanydeal.com, apri “My apps”, registra un'app e copia la sua chiave API.",
+        "es": "Gratuita: inicia sesión en isthereanydeal.com, abre “My apps”, registra una app y copia su clave API.",
+        "ru": "Бесплатно: войдите на isthereanydeal.com, откройте «My apps», зарегистрируйте приложение и скопируйте его ключ API."
+      }
+    },
+    {
+      "key": "country",
+      "type": "text",
+      "default": "IT",
+      "label": {
+        "en": "Country for prices (two letters, e.g. IT, US, ES)",
+        "it": "Paese dei prezzi (due lettere, es. IT, US, ES)",
+        "es": "País de los precios (dos letras, p. ej. ES, US, IT)",
+        "ru": "Страна для цен (две буквы, например RU, US, IT)"
+      }
+    }
+  ]
+}

@@ -142,7 +142,8 @@ Un nome può indicare:
 
 1. **un font incluso in Kanso** — funziona su ogni PC, anche in cirillico:
    Inter, Manrope, Montserrat, Nunito, Rubik, Exo 2, Tektur, Oswald, Unbounded, Comfortaa, Lora,
-   Playfair Display, JetBrains Mono, Pixelify Sans;
+   Playfair Display, JetBrains Mono, Pixelify Sans; più due font per la leggibilità, solo per
+   alfabeti latini: Atkinson Hyperlegible e OpenDyslexic;
 2. **un font incorporato nel tema** con `fontFiles` (vedi sotto);
 3. **un font installato sul PC** — attenzione: chi non lo ha vedrà il font predefinito.
 
@@ -226,6 +227,14 @@ Le misure sono in pixel. *Sizes are in pixels.*
 | --- | --- | --- |
 | `backgroundGradient` | 2 o 3 colori | Sfondo sfumato della finestra; `[]` per il colore pieno `colors.background` |
 | `backgroundAngle` | 0 – 360 | Direzione della sfumatura in gradi (180 = dall'alto in basso) |
+
+## Accessibilità e temi / Accessibility and themes
+
+Le preferenze di *Impostazioni → Accessibilità* prevalgono sul tema: la dimensione del testo
+moltiplica `typography.scale`, il contrasto elevato rende più forti i colori di testo e bordi, un
+font ad alta leggibilità sostituisce `fontFamily` e `headingFont`, le barre di scorrimento possono
+essere forzate visibili. Un tema non può disattivarle. *The user's accessibility preferences win
+over the theme and cannot be switched off by it.*
 
 ## Sicurezza / Safety
 

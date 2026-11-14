@@ -83,6 +83,29 @@
   fill: color-mix(in srgb, currentColor calc(var(--icon-fill) * 100%), transparent);
 }
 
+/*
+ * Accessibility preferences (Settings). They hold whatever the theme says, hence outside the
+ * layers and, where they must beat component rules, `!important`.
+ */
+:root[data-reduce-motion] *,
+:root[data-reduce-motion] *::before,
+:root[data-reduce-motion] *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  scroll-behavior: auto !important;
+}
+
+:root[data-reduce-motion] .game-card,
+:root[data-reduce-motion] .game-card-art {
+  transform: none !important;
+}
+
+:root[data-strong-focus] :focus-visible {
+  outline: 3px solid var(--accent-color) !important;
+  outline-offset: 2px !important;
+}
+
 /* Title rules a theme switches on; above utilities, which set these per component. */
 :root[data-heading-weight] :is(h1, h2, h3) {
   font-weight: var(--heading-weight);

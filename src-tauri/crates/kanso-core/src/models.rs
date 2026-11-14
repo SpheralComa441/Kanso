@@ -66,6 +66,54 @@ pub fn now_timestamp_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Where the user stands with a game. Set by hand, never guessed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GameStatus {
+    /// Owned but not started yet.
+    Backlog,
+    Playing,
+    Finished,
+    Abandoned,
+}
+
+impl GameStatus {
+    pub const ALL: [GameStatus; 4] = [
+        GameStatus::Backlog,
+        GameStatus::Playing,
+        GameStatus::Finished,
+        GameStatus::Abandoned,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            GameStatus::Backlog => "backlog",
+            GameStatus::Playing => "playing",
+            GameStatus::Finished => "finished",
+            GameStatus::Abandoned => "abandoned",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|status| status.as_str().eq_ignore_ascii_case(raw.trim()))
+    }
+}
+
+/// A stretch of play time, the unit of the statistics page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaySession {
+    pub game_id: String,
+    /// When the session began (ms).
+    pub started_at: u64,
+    pub seconds: u64,
+    /// `kanso` when Kanso measured it, `steam` when it is the difference between two readings
+    /// of Steam's own counter.
+    pub source: String,
+}
+
 /// Unified representation of an installed game discovered on the system,
 /// enriched with cached cover art, metadata, and optional user overrides.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -124,7 +172,8 @@ pub struct DetectedGame {
     /// When automatic metadata lookup was last attempted (ms); `0` = never. Drives retry back-off.
     #[serde(default)]
     pub metadata_attempted_at: u64,
-    /// When the game was last launched from Kanso (ms).
+    /// When the game was last played (ms): the latest between a launch from Kanso and what
+    /// the game's own client recorded (Steam).
     #[serde(default)]
     pub last_played_at: Option<u64>,
     /// How many times the game was launched from Kanso.
@@ -133,6 +182,29 @@ pub struct DetectedGame {
     /// Language (`it`, `en`, ...) the cached description and genres were fetched in.
     #[serde(default)]
     pub metadata_lang: Option<String>,
+    /// Steam community tags ("Souls-like", "Co-op online", ...), most relevant first.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Language the tags were fetched in; `None` until a lookup got an answer (even an empty one).
+    #[serde(default)]
+    pub tags_lang: Option<String>,
+    /// Total playtime in minutes: what the game's own client recorded (Steam) or what Kanso
+    /// measured while the game was running (every other store); `None` when unknown.
+    #[serde(default)]
+    pub playtime_minutes: Option<u32>,
+    /// Backlog, playing, finished or abandoned, as chosen by the user.
+    #[serde(default)]
+    pub status: Option<GameStatus>,
+    /// Achievements unlocked / available according to the game's client (Steam); `None` when
+    /// unknown or the game has none.
+    #[serde(default)]
+    pub achievements_unlocked: Option<u32>,
+    #[serde(default)]
+    pub achievements_total: Option<u32>,
+    /// Steam store page matched to a game from another store: `None` until looked up, empty
+    /// when there is none. Read it through [`DetectedGame::steam_store_id`].
+    #[serde(default)]
+    pub steam_store_appid: Option<String>,
     /// Last metadata/cover update timestamp in ms (also used for UI image cache busting).
     #[serde(default)]
     pub updated_at: u64,
@@ -174,8 +246,28 @@ impl DetectedGame {
             last_played_at: None,
             play_count: 0,
             metadata_lang: None,
+            tags: Vec::new(),
+            tags_lang: None,
+            playtime_minutes: None,
+            status: None,
+            achievements_unlocked: None,
+            achievements_total: None,
+            steam_store_appid: None,
             updated_at: now_timestamp_ms(),
         }
+    }
+
+    /// Appid of the game's Steam store page: its own for a Steam game, the matched one for a
+    /// game from another store, `None` when there is none or it is not known yet.
+    pub fn steam_store_id(&self) -> Option<&str> {
+        let appid = if self.platform == GamePlatform::Steam {
+            self.platform_app_id.as_deref()
+        } else {
+            self.steam_store_appid.as_deref()
+        };
+        appid
+            .map(str::trim)
+            .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
     }
 }
 

@@ -1,0 +1,23 @@
+{
+  "kansoPlugin": 1,
+  "id": "steam-reviews",
+  "name": {
+    "en": "Review scores",
+    "it": "Recensioni",
+    "es": "Reseñas",
+    "ru": "Оценки"
+  },
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "Steam user reviews and the Metacritic score, also for games from other stores that have a Steam page.",
+    "it": "Recensioni degli utenti di Steam e voto Metacritic, anche per i giochi di altri store che hanno una pagina su Steam.",
+    "es": "Reseñas de los usuarios de Steam y nota de Metacritic, también para juegos de otras tiendas con página en Steam.",
+    "ru": "Отзывы пользователей Steam и оценка Metacritic — в том числе для игр из других магазинов, у которых есть страница в Steam."
+  },
+  "homepage": "https://store.steampowered.com",
+  "hosts": ["api.steampowered.com", "store.steampowered.com"],
+  "provides": { "gameDetails": true, "badge": true, "background": true },
+  "cacheHours": 96,
+  "enabledByDefault": true
+}

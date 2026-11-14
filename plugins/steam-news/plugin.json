@@ -1,0 +1,37 @@
+{
+  "kansoPlugin": 1,
+  "id": "steam-news",
+  "name": {
+    "en": "News and patch notes",
+    "it": "Novità e note delle patch",
+    "es": "Novedades y notas de parches",
+    "ru": "Новости и обновления"
+  },
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "The latest announcements and patch notes published by the developers on Steam.",
+    "it": "Gli ultimi annunci e le note delle patch pubblicati dagli sviluppatori su Steam.",
+    "es": "Los últimos anuncios y notas de parches publicados por los desarrolladores en Steam.",
+    "ru": "Последние объявления и списки изменений, опубликованные разработчиками в Steam."
+  },
+  "homepage": "https://store.steampowered.com",
+  "hosts": ["api.steampowered.com"],
+  "provides": { "gameDetails": true },
+  "cacheHours": 12,
+  "enabledByDefault": true,
+  "settings": [
+    {
+      "key": "count",
+      "type": "select",
+      "default": "4",
+      "label": {
+        "en": "How many entries to show",
+        "it": "Quante notizie mostrare",
+        "es": "Cuántas entradas mostrar",
+        "ru": "Сколько записей показывать"
+      },
+      "options": ["3", "4", "6", "8"]
+    }
+  ]
+}

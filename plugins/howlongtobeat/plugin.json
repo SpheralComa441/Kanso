@@ -1,0 +1,17 @@
+{
+  "kansoPlugin": 1,
+  "id": "howlongtobeat",
+  "name": "HowLongToBeat",
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "How long a game takes: main story, main + extras, completionist. Data from howlongtobeat.com, which has no official API: if the site changes, this plugin may need an update.",
+    "it": "Quanto dura un gioco: storia principale, storia + extra, completista. Dati di howlongtobeat.com, che non ha un'API ufficiale: se il sito cambia, questo plugin può richiedere un aggiornamento.",
+    "es": "Cuánto dura un juego: historia principal, historia + extras, completista. Datos de howlongtobeat.com, que no tiene API oficial: si el sitio cambia, este plugin puede necesitar una actualización.",
+    "ru": "Сколько длится игра: основной сюжет, сюжет + дополнительное, полное прохождение. Данные howlongtobeat.com, у которого нет официального API: если сайт изменится, плагину может понадобиться обновление."
+  },
+  "homepage": "https://howlongtobeat.com",
+  "hosts": ["howlongtobeat.com"],
+  "provides": { "gameDetails": true, "badge": true, "background": true },
+  "cacheHours": 720
+}

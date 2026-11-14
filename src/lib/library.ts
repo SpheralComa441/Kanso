@@ -1,4 +1,4 @@
-import type { DetectedGame, GamePlatform } from "../types/game";
+import type { DetectedGame, GamePlatform, GameStatus } from "../types/game";
 import { PLATFORM_ORDER } from "./platforms";
 
 /**
@@ -13,13 +13,37 @@ export interface LibraryFilters {
   platform: GamePlatform | null;
   /** Normalized genre key, see {@link genreKey}. */
   genre: string | null;
+  /** Normalized key of a Steam community tag. */
+  tag: string | null;
+  status: GameStatus | null;
 }
 
 export const EMPTY_FILTERS: LibraryFilters = {
   collection: "all",
   platform: null,
   genre: null,
+  tag: null,
+  status: null,
 };
+
+/** The statuses in the order they are listed everywhere. */
+export const GAME_STATUSES: readonly GameStatus[] = [
+  "backlog",
+  "playing",
+  "finished",
+  "abandoned",
+];
+
+/** "Recently played" means within this many days. */
+const RECENT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * Played in the last 30 days. Steam's own records count, so games played years ago must not
+ * crowd the list the way "ever launched" would.
+ */
+export function isRecentlyPlayed(game: DetectedGame, now = Date.now()): boolean {
+  return game.lastPlayedAt !== null && now - game.lastPlayedAt <= RECENT_WINDOW_MS;
+}
 
 export interface GenreSummary {
   key: string;
@@ -34,13 +58,16 @@ export interface LibraryCounts {
   recent: number;
   hidden: number;
   byPlatform: Record<GamePlatform, number>;
+  byStatus: Record<GameStatus, number>;
 }
 
 export function hasActiveFilters(filters: LibraryFilters): boolean {
   return (
     filters.collection !== "all" ||
     filters.platform !== null ||
-    filters.genre !== null
+    filters.genre !== null ||
+    filters.tag !== null ||
+    filters.status !== null
   );
 }
 
@@ -48,7 +75,9 @@ export function activeFilterCount(filters: LibraryFilters): number {
   return (
     Number(filters.collection !== "all") +
     Number(filters.platform !== null) +
-    Number(filters.genre !== null)
+    Number(filters.genre !== null) +
+    Number(filters.tag !== null) +
+    Number(filters.status !== null)
   );
 }
 
@@ -83,6 +112,36 @@ export function summarizeGenres(games: DetectedGame[]): GenreSummary[] {
   );
 }
 
+/**
+ * Steam community tags found in the visible library, most common first. Tags that merely
+ * repeat a genre already listed ("GDR", "Indie") are left to the genre list.
+ */
+export function summarizeTags(
+  games: DetectedGame[],
+  genres: GenreSummary[]
+): GenreSummary[] {
+  const genreKeys = new Set(genres.map((genre) => genre.key));
+  const byKey = new Map<string, GenreSummary>();
+  for (const game of games) {
+    if (game.isHidden) continue;
+    const seenInGame = new Set<string>();
+    for (const raw of game.tags) {
+      const key = genreKey(raw);
+      if (!key || genreKeys.has(key) || seenInGame.has(key)) continue;
+      seenInGame.add(key);
+      const entry = byKey.get(key);
+      if (entry) {
+        entry.count += 1;
+      } else {
+        byKey.set(key, { key, label: raw.trim(), count: 1 });
+      }
+    }
+  }
+  return [...byKey.values()].sort(
+    (a, b) => b.count - a.count || a.label.localeCompare(b.label, "it")
+  );
+}
+
 export function countLibrary(games: DetectedGame[]): LibraryCounts {
   const byPlatform = Object.fromEntries(
     PLATFORM_ORDER.map((p) => [p, 0])
@@ -93,6 +152,7 @@ export function countLibrary(games: DetectedGame[]): LibraryCounts {
     recent: 0,
     hidden: 0,
     byPlatform,
+    byStatus: { backlog: 0, playing: 0, finished: 0, abandoned: 0 },
   };
   for (const game of games) {
     if (game.isHidden) {
@@ -101,7 +161,8 @@ export function countLibrary(games: DetectedGame[]): LibraryCounts {
     }
     counts.visible += 1;
     if (game.isFavorite) counts.favorites += 1;
-    if (game.lastPlayedAt !== null) counts.recent += 1;
+    if (isRecentlyPlayed(game)) counts.recent += 1;
+    if (game.status) counts.byStatus[game.status] += 1;
     byPlatform[game.platform] = (byPlatform[game.platform] ?? 0) + 1;
   }
   return counts;
@@ -118,24 +179,29 @@ export function applyLibraryFilters(
   const matching = games.filter((g) => {
     if (g.isHidden !== wantHidden) return false;
     if (filters.collection === "favorites" && !g.isFavorite) return false;
-    if (filters.collection === "recent" && g.lastPlayedAt === null) return false;
+    if (filters.collection === "recent" && !isRecentlyPlayed(g)) return false;
     if (filters.platform && g.platform !== filters.platform) return false;
+    if (filters.status && g.status !== filters.status) return false;
     if (
       filters.genre &&
       !g.genres.some((genre) => genreKey(genre) === filters.genre)
     ) {
       return false;
     }
+    if (filters.tag && !g.tags.some((tag) => genreKey(tag) === filters.tag)) {
+      return false;
+    }
     if (!q) return true;
     return (
       g.title.toLowerCase().includes(q) ||
       g.cleanTitle.toLowerCase().includes(q) ||
-      g.genres.some((genre) => genre.toLowerCase().includes(q))
+      g.genres.some((genre) => genre.toLowerCase().includes(q)) ||
+      g.tags.some((tag) => tag.toLowerCase().includes(q))
     );
   });
 
   if (filters.collection === "recent") {
-    // Most recently launched first
+    // Most recently played first
     matching.sort((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0));
   }
   return matching;
