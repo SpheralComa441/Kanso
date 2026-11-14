@@ -1,4 +1,4 @@
-use crate::cleaner::clean_game_title;
+use crate::cleaner::{clean_game_title, is_placeholder_title};
 use crate::models::{now_timestamp_ms, DetectedGame, GamePlatform, SgdbGameMatch};
 use serde::Deserialize;
 use serde_json::Value;
@@ -15,8 +15,19 @@ const DEFAULT_STEAM_COMMUNITY_BASE_URL: &str = "https://steamcommunity.com";
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SteamStoreMetadata {
     pub steam_appid: String,
+    /// Official store name of the app, used to replace `appid_<id>` placeholder titles.
+    pub name: Option<String>,
     pub short_description: Option<String>,
     pub genres: Vec<String>,
+}
+
+/// Outcome of matching a detected game against SteamGridDB.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SgdbResolution {
+    pub game: SgdbGameMatch,
+    /// `true` when the match came from `GET /games/steam/{appid}` (authoritative for that
+    /// Steam app), `false` when it is only the first hit of a text search.
+    pub exact_steam_match: bool,
 }
 
 /// HTTP client for SteamGridDB API v2 and the public Steam Store API.
@@ -194,6 +205,18 @@ impl MetadataClient {
         api_key: &str,
         game: &DetectedGame,
     ) -> Result<Option<SgdbGameMatch>, String> {
+        Ok(self
+            .resolve_sgdb_match(api_key, game)?
+            .map(|resolution| resolution.game))
+    }
+
+    /// Same lookup as [`Self::resolve_sgdb_for_game`], additionally reporting whether the
+    /// result is the exact Steam `appid` match or just a text-search guess.
+    pub fn resolve_sgdb_match(
+        &self,
+        api_key: &str,
+        game: &DetectedGame,
+    ) -> Result<Option<SgdbResolution>, String> {
         if game.platform == GamePlatform::Steam {
             if let Some(appid) = game
                 .platform_app_id
@@ -202,7 +225,12 @@ impl MetadataClient {
                 .filter(|id| !id.is_empty())
             {
                 match self.lookup_sgdb_by_steam_appid(api_key, appid) {
-                    Ok(Some(exact_match)) => return Ok(Some(exact_match)),
+                    Ok(Some(exact_match)) => {
+                        return Ok(Some(SgdbResolution {
+                            game: exact_match,
+                            exact_steam_match: true,
+                        }))
+                    }
                     Ok(None) => {
                         // Exact Steam AppID not indexed on SteamGridDB -> fallback to text autocomplete
                     }
@@ -220,7 +248,10 @@ impl MetadataClient {
             &game.title
         };
         let results = self.search_steamgriddb(api_key, search_term)?;
-        Ok(results.into_iter().next())
+        Ok(results.into_iter().next().map(|first_hit| SgdbResolution {
+            game: first_hit,
+            exact_steam_match: false,
+        }))
     }
 
     /// Downloads the vertical `600x900` cover grid for `sgdb_game_id` and saves it locally inside `covers_dir`.
@@ -353,7 +384,8 @@ impl MetadataClient {
         Ok(pick_from(false, false).or_else(|| pick_from(false, true)))
     }
 
-    /// Queries the public Steam Store API (no API key required) for Italian `short_description` and `genres`.
+    /// Queries the public Steam Store API (no API key required) for the app's official `name`
+    /// plus Italian `short_description` and `genres`.
     pub fn fetch_steam_store_metadata(
         &self,
         known_steam_appid: Option<&str>,
@@ -381,6 +413,13 @@ impl MetadataClient {
         }
         let data = entry.get("data")?;
 
+        let name = data
+            .get("name")
+            .and_then(Value::as_str)
+            .map(decode_basic_html_entities)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
         let short_description = data
             .get("short_description")
             .and_then(Value::as_str)
@@ -402,6 +441,7 @@ impl MetadataClient {
 
         Some(SteamStoreMetadata {
             steam_appid: appid,
+            name,
             short_description,
             genres,
         })
@@ -422,8 +462,9 @@ impl MetadataClient {
         items.into_iter().next().and_then(|item| item.appid_string())
     }
 
-    /// Automatically enriches a game with SteamGridDB cover art (when `api_key` is non-empty)
-    /// and public Steam Store Italian description & genres.
+    /// Automatically enriches a game with its official Steam name (when the scanner could only
+    /// produce a provisional title), public Steam Store Italian description & genres, and
+    /// SteamGridDB cover art (when `api_key` is non-empty).
     pub fn enrich_game_automatically(
         &self,
         game: &mut DetectedGame,
@@ -431,18 +472,60 @@ impl MetadataClient {
         covers_dir: &Path,
     ) -> Result<(), String> {
         let mut sgdb_warning: Option<String> = None;
+        let api_key = api_key.map(str::trim).filter(|k| !k.is_empty());
 
-        // 1. Cover art via SteamGridDB if API key is configured and cover is missing
-        if let Some(key) = api_key.map(str::trim).filter(|k| !k.is_empty()) {
+        let steam_appid = if game.platform == GamePlatform::Steam {
+            game.platform_app_id
+                .as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(ToString::to_string)
+        } else {
+            None
+        };
+
+        // A provisional title can only be resolved reliably through the exact Steam appid
+        let mut needs_title = game.title_provisional && steam_appid.is_some();
+
+        // 1. Official name, description & genres via the public Steam Store API. Runs before
+        //    the cover lookup so a freshly resolved title also drives SteamGridDB's text search.
+        if needs_title || game.short_description.is_none() || game.genres.is_empty() {
+            if let Some(meta) =
+                self.fetch_steam_store_metadata(steam_appid.as_deref(), &game.clean_title)
+            {
+                if needs_title && meta.name.as_deref().is_some_and(|n| apply_resolved_title(game, n))
+                {
+                    needs_title = false;
+                }
+                if game.short_description.is_none() {
+                    game.short_description = meta.short_description;
+                }
+                if game.genres.is_empty() && !meta.genres.is_empty() {
+                    game.genres = meta.genres;
+                }
+            }
+        }
+
+        if let Some(key) = api_key {
+            // 2. Cover art via SteamGridDB when the cover is missing
             let needs_cover = game
                 .cover_path
                 .as_deref()
                 .is_none_or(|p| !Path::new(p).is_file());
+            let mut exact_lookup_done = false;
 
             if needs_cover {
-                match self.resolve_sgdb_for_game(key, game) {
-                    Ok(Some(matched)) => {
+                exact_lookup_done = steam_appid.is_some();
+                match self.resolve_sgdb_match(key, game) {
+                    Ok(Some(resolution)) => {
+                        let matched = resolution.game;
                         game.steamgriddb_id = Some(matched.id);
+                        if needs_title
+                            && resolution.exact_steam_match
+                            && apply_resolved_title(game, &matched.name)
+                        {
+                            needs_title = false;
+                        }
                         match self.download_cover_for_sgdb_id(
                             key,
                             matched.id,
@@ -460,21 +543,20 @@ impl MetadataClient {
                     Err(e) => sgdb_warning = Some(e),
                 }
             }
-        }
 
-        // 2. Description & genres via public Steam Store API
-        if game.short_description.is_none() || game.genres.is_empty() {
-            let known_steam_id = if game.platform == GamePlatform::Steam {
-                game.platform_app_id.as_deref()
-            } else {
-                None
-            };
-            if let Some(meta) = self.fetch_steam_store_metadata(known_steam_id, &game.clean_title) {
-                if game.short_description.is_none() {
-                    game.short_description = meta.short_description;
-                }
-                if game.genres.is_empty() && !meta.genres.is_empty() {
-                    game.genres = meta.genres;
+            // 3. The store had no usable name (delisted / region-locked app) and the cover was
+            //    already cached: ask SteamGridDB's exact appid endpoint for the name alone.
+            if needs_title && !exact_lookup_done {
+                if let Some(appid) = steam_appid.as_deref() {
+                    match self.lookup_sgdb_by_steam_appid(key, appid) {
+                        Ok(Some(exact)) => {
+                            apply_resolved_title(game, &exact.name);
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            sgdb_warning.get_or_insert(e);
+                        }
+                    }
                 }
             }
         }
@@ -509,6 +591,7 @@ impl MetadataClient {
         if !trimmed_name.is_empty() {
             game.title = trimmed_name.to_string();
             game.clean_title = clean_game_title(trimmed_name);
+            game.title_provisional = false;
         }
 
         // Refresh description & genres to match the chosen game
@@ -537,6 +620,19 @@ impl MetadataClient {
 
         Ok(())
     }
+}
+
+/// Replaces a provisional title with an official `name`, clearing `title_provisional`.
+/// Returns `false` (leaving the game untouched) when `name` is itself unusable.
+fn apply_resolved_title(game: &mut DetectedGame, name: &str) -> bool {
+    let trimmed = name.trim();
+    if is_placeholder_title(trimmed) {
+        return false;
+    }
+    game.title = trimmed.to_string();
+    game.clean_title = clean_game_title(trimmed);
+    game.title_provisional = false;
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -720,6 +816,18 @@ mod tests {
                             "application/json",
                             br#"{"success":true,"data":{"id":5276290,"name":"Cyberpunk 2077","verified":true,"release_date":1607558400,"types":["steam"]}}"#.to_vec(),
                         )
+                    } else if path == "/games/steam/1321440" {
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"success":true,"data":{"id":5330001,"name":"Cassette Beasts","verified":true,"release_date":1682467200,"types":["steam"]}}"#.to_vec(),
+                        )
+                    } else if path == "/games/steam/777777" {
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"success":true,"data":{"id":5440002,"name":"Delisted Gem","verified":false,"types":["steam"]}}"#.to_vec(),
+                        )
                     } else if path == "/games/steam/999999" {
                         (
                             "404 Not Found",
@@ -750,6 +858,18 @@ mod tests {
                             "200 OK",
                             "application/json",
                             r#"{"1091500":{"success":true,"data":{"short_description":"GDR d'azione futuristico.","genres":[{"id":"3","description":"GDR"}]}}}"#.as_bytes().to_vec(),
+                        )
+                    } else if path.starts_with("/api/appdetails?appids=1321440") {
+                        (
+                            "200 OK",
+                            "application/json",
+                            r#"{"1321440":{"success":true,"data":{"type":"game","name":"Cassette Beasts","short_description":"Colleziona mostri e trasformati in loro.","genres":[{"id":"23","description":"Indie"},{"id":"3","description":"GDR"}]}}}"#.as_bytes().to_vec(),
+                        )
+                    } else if path.starts_with("/api/appdetails?appids=777777") {
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"777777":{"success":false}}"#.to_vec(),
                         )
                     } else if path.starts_with("/api/appdetails?appids=2344520") {
                         (
@@ -884,5 +1004,136 @@ mod tests {
             Some("Action RPG oscuro a Sanctuarium.")
         );
         assert_eq!(bnet_game.genres, vec!["Azione", "GDR"]);
+    }
+
+    fn provisional_steam_game(appid: &str, guessed_title: &str) -> DetectedGame {
+        let mut game = DetectedGame::new_detected(
+            format!("steam:{appid}"),
+            guessed_title.to_string(),
+            guessed_title.to_string(),
+            GamePlatform::Steam,
+            Some(appid.to_string()),
+            format!(r"C:\Steam\steamapps\common\{guessed_title}"),
+            None,
+            Some(format!("steam://rungameid/{appid}")),
+        );
+        game.title_provisional = true;
+        game
+    }
+
+    #[test]
+    fn provisional_steam_title_is_replaced_by_official_store_name_without_api_key() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let covers_dir = tempdir().unwrap();
+
+        // Manifest said `appid_1321440`; the scanner could only guess from the install folder
+        let mut game = provisional_steam_game("1321440", "CassetteBeasts");
+
+        client
+            .enrich_game_automatically(&mut game, None, covers_dir.path())
+            .expect("enrichment succeeds without SteamGridDB key");
+
+        assert_eq!(game.title, "Cassette Beasts");
+        assert_eq!(game.clean_title, "Cassette Beasts");
+        assert!(!game.title_provisional);
+        assert_eq!(game.genres, vec!["Indie", "GDR"]);
+
+        let paths = recorded.lock().unwrap().clone();
+        assert!(
+            !paths.iter().any(|p| p.starts_with("/games/steam/")),
+            "No SteamGridDB call expected without an API key: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn provisional_title_is_resolved_even_when_cover_and_metadata_are_already_cached() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let covers_dir = tempdir().unwrap();
+        let cached_cover = covers_dir.path().join("steam_1321440.png");
+        fs::write(&cached_cover, b"cached").unwrap();
+
+        // State of a library synced before the fix: cover, description and genres are all
+        // present, only the name is wrong
+        let mut game = provisional_steam_game("1321440", "Cassette Beasts (folder)");
+        game.cover_path = Some(cached_cover.to_string_lossy().to_string());
+        game.short_description = Some("Descrizione in cache.".to_string());
+        game.genres = vec!["Indie".to_string()];
+        game.metadata_synced = true;
+
+        client
+            .enrich_game_automatically(&mut game, Some("test_sgdb_key"), covers_dir.path())
+            .expect("enrichment succeeds");
+
+        assert_eq!(game.title, "Cassette Beasts");
+        assert!(!game.title_provisional);
+        // Cached data is left alone
+        assert_eq!(game.short_description.as_deref(), Some("Descrizione in cache."));
+        assert_eq!(game.genres, vec!["Indie"]);
+        assert_eq!(fs::read(&cached_cover).unwrap(), b"cached");
+
+        let paths = recorded.lock().unwrap().clone();
+        assert!(
+            !paths.iter().any(|p| p.starts_with("/grids/")),
+            "Cover must not be downloaded again: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn provisional_title_falls_back_to_exact_sgdb_name_when_store_has_no_entry() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let covers_dir = tempdir().unwrap();
+
+        // a) Cover missing: the exact appid match gives both the name and the cover
+        let mut without_cover = provisional_steam_game("777777", "delisted_gem");
+        client
+            .enrich_game_automatically(&mut without_cover, Some("test_sgdb_key"), covers_dir.path())
+            .expect("enrichment succeeds");
+        assert_eq!(without_cover.title, "Delisted Gem");
+        assert!(!without_cover.title_provisional);
+        assert!(without_cover.cover_path.is_some());
+        let exact_calls = recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| *p == "/games/steam/777777")
+            .count();
+        assert_eq!(exact_calls, 1, "exact appid endpoint must be queried only once");
+
+        // b) Cover already cached: the name alone is fetched from the exact appid endpoint
+        let mut with_cover = provisional_steam_game("777777", "delisted_gem");
+        with_cover.cover_path = without_cover.cover_path.clone();
+        client
+            .enrich_game_automatically(&mut with_cover, Some("test_sgdb_key"), covers_dir.path())
+            .expect("enrichment succeeds");
+        assert_eq!(with_cover.title, "Delisted Gem");
+        assert!(!with_cover.title_provisional);
+    }
+
+    #[test]
+    fn provisional_title_is_kept_and_stays_flagged_when_nothing_resolves_it() {
+        let (base_url, _recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let covers_dir = tempdir().unwrap();
+        let cached_cover = covers_dir.path().join("steam_424242.png");
+        fs::write(&cached_cover, b"cached").unwrap();
+
+        // Unknown everywhere (store 404, SteamGridDB 404). A text-search hit must never be
+        // used as the name: it would rename the game to an unrelated title.
+        let mut game = provisional_steam_game("424242", "Some Folder Name");
+        game.cover_path = Some(cached_cover.to_string_lossy().to_string());
+
+        let _ = client.enrich_game_automatically(&mut game, Some("test_sgdb_key"), covers_dir.path());
+
+        assert_eq!(game.title, "Some Folder Name");
+        assert!(game.title_provisional, "must be retried on the next sync");
+
+        // Same guarantee when the cover is missing and SteamGridDB only has a text-search hit
+        let mut no_cover = provisional_steam_game("424242", "Some Folder Name");
+        let _ = client.enrich_game_automatically(&mut no_cover, Some("test_sgdb_key"), covers_dir.path());
+        assert_eq!(no_cover.title, "Some Folder Name");
+        assert!(no_cover.title_provisional);
     }
 }

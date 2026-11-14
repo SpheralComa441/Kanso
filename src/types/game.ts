@@ -16,6 +16,8 @@ export interface DetectedGame {
   isFavorite: boolean;
   metadataSynced: boolean;
   customOverride: boolean;
+  /** Title is a local guess (Steam manifest had `appid_<id>`); sync will replace it. */
+  titleProvisional: boolean;
   updatedAt: number;
 }
 

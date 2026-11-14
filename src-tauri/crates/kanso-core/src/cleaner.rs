@@ -55,6 +55,23 @@ pub fn clean_game_title(raw: &str) -> String {
     }
 }
 
+/// Returns `true` when `title` is not a real game name but a Steam placeholder.
+///
+/// Steam writes `"name" "appid_<id>"` into an `appmanifest_*.acf` whenever the manifest is
+/// created before the client has cached the app's store info (e.g. a library folder moved
+/// between PCs, or an install queued from another device). Such a string must never be shown
+/// to the user or sent to a metadata search.
+pub fn is_placeholder_title(title: &str) -> bool {
+    let trimmed = title.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    trimmed
+        .to_ascii_lowercase()
+        .strip_prefix("appid_")
+        .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+}
+
 fn strip_one_trailing_suffix(input: &str) -> Option<String> {
     let lower = input.to_lowercase();
 
@@ -125,6 +142,18 @@ mod tests {
             clean_game_title("Sekiro™: Shadows Die Twice (GOTY)"),
             "Sekiro: Shadows Die Twice"
         );
+    }
+
+    #[test]
+    fn detects_steam_placeholder_titles() {
+        assert!(is_placeholder_title("appid_1321440"));
+        assert!(is_placeholder_title("  APPID_42 "));
+        assert!(is_placeholder_title(""));
+        assert!(!is_placeholder_title("appid_"));
+        assert!(!is_placeholder_title("appid_12x"));
+        assert!(!is_placeholder_title("Cassette Beasts"));
+        // A purely numeric name is a legitimate title
+        assert!(!is_placeholder_title("2048"));
     }
 
     #[test]

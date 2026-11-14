@@ -81,6 +81,11 @@ pub struct DetectedGame {
     /// Whether the user manually customized fields or selected a specific SteamGridDB entry.
     #[serde(default)]
     pub custom_override: bool,
+    /// `true` while `title` is only a local best guess (the Steam manifest carried an
+    /// `appid_<id>` placeholder instead of the game's name). Metadata sync replaces it with
+    /// the official name and clears the flag.
+    #[serde(default)]
+    pub title_provisional: bool,
     /// Last metadata/cover update timestamp in ms (also used for UI image cache busting).
     #[serde(default)]
     pub updated_at: u64,
@@ -115,6 +120,7 @@ impl DetectedGame {
             is_favorite: false,
             metadata_synced: false,
             custom_override: false,
+            title_provisional: false,
             updated_at: now_timestamp_ms(),
         }
     }

@@ -9,6 +9,7 @@ import type {
   ScanReport,
   SgdbGameMatch,
 } from "../types/game";
+import { PREVIEW_MOCK_GAMES } from "./previewData";
 
 const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
 
@@ -18,88 +19,10 @@ const DEFAULT_CONFIG: AppConfig = {
   minimizeToTrayOnLaunch: false,
 };
 
-const PREVIEW_MOCK_GAMES: DetectedGame[] = [
-  {
-    id: "steam:1091500",
-    title: "Cyberpunk 2077",
-    cleanTitle: "Cyberpunk 2077",
-    platform: "steam",
-    platformAppId: "1091500",
-    installDir:
-      "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Cyberpunk 2077",
-    executablePath: null,
-    launchUri: "steam://rungameid/1091500",
-    steamgriddbId: 5276290,
-    coverPath: null,
-    shortDescription:
-      "Cyberpunk 2077 è un GDR d'azione e avventura open-world ambientato a Night City.",
-    genres: ["Azione", "GDR"],
-    isFavorite: false,
-    metadataSynced: true,
-    customOverride: false,
-    updatedAt: 1700000000000,
-  },
-  {
-    id: "battlenet:fenris",
-    title: "Diablo® IV",
-    cleanTitle: "Diablo IV",
-    platform: "Battle.net",
-    platformAppId: "Fenris",
-    installDir: "C:\\Program Files (x86)\\Diablo IV",
-    executablePath:
-      "C:\\Program Files (x86)\\Diablo IV\\Diablo IV Launcher.exe",
-    launchUri: null,
-    steamgriddbId: null,
-    coverPath: null,
-    shortDescription:
-      "Unisciti alla lotta infinita tra gli Alti Cieli e gli Inferi Fiammeggianti.",
-    genres: ["Azione", "GDR"],
-    isFavorite: false,
-    metadataSynced: true,
-    customOverride: false,
-    updatedAt: 1700000000000,
-  },
-  {
-    id: "epic:dc9d2e595d0e4650b35d659f90d41059",
-    title: "Alan Wake 2 Deluxe Edition",
-    cleanTitle: "Alan Wake 2",
-    platform: "epic",
-    platformAppId: "dc9d2e595d0e4650b35d659f90d41059",
-    installDir: "D:\\Epic Games\\AlanWake2",
-    executablePath: "D:\\Epic Games\\AlanWake2\\Binaries\\Win64\\AlanWake2.exe",
-    launchUri:
-      "com.epicgames.launcher://apps/da155068a9034375839136b4697593c1%3A235b28b9c6e2469da792fbabbc2fd25e%3Adc9d2e595d0e4650b35d659f90d41059?action=launch&silent=true",
-    steamgriddbId: null,
-    coverPath: null,
-    shortDescription: "Un thriller psicologico survival horror.",
-    genres: ["Azione", "Avventura"],
-    isFavorite: false,
-    metadataSynced: true,
-    customOverride: false,
-    updatedAt: 1700000000000,
-  },
-  {
-    id: "standalone:8f31c9a04d2e11b7",
-    title: "Hollow Knight",
-    cleanTitle: "Hollow Knight",
-    platform: "standalone",
-    platformAppId: null,
-    installDir: "E:\\Games\\Hollow Knight",
-    executablePath: "E:\\Games\\Hollow Knight\\hollow_knight.exe",
-    launchUri: null,
-    steamgriddbId: null,
-    coverPath: null,
-    shortDescription:
-      "Forgia il tuo cammino in Hollow Knight! Un'epica avventura d'azione in un vasto regno in rovina.",
-    genres: ["Azione", "Avventura", "Indie"],
-    isFavorite: false,
-    metadataSynced: true,
-    customOverride: false,
-    updatedAt: 1700000000000,
-  },
-];
-
-let previewGamesState: DetectedGame[] = [...PREVIEW_MOCK_GAMES];
+// Same ordering the desktop backend applies to a real scan
+let previewGamesState: DetectedGame[] = [...PREVIEW_MOCK_GAMES].sort((a, b) =>
+  a.title.toLowerCase().localeCompare(b.title.toLowerCase())
+);
 
 export function isRunningInTauri(): boolean {
   return isTauri();
@@ -322,6 +245,7 @@ export async function applySteamGridDbMatch(
     cleanTitle: matchedName,
     steamgriddbId: sgdbGameId,
     customOverride: true,
+    titleProvisional: false,
     updatedAt: Date.now(),
   };
   previewGamesState[idx] = updated;
@@ -349,6 +273,7 @@ export async function updateGameDetails(
     genres: payload.genres,
     isFavorite: payload.isFavorite ?? previewGamesState[idx].isFavorite,
     customOverride: true,
+    titleProvisional: false,
     updatedAt: Date.now(),
   };
   previewGamesState[idx] = updated;
@@ -370,9 +295,30 @@ export async function setGameLocalCover(
   throw new Error("Selezione file locale disponibile nell'app Windows.");
 }
 
+export async function setGameFavorite(
+  gameId: string,
+  isFavorite: boolean
+): Promise<DetectedGame> {
+  if (isTauri()) {
+    const updated = await invoke<DetectedGame>("set_game_favorite", {
+      gameId,
+      isFavorite,
+    });
+    void mirrorGamesToSqlite([updated]);
+    return updated;
+  }
+
+  const idx = previewGamesState.findIndex((g) => g.id === gameId);
+  if (idx === -1) throw new Error("Gioco non trovato.");
+  const updated: DetectedGame = { ...previewGamesState[idx], isFavorite };
+  previewGamesState[idx] = updated;
+  return updated;
+}
+
 export async function launchGame(game: DetectedGame): Promise<void> {
   if (isTauri()) {
-    await invoke<void>("launch_game", { game });
+    // The backend launches what is stored for this id, not what the webview sends
+    await invoke<void>("launch_game", { gameId: game.id });
     return;
   }
 

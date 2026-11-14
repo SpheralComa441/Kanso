@@ -1,15 +1,22 @@
-import { LayoutGrid, List, RefreshCw, Search, Settings } from "lucide-react";
-import type { GamePlatform } from "../types/game";
+import {
+  LayoutGrid,
+  List,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCw,
+  Search,
+  Settings,
+} from "lucide-react";
 
-export type PlatformFilter = "all" | GamePlatform;
 export type ViewMode = "grid" | "list";
 
 interface HeaderProps {
   totalGames: number;
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  platformFilter: PlatformFilter;
-  onPlatformFilterChange: (filter: PlatformFilter) => void;
+  isSidebarOpen: boolean;
+  onToggleSidebar: () => void;
+  activeFilterCount: number;
   viewMode: ViewMode;
   onViewModeChange: (mode: ViewMode) => void;
   isScanning: boolean;
@@ -19,20 +26,13 @@ interface HeaderProps {
   onOpenSettings: () => void;
 }
 
-const FILTER_OPTIONS: { value: PlatformFilter; label: string }[] = [
-  { value: "all", label: "Tutti" },
-  { value: "steam", label: "Steam" },
-  { value: "epic", label: "Epic" },
-  { value: "Battle.net", label: "Battle.net" },
-  { value: "standalone", label: "Locale" },
-];
-
 export function Header({
   totalGames,
   searchQuery,
   onSearchChange,
-  platformFilter,
-  onPlatformFilterChange,
+  isSidebarOpen,
+  onToggleSidebar,
+  activeFilterCount,
   viewMode,
   onViewModeChange,
   isScanning,
@@ -41,74 +41,68 @@ export function Header({
   onScan,
   onOpenSettings,
 }: HeaderProps) {
+  const SidebarIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen;
+
   return (
-    <header className="sticky top-0 z-20 border-b border-oled-border bg-oled-bg/95 backdrop-blur-md">
-      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-3.5">
-        {/* Brand & count */}
-        <div className="flex items-center gap-3">
-          <div
-            aria-hidden="true"
-            className="flex h-7 w-7 items-center justify-center rounded-lg border border-oled-border bg-oled-surface"
+    <header className="shrink-0 border-b border-oled-border bg-oled-bg">
+      <div className="flex h-[var(--header-height)] items-center gap-3 px-4">
+        {/* Sidebar toggle, brand & count */}
+        <div className="flex shrink-0 items-center gap-3">
+          <button
+            id="toggle-sidebar-button"
+            type="button"
+            onClick={onToggleSidebar}
+            aria-expanded={isSidebarOpen}
+            aria-controls="library-sidebar"
+            title={isSidebarOpen ? "Nascondi filtri" : "Mostra filtri"}
+            aria-label={isSidebarOpen ? "Nascondi filtri" : "Mostra filtri"}
+            className="relative rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-oled-elevated hover:text-zinc-100"
           >
-            <span className="h-3.5 w-3.5 rounded-full border-2 border-accent border-r-transparent" />
-          </div>
-          <div className="flex items-baseline gap-2.5">
+            <SidebarIcon className="h-4 w-4" />
+            {!isSidebarOpen && activeFilterCount > 0 && (
+              <span className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-accent" />
+            )}
+          </button>
+
+          <div className="flex items-center gap-2.5">
+            <span
+              aria-hidden="true"
+              className="h-3.5 w-3.5 rounded-full border-2 border-accent border-r-transparent"
+            />
             <h1 className="text-base font-semibold tracking-tight text-zinc-100">
               Kanso
             </h1>
             <span className="rounded-md border border-oled-border bg-oled-surface px-2 py-0.5 text-xs font-medium tabular-nums text-zinc-400">
               {totalGames} {totalGames === 1 ? "gioco" : "giochi"}
             </span>
-            {isSyncingMetadata && (
-              <span className="hidden md:inline-flex items-center gap-1.5 text-[11px] text-zinc-400">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                Sincronizzazione metadata...
-              </span>
-            )}
           </div>
         </div>
 
-        {/* Instant search + quick platform filters */}
-        <div className="flex flex-1 items-center justify-center gap-3 min-w-[260px] max-w-2xl">
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
-            <input
-              id="library-search-input"
-              type="search"
-              value={searchQuery}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Cerca nella libreria..."
-              className="w-full rounded-lg border border-oled-border bg-oled-surface py-1.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-500 transition-colors focus:border-accent/60 focus:outline-none"
-            />
-          </div>
-
-          <nav
-            aria-label="Filtro piattaforma"
-            className="hidden lg:flex items-center rounded-lg border border-oled-border bg-oled-surface p-0.5"
-          >
-            {FILTER_OPTIONS.map((opt) => {
-              const active = platformFilter === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  id={`filter-${opt.value}`}
-                  type="button"
-                  onClick={() => onPlatformFilterChange(opt.value)}
-                  className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
-                    active
-                      ? "bg-oled-elevated text-zinc-100"
-                      : "text-zinc-400 hover:text-zinc-200"
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </nav>
+        {/* Instant search */}
+        <div className="relative mx-auto w-full max-w-xl min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-500" />
+          <input
+            id="library-search-input"
+            type="search"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Cerca nella libreria..."
+            className="w-full rounded-lg border border-oled-border bg-oled-surface py-1.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-500 transition-colors focus:border-accent/60 focus:outline-none"
+          />
         </div>
 
         {/* Actions */}
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
+          {isSyncingMetadata && (
+            <span
+              role="status"
+              className="hidden items-center gap-1.5 text-[11px] text-zinc-400 lg:inline-flex"
+            >
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+              Sincronizzazione metadata...
+            </span>
+          )}
+
           <div
             role="group"
             aria-label="Modalità vista"
@@ -119,6 +113,8 @@ export function Header({
               type="button"
               onClick={() => onViewModeChange("grid")}
               title="Vista griglia copertine"
+              aria-label="Vista griglia copertine"
+              aria-pressed={viewMode === "grid"}
               className={`rounded-md p-1.5 transition-colors ${
                 viewMode === "grid"
                   ? "bg-oled-elevated text-zinc-100"
@@ -132,6 +128,8 @@ export function Header({
               type="button"
               onClick={() => onViewModeChange("list")}
               title="Vista elenco dettagliato"
+              aria-label="Vista elenco dettagliato"
+              aria-pressed={viewMode === "list"}
               className={`rounded-md p-1.5 transition-colors ${
                 viewMode === "list"
                   ? "bg-oled-elevated text-zinc-100"
@@ -147,11 +145,12 @@ export function Header({
             type="button"
             onClick={onScan}
             disabled={isScanning}
+            title="Scansiona di nuovo i giochi installati"
             className="inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-surface px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-700 hover:bg-oled-elevated disabled:cursor-not-allowed disabled:opacity-60"
           >
             <RefreshCw
-              className={`h-3.5 w-3.5 text-zinc-400 ${
-                isScanning ? "animate-spin text-accent" : ""
+              className={`h-3.5 w-3.5 ${
+                isScanning ? "animate-spin text-accent" : "text-zinc-400"
               }`}
             />
             <span>{isScanning ? "Scansione..." : "Scansiona"}</span>
@@ -161,14 +160,15 @@ export function Header({
             id="open-settings-button"
             type="button"
             onClick={onOpenSettings}
-            className="relative inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-surface px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-700 hover:bg-oled-elevated"
+            title="Impostazioni"
+            aria-label="Impostazioni"
+            className="relative rounded-lg border border-oled-border bg-oled-surface p-2 text-zinc-400 transition-colors hover:border-zinc-700 hover:bg-oled-elevated hover:text-zinc-100"
           >
-            <Settings className="h-3.5 w-3.5 text-zinc-400" />
-            <span>Impostazioni</span>
+            <Settings className="h-3.5 w-3.5" />
             {!hasApiKey && (
               <span
                 title="SteamGridDB API Key non configurata"
-                className="h-1.5 w-1.5 rounded-full bg-accent"
+                className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-oled-bg bg-accent"
               />
             )}
           </button>

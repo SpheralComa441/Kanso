@@ -5,6 +5,8 @@ use kanso_core::{
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_sql::{Migration, MigrationKind};
@@ -92,7 +94,9 @@ async fn sync_library_metadata(
                             .as_deref()
                             .is_none_or(|p| !Path::new(p).is_file());
                     let missing_desc = g.short_description.is_none() && g.genres.is_empty();
-                    !g.metadata_synced || missing_cover || missing_desc
+                    // `title_provisional`: the Steam manifest only had an `appid_<id>`
+                    // placeholder, so the official name still has to be fetched
+                    !g.metadata_synced || missing_cover || missing_desc || g.title_provisional
                 })
                 .collect()
         };
@@ -105,21 +109,20 @@ async fn sync_library_metadata(
         for mut game in candidates {
             let _ = client.enrich_game_automatically(&mut game, api_key_opt, &covers_dir);
 
-            let emitted_game = {
+            let committed = {
                 let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
                 let mut store = LibraryStore::load_from_file(&store_path);
-                // Do not overwrite if user concurrently saved a manual override while HTTP was in flight
-                if let Some(existing) = store.games.iter().find(|g| g.id == game.id) {
-                    if existing.custom_override && !game.custom_override {
-                        continue;
-                    }
+                // Keeps favorites toggled, and skips manual overrides saved, while HTTP was in flight
+                let committed = store.commit_enriched_game(game);
+                if committed.is_some() {
+                    let _ = store.save_to_file(&store_path);
                 }
-                store.upsert_game(game.clone());
-                let _ = store.save_to_file(&store_path);
-                game
+                committed
             };
 
-            let _ = app_handle.emit("library:game-updated", emitted_game);
+            if let Some(updated) = committed {
+                let _ = app_handle.emit("library:game-updated", updated);
+            }
         }
 
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -193,12 +196,15 @@ async fn apply_steamgriddb_match(
             &covers_dir,
         )?;
 
-        {
+        let game = {
             let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
             let mut store = LibraryStore::load_from_file(&store_path);
-            store.upsert_game(game.clone());
+            let committed = store.commit_enriched_game(game).ok_or_else(|| {
+                format!("Gioco '{game_id}' non più presente nella libreria.")
+            })?;
             store.save_to_file(&store_path)?;
-        }
+            committed
+        };
 
         let _ = app_handle.emit("library:game-updated", game.clone());
         Ok(game)
@@ -240,19 +246,108 @@ fn set_game_local_cover(
 }
 
 #[tauri::command]
-fn launch_game(app: AppHandle, game: DetectedGame) -> Result<(), String> {
-    let config_path = resolve_config_path(&app).ok();
-    let minimize_after = config_path
+fn set_game_favorite(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+    is_favorite: bool,
+) -> Result<DetectedGame, String> {
+    let store_path = resolve_library_store_path(&app)?;
+    let _guard = state.store_lock.lock().unwrap_or_else(|e| e.into_inner());
+    let mut store = LibraryStore::load_from_file(&store_path);
+    let updated = store.set_favorite(&game_id, is_favorite)?;
+    store.save_to_file(&store_path)?;
+    let _ = app.emit("library:game-updated", updated.clone());
+    Ok(updated)
+}
+
+/// Launches a game by library id. The launch target is always read from the local store,
+/// never taken from the webview.
+#[tauri::command]
+fn launch_game(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+) -> Result<(), String> {
+    let store_path = resolve_library_store_path(&app)?;
+    let game = {
+        let _guard = state.store_lock.lock().unwrap_or_else(|e| e.into_inner());
+        LibraryStore::load_from_file(&store_path)
+            .games
+            .into_iter()
+            .find(|g| g.id == game_id)
+            .ok_or_else(|| format!("Gioco '{game_id}' non trovato nella libreria."))?
+    };
+
+    launch_game_inner(&app, &game)?;
+
+    let hide_to_tray = resolve_config_path(&app)
+        .ok()
         .and_then(|p| AppConfig::load_from_file(&p).ok())
         .is_some_and(|c| c.minimize_to_tray_on_launch);
-
-    let launch_result = launch_game_inner(&app, &game);
-    if launch_result.is_ok() && minimize_after {
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.minimize();
-        }
+    if hide_to_tray {
+        hide_main_window_to_tray(&app);
     }
-    launch_result
+    Ok(())
+}
+
+const TRAY_ICON_ID: &str = "kanso-tray";
+const TRAY_MENU_SHOW_ID: &str = "tray-show";
+const TRAY_MENU_QUIT_ID: &str = "tray-quit";
+
+fn show_main_window(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+}
+
+/// Hides the main window, leaving Kanso reachable from its system tray icon. Falls back to a
+/// plain minimize when the tray icon could not be created, so the window is never lost.
+fn hide_main_window_to_tray(app: &AppHandle) {
+    let Some(win) = app.get_webview_window("main") else {
+        return;
+    };
+    if app.tray_by_id(TRAY_ICON_ID).is_some() {
+        let _ = win.hide();
+    } else {
+        let _ = win.minimize();
+    }
+}
+
+/// Creates the system tray icon: left click (or "Apri Kanso") restores the window, "Esci" quits.
+fn setup_system_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show_item = MenuItem::with_id(app, TRAY_MENU_SHOW_ID, "Apri Kanso", true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, TRAY_MENU_QUIT_ID, "Esci", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+    let mut builder = TrayIconBuilder::with_id(TRAY_ICON_ID)
+        .tooltip("Kanso")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_MENU_SHOW_ID => show_main_window(app),
+            TRAY_MENU_QUIT_ID => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        });
+
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+
+    builder.build(app)?;
+    Ok(())
 }
 
 fn launch_game_inner(app: &AppHandle, game: &DetectedGame) -> Result<(), String> {
@@ -345,7 +440,19 @@ fn database_migrations() -> Vec<Migration> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be the first plugin: a second launch (e.g. from the Start menu while Kanso sits
+        // in the tray) just brings the running window back instead of starting a new process.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main_window(app);
+        }))
         .manage(AppState::default())
+        .setup(|app| {
+            // The tray is a convenience: failing to create it must not prevent startup
+            if let Err(err) = setup_system_tray(app.handle()) {
+                eprintln!("Kanso: impossibile creare l'icona nella system tray: {err}");
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(
@@ -362,6 +469,7 @@ pub fn run() {
             apply_steamgriddb_match,
             update_game_details,
             set_game_local_cover,
+            set_game_favorite,
             launch_game
         ])
         .run(tauri::generate_context!())

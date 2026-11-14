@@ -9,9 +9,9 @@ export function ApiKeyBanner({ onConfigure, onDismiss }: ApiKeyBannerProps) {
   return (
     <div
       role="status"
-      className="border-b border-oled-border bg-oled-surface/70 px-6 py-2.5"
+      className="shrink-0 border-b border-oled-border bg-oled-surface/70 px-4 py-2.5"
     >
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 text-xs">
+      <div className="flex items-center justify-between gap-4 text-xs">
         <div className="flex items-center gap-2.5 text-zinc-300">
           <KeyRound className="h-3.5 w-3.5 shrink-0 text-accent" />
           <p>

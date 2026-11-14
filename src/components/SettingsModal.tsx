@@ -308,11 +308,14 @@ export function SettingsModal({
           {/* Launch behavior */}
           <section className="flex items-center justify-between rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
             <div>
-              <p className="text-xs font-medium text-zinc-200">
-                Minimizza nella barra di sistema all&apos;avvio
-              </p>
+              <label
+                htmlFor="minimize-to-tray-checkbox"
+                className="block text-xs font-medium text-zinc-200"
+              >
+                Nascondi nell&apos;area di notifica quando avvii un gioco
+              </label>
               <p className="text-[11px] text-zinc-500">
-                Riduce automaticamente Kanso quando avvii un gioco
+                Kanso resta nella system tray: clicca l&apos;icona per riaprirlo
               </p>
             </div>
             <input
