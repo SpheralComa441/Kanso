@@ -12,9 +12,52 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Fast feedback (a couple of minutes): everything that does not need Windows.
+  # kanso-core has no GUI dependencies, so it builds on a stock Linux runner.
+  checks:
+    name: Tests, lint & frontend build (Linux)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify TypeScript & frontend bundle
+        run: npm run build
+
+      - name: Run core unit tests (scanners, metadata, library database)
+        run: cargo test -p kanso-core --manifest-path src-tauri/Cargo.toml
+
+      - name: Lint core crate
+        run: cargo clippy -p kanso-core --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+  # The slow part: the Windows-only code paths (registry scanners) and the installers.
   build-windows:
     name: Test & Build Kanso (Windows x64)
+    needs: checks
     runs-on: windows-latest
 
     steps:
@@ -37,11 +80,8 @@ jobs:
       - name: Install frontend dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Verify TypeScript & frontend bundle
-        run: npm run build
-
-      - name: Run Rust parser & scanner unit tests
-        run: cargo test --workspace --manifest-path src-tauri/Cargo.toml
+      - name: Run core unit tests on Windows
+        run: cargo test -p kanso-core --manifest-path src-tauri/Cargo.toml
 
       - name: Build Tauri Windows installers (.exe & .msi)
         run: npx tauri build
