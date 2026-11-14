@@ -51,8 +51,10 @@ jobs:
       - name: Run core unit tests (scanners, metadata, library database)
         run: cargo test -p kanso-core --manifest-path src-tauri/Cargo.toml
 
+      # Only likely-bug lints fail the build. Style suggestions stay visible as warnings:
+      # the toolchain is not pinned, and every new Rust release adds some.
       - name: Lint core crate
-        run: cargo clippy -p kanso-core --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+        run: cargo clippy -p kanso-core --all-targets --manifest-path src-tauri/Cargo.toml -- -D clippy::correctness -D clippy::suspicious
 
   # The slow part: the Windows-only code paths (registry scanners) and the installers.
   build-windows:

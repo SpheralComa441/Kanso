@@ -80,8 +80,10 @@ pub fn detect_xbox_game_roots() -> Vec<PathBuf> {
 pub fn parse_gaming_root(bytes: &[u8]) -> Option<String> {
     let payload = bytes.strip_prefix(b"RGBX")?.get(4..)?;
     let units: Vec<u16> = payload
-        .chunks_exact(2)
-        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|pair| u16::from_le_bytes(*pair))
         .take_while(|unit| *unit != 0)
         .collect();
     let folder = String::from_utf16(&units).ok()?;
@@ -139,8 +141,10 @@ fn read_config_text(path: &Path) -> Option<String> {
     let bytes = fs::read(path).ok()?;
     if let Some(utf16) = bytes.strip_prefix(&[0xFF, 0xFE]) {
         let units: Vec<u16> = utf16
-            .chunks_exact(2)
-            .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
             .collect();
         return String::from_utf16(&units).ok();
     }
