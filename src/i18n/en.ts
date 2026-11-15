@@ -376,6 +376,8 @@ export const en: Dictionary = {
 
   "accounts.title": "Store accounts",
   "accounts.help": "Sign in to a store to see in the library the games you own there and have not installed. Signing in always happens on the store's own page: Kanso does not see the password, does not save it and does not send it to anyone. Only the session issued by the store stays on the PC, and Kanso uses it with that store alone, to read the list of your games; \"Sign out\" deletes it.",
+  "accounts.gamePass.title": "I have Xbox Game Pass linked to Battle.net",
+  "accounts.gamePass.help": "Adds to the library, as not installed, the games Game Pass for PC makes installable from Battle.net (Sea of Thieves, Avowed, DOOM: The Dark Ages, the Diablo games…). Battle.net does not tell Kanso whether you have Game Pass, so you say it here: the list ships with Kanso, no sign-in is needed and no request is made. Unticking removes the ones that are not installed.",
   "accounts.notConnected": "Not connected",
   "accounts.connectedAs": "Connected as {name}",
   "accounts.connected": "Connected",

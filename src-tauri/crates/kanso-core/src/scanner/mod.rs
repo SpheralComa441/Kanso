@@ -69,9 +69,7 @@ pub fn read_owned_games_from_clients() -> Vec<crate::owned::OwnedGame> {
     if let Some(path) = gog_galaxy::detect_gog_galaxy_db() {
         owned.extend(gog_galaxy::read_owned_gog_games(&path));
     }
-    if let Some(path) = ubisoft_cache::detect_ubisoft_cache() {
-        owned.extend(ubisoft_cache::read_owned_ubisoft_games(&path));
-    }
+    owned.extend(ubisoft_cache::read_owned_ubisoft_games_of_this_pc());
     owned
 }
 

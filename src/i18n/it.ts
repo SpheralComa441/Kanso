@@ -386,6 +386,8 @@ export const it = {
 
   "accounts.title": "Account degli store",
   "accounts.help": "Accedi a uno store per vedere in libreria anche i giochi che possiedi lì e non hai installato. L'accesso avviene sempre sulla pagina dello store: Kanso non vede la password, non la salva e non la invia a nessuno. Sul PC resta solo la sessione rilasciata dallo store, che Kanso usa soltanto con quello store per leggere l'elenco dei tuoi giochi; «Esci» la cancella.",
+  "accounts.gamePass.title": "Ho Xbox Game Pass collegato a Battle.net",
+  "accounts.gamePass.help": "Aggiunge alla libreria, come non installati, i giochi che Game Pass per PC rende installabili da Battle.net (Sea of Thieves, Avowed, DOOM: The Dark Ages, i Diablo…). Battle.net non dice a Kanso se hai Game Pass, quindi lo indichi tu: l'elenco è incluso in Kanso, non serve alcun accesso e non parte alcuna richiesta. Togliendo la spunta, quelli non installati vengono rimossi.",
   "accounts.notConnected": "Non collegato",
   "accounts.connectedAs": "Collegato come {name}",
   "accounts.connected": "Collegato",

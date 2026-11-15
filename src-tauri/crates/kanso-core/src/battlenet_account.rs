@@ -195,27 +195,70 @@ pub fn games_in(answer: &str) -> Option<Vec<OwnedGame>> {
         else {
             continue;
         };
-        let clean = clean_game_title(name);
-        let slug = slugify(&clean);
-        if slug.is_empty() || name.len() > 200 {
-            continue;
-        }
-        let id = format!("battlenet:{slug}");
-        if games.iter().any(|known| known.game.id == id) {
-            continue;
-        }
         let code = account.get("titleId").and_then(title_id).and_then(product_code);
-        games.push(OwnedGame::new(
-            GamePlatform::BattleNet,
-            id,
-            name,
-            clean,
-            code.clone().unwrap_or_default(),
-            code.map(|code| format!("battlenet://{code}")),
-            None,
-        ));
+        match game_named(name, code) {
+            Some(game) if !games.iter().any(|known| known.game.id == game.game.id) => games.push(game),
+            _ => {}
+        }
     }
     Some(games)
+}
+
+/// A game of Battle.net called `name`, as an entry that is not installed. Its id is the one
+/// the scanner gives the game once installed, from its name; `code` is the short code the
+/// Battle.net app opens the game's page by, when known.
+fn game_named(name: &str, code: Option<String>) -> Option<OwnedGame> {
+    let clean = clean_game_title(name);
+    let slug = slugify(&clean);
+    if slug.is_empty() || name.len() > 200 {
+        return None;
+    }
+    Some(OwnedGame::new(
+        GamePlatform::BattleNet,
+        format!("battlenet:{slug}"),
+        name,
+        clean,
+        code.clone().unwrap_or_default(),
+        code.map(|code| format!("battlenet://{code}")),
+        None,
+    ))
+}
+
+/// The games Xbox Game Pass for PC makes installable through Battle.net, once the Xbox
+/// account is linked to the Battle.net one: Battle.net's short code, and the name.
+///
+/// A list that ships with Kanso, from Blizzard's own support page "Games Playable on
+/// Battle.net with Game Pass" and the Game Pass catalog for PC (November 2026). Battle.net's
+/// account site does not say whether an account has Game Pass, nor list these games before
+/// they are first started, and Kanso does not sign in to Xbox: so the user says so in the
+/// settings, and this list is what is added. Which plan includes which game is Microsoft's
+/// business: a game the plan does not include simply cannot be installed from Battle.net.
+const GAME_PASS_GAMES: &[(&str, &str)] = &[
+    ("AQUA", "Avowed"),
+    ("RTRO", "Blizzard Arcade Collection"),
+    ("AUKS", "Call of Duty"),
+    ("DRTL", "Diablo"),
+    ("OSI", "Diablo II: Resurrected"),
+    ("D3", "Diablo III"),
+    ("Fen", "Diablo IV"),
+    ("ARIS", "DOOM: The Dark Ages"),
+    ("SCOR", "Sea of Thieves"),
+    ("S1", "StarCraft"),
+    ("S2", "StarCraft II"),
+    ("ARK", "The Outer Worlds 2"),
+    ("LBRA", "Tony Hawk's Pro Skater 3 + 4"),
+    ("W1R", "Warcraft I: Remastered"),
+    ("W2R", "Warcraft II: Remastered"),
+    ("W3", "Warcraft III: Reforged"),
+];
+
+/// The games of [`GAME_PASS_GAMES`], ready to join the library as not installed. Nothing is
+/// asked to anyone to build them.
+pub fn game_pass_games() -> Vec<OwnedGame> {
+    GAME_PASS_GAMES
+        .iter()
+        .filter_map(|(code, name)| game_named(name, Some(code.to_string())))
+        .collect()
 }
 
 /// A title's number, which the site writes as a number or as text.
@@ -258,6 +301,31 @@ pub(crate) mod tests {
 
     fn body(text: &str) -> String {
         serde_json::to_string(text).unwrap()
+    }
+
+    #[test]
+    fn the_games_of_game_pass_are_the_same_entries_the_account_would_list() {
+        let games = game_pass_games();
+        assert_eq!(games.len(), GAME_PASS_GAMES.len());
+        let mut ids: Vec<&str> = games.iter().map(|owned| owned.game.id.as_str()).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), games.len(), "each game once");
+        for owned in &games {
+            assert_eq!(owned.game.platform, GamePlatform::BattleNet);
+            assert!(!owned.game.is_installed);
+            assert!(owned.game.install_uri().is_some_and(|uri| uri.starts_with("battlenet://")), "{}", owned.game.title);
+        }
+
+        // A game the account lists too is one entry, whichever comes first
+        let from_account = games_in(GAMES_ANSWER).unwrap();
+        for id in ["battlenet:diablo-iv", "battlenet:diablo-iii"] {
+            let listed = from_account.iter().find(|owned| owned.game.id == id).expect(id);
+            let offered = games.iter().find(|owned| owned.game.id == id).expect(id);
+            assert_eq!(listed.game.launch_uri, offered.game.launch_uri);
+        }
+        assert!(ids.contains(&"battlenet:sea-of-thieves"));
+        assert!(ids.contains(&"battlenet:doom-the-dark-ages"));
     }
 
     #[test]

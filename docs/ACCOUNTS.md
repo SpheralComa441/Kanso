@@ -48,11 +48,46 @@ Tutti i file stanno nella cartella dati di Kanso, `%LOCALAPPDATA%\com.kanso.laun
   client, senza credenziali.
 
 **Che cosa viene letto dall'account.** Solo l'elenco dei giochi: titolo, identificativo, e la
-copertina dove lo store la dà. Per Ubisoft anche le piattaforme su cui possiedi ogni gioco, per
-lasciare fuori quelli che hai solo su console, e i giochi dell'abbonamento Ubisoft+ che hai in
+copertina dove lo store la dà. Per Ubisoft anche le piattaforme su cui possiedi ogni gioco: un
+gioco entra in libreria solo se lo possiedi per PC, e quelli che hai soltanto su console
+(PlayStation, Xbox, Switch) restano fuori. Più i giochi dell'abbonamento Ubisoft+ che hai in
 libreria. Sotto ogni account collegato le Impostazioni dicono quanti giochi sono stati letti,
 quanti vengono da un abbonamento e quanti sono stati lasciati fuori. Nient'altro viene chiesto:
 né amici, né acquisti, né dati di pagamento.
+
+## Che cosa Kanso legge dai client installati, senza alcun accesso
+
+Oltre agli account, Kanso legge dal disco ciò che i client degli store già sanno dei tuoi
+giochi: l'elenco di Steam, il catalogo di Epic, il database di GOG Galaxy e la cache di
+Ubisoft Connect. Sono letture locali: **nessuna richiesta di rete, nessuna credenziale, nulla
+viene scritto o modificato** in quei file.
+
+**La cache di Ubisoft Connect merita due righe in più**, perché è l'unico posto in cui si trova
+l'elenco completo dei giochi che puoi installare su questo PC, compresi quelli che ti arrivano
+da Ubisoft+ o da Xbox Game Pass (l'elenco dell'account su internet non li contiene).
+
+- I client recenti tengono quell'elenco in `configurations.vdat`, cifrato (AES-256-GCM). La
+  chiave sta accanto, in `%LOCALAPPDATA%\Ubisoft Game Launcher\store\`, ed è a sua volta
+  protetta **da Windows per il tuo utente** (DPAPI: la stessa protezione che Kanso usa per i
+  propri token). Windows la consegna a qualunque programma avviato da te, e a nessun altro.
+- Kanso chiede a Windows quella chiave, apre l'elenco **in memoria** e ne legge i giochi: nome,
+  numero del gioco nel launcher, nome del file della copertina. In quel file non ci sono
+  password, sessioni o dati di pagamento.
+- La chiave viene usata una volta e scartata: **non viene salvata, mostrata né inviata**. Kanso
+  non scrive nulla nella cartella di Ubisoft Connect e non aggira alcuna protezione dei giochi:
+  legge un elenco che è tuo, sul tuo PC, con la chiave che Windows custodisce per te.
+- Se preferisci che Kanso non lo faccia, il file sorgente è uno solo
+  ([`ubisoft_cache.rs`](../src-tauri/crates/kanso-core/src/scanner/ubisoft_cache.rs)) e la
+  lettura è indipendente dall'accesso: senza Ubisoft Connect installato non succede nulla.
+
+**Xbox Game Pass su Battle.net: lo dici tu.** Il sito di Battle.net non dice se un account ha
+Game Pass e non elenca i giochi che Game Pass rende installabili finché non li avvii una volta.
+Kanso non accede a Xbox. Per questo nelle Impostazioni c'è la spunta *«Ho Xbox Game Pass
+collegato a Battle.net»*: se la metti, Kanso aggiunge come «non installati» i giochi di un
+elenco incluso nel programma ([`battlenet_account.rs`](../src-tauri/crates/kanso-core/src/battlenet_account.rs)),
+preso dalla pagina di supporto di Blizzard. È solo una tua dichiarazione salvata in
+`config.json`: **non parte alcuna richiesta e nessuno viene informato**. Se un gioco non è
+compreso nel tuo piano, Battle.net semplicemente non te lo farà installare.
 
 ## La finestra di accesso (Ubisoft, EA, Battle.net)
 
@@ -193,11 +228,46 @@ All files are in Kanso's data folder, `%LOCALAPPDATA%\com.kanso.launcher`.
   files, with no credentials.
 
 **What is read from the account.** Only the list of games: title, identifier, and the cover
-where the store gives one. For Ubisoft also the platforms you have each game on, to leave out
-the ones you have on a console only, and the games of the Ubisoft+ subscription that are in
-your library. Under each signed-in account, Settings say how many games were read, how many
-come from a subscription and how many were left out. Nothing else is asked for: no friends, no
+where the store gives one. For Ubisoft also the platforms you have each game on: a game joins
+the library only if you own it for PC, and the ones you have on a console only (PlayStation,
+Xbox, Switch) are left out. Plus the games of the Ubisoft+ subscription that are in your
+library. Under each signed-in account, Settings say how many games were read, how many come
+from a subscription and how many were left out. Nothing else is asked for: no friends, no
 purchases, no payment data.
+
+## What Kanso reads from the installed clients, with no sign-in at all
+
+Besides the accounts, Kanso reads from disk what the stores' clients already know about your
+games: Steam's list, Epic's catalog, GOG Galaxy's database and Ubisoft Connect's cache. These
+are local reads: **no network request, no credentials, nothing is written or changed** in
+those files.
+
+**Ubisoft Connect's cache deserves a few more lines**, because it is the only place that holds
+the full list of the games you can install on this PC, including the ones Ubisoft+ or Xbox
+Game Pass give you (the account's list on the internet does not have them).
+
+- Recent clients keep that list in `configurations.vdat`, encrypted (AES-256-GCM). The key is
+  next to it, in `%LOCALAPPDATA%\Ubisoft Game Launcher\store\`, itself protected **by
+  Windows for your user** (DPAPI: the very protection Kanso gives its own tokens). Windows
+  hands it to any program you start, and to nobody else.
+- Kanso asks Windows for that key, opens the list **in memory** and reads the games from it:
+  name, the game's number in the launcher, the cover's file name. There are no passwords,
+  sessions or payment data in that file.
+- The key is used once and dropped: **it is never stored, shown or sent**. Kanso writes
+  nothing in Ubisoft Connect's folder and gets around no protection of the games: it reads a
+  list that is yours, on your PC, with the key Windows keeps for you.
+- If you would rather Kanso did not, it is a single source file
+  ([`ubisoft_cache.rs`](../src-tauri/crates/kanso-core/src/scanner/ubisoft_cache.rs)) and the
+  read does not depend on signing in: without Ubisoft Connect installed nothing happens.
+
+**Xbox Game Pass on Battle.net: you say so.** Battle.net's site does not say whether an account
+has Game Pass, and does not list the games Game Pass makes installable until they have been
+started once. Kanso does not sign in to Xbox. Hence the *"I have Xbox Game Pass linked to
+Battle.net"* tick in Settings: with it, Kanso adds as "not installed" the games of a list that
+ships with the program ([`battlenet_account.rs`](../src-tauri/crates/kanso-core/src/battlenet_account.rs)),
+taken from Blizzard's support page. It is only your own statement, saved in `config.json`: **no
+request is made and nobody is told**. If your plan does not include a game, Battle.net will
+simply not let you install it.
 
 ## The sign-in window (Ubisoft, EA, Battle.net)
 

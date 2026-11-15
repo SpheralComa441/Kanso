@@ -135,6 +135,25 @@ pub fn merge_owned_games(
     changed
 }
 
+/// Takes out of the library the games listed under `ids` that are not installed: entries a
+/// store's list was wrongly read into (a game the account has on a console only). An
+/// installed game is never touched, whatever a store says. Returns the ids removed.
+pub fn remove_absent_games(db: &Mutex<LibraryDb>, ids: &[String]) -> Vec<String> {
+    if ids.is_empty() {
+        return Vec::new();
+    }
+    let db = lock(db);
+    let gone: Vec<String> = ids
+        .iter()
+        .filter(|id| matches!(db.get_game(id), Ok(Some(game)) if !game.is_installed))
+        .cloned()
+        .collect();
+    match db.delete_games(&gone) {
+        Ok(()) => gone,
+        Err(_) => Vec::new(),
+    }
+}
+
 /// Items of an Epic account described by the catalog in one [`sync_epic_library_step`].
 pub const EPIC_STEP: usize = 15;
 
@@ -882,6 +901,34 @@ mod tests {
             None,
             Some(format!("https://cdn.example/{id}.jpg")),
         )
+    }
+
+    #[test]
+    fn entries_a_list_was_wrongly_read_into_are_removed_unless_installed() {
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        merge_owned_games(
+            &db,
+            vec![
+                owned(GamePlatform::Ubisoft, "ubisoft:console-1", "Far Cry 6"),
+                owned(GamePlatform::Ubisoft, "ubisoft:console-2", "Riders Republic"),
+                owned(GamePlatform::Ubisoft, "ubisoft:5059", "Assassin's Creed Odyssey"),
+            ],
+            1,
+        );
+        {
+            let db = lock(&db);
+            let mut riders = db.get_game("ubisoft:console-2").unwrap().unwrap();
+            riders.is_installed = true;
+            db.upsert_game(&riders).unwrap();
+        }
+
+        let ids = ["ubisoft:console-1".to_string(), "ubisoft:console-2".to_string(), "ubisoft:never-there".to_string()];
+        assert_eq!(remove_absent_games(&db, &ids), ["ubisoft:console-1"]);
+        let left: Vec<String> = lock(&db).load_games().unwrap().into_iter().map(|game| game.id).collect();
+        assert_eq!(left.len(), 2);
+        assert!(left.contains(&"ubisoft:console-2".to_string()), "an installed game is never removed");
+        assert!(left.contains(&"ubisoft:5059".to_string()));
+        assert!(remove_absent_games(&db, &[]).is_empty());
     }
 
     #[test]

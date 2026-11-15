@@ -106,6 +106,7 @@ export function SettingsModal({
     initialConfig.accessibility
   );
   const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
+  const [hasGamePass, setHasGamePass] = useState(initialConfig.hasGamePass);
   const [pluginStates, setPluginStates] = useState<Record<string, PluginState>>(
     initialConfig.plugins
   );
@@ -125,6 +126,7 @@ export function SettingsModal({
       setThemeId(initialConfig.themeId);
       setAccessibility(initialConfig.accessibility);
       setTrackPlaytime(initialConfig.trackPlaytime);
+      setHasGamePass(initialConfig.hasGamePass);
       setPluginStates(initialConfig.plugins);
       setManualFolderInput("");
       setShowKey(false);
@@ -264,6 +266,7 @@ export function SettingsModal({
         accessibility,
         trackPlaytime,
         plugins: pluginStates,
+        hasGamePass,
       });
       onPreviewTheme(null);
       onPreviewAccessibility(null);
@@ -596,6 +599,27 @@ export function SettingsModal({
             </div>
             <p className="text-2xs leading-relaxed text-zinc-500">{t("accounts.help")}</p>
             <StoreAccountsSettings isOpen={isOpen} onSignedIn={onStoreSignedIn} />
+            {/* Nothing tells Kanso about a Game Pass subscription: the user does */}
+            <div className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+              <div>
+                <label
+                  htmlFor="game-pass-checkbox"
+                  className="block text-xs font-medium text-zinc-200"
+                >
+                  {t("accounts.gamePass.title")}
+                </label>
+                <p className="text-2xs leading-relaxed text-zinc-500">
+                  {t("accounts.gamePass.help")}
+                </p>
+              </div>
+              <input
+                id="game-pass-checkbox"
+                type="checkbox"
+                checked={hasGamePass}
+                onChange={(e) => setHasGamePass(e.target.checked)}
+                className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+              />
+            </div>
           </section>
 
           {/* SteamGridDB API Key */}

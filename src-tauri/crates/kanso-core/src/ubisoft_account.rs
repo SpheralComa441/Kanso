@@ -1,8 +1,10 @@
 //! The Ubisoft Connect account: the session its sign-in page hands out, and the library.
 //!
-//! A current Ubisoft Connect client encrypts its local list of games (see
-//! [`crate::scanner::ubisoft_cache`]), so the games of the account that are not installed can
-//! only come from the account itself. Ubisoft has no public API for that and no sign-in that
+//! The games an account may install on a PC are in the Ubisoft Connect client's own records
+//! on that PC (see [`crate::scanner::ubisoft_cache`]), read with no sign-in. The account adds
+//! what a PC without the client, or with a client that never signed in, cannot know: the
+//! games owned for PC, and which entries are games the account has on a console only.
+//! Ubisoft has no public API for that and no sign-in that
 //! ends on a code to paste: its sign-in page keeps the session it obtained in the page's own
 //! storage. Kanso therefore shows that page in a window of its own (see [`crate::signin`] for
 //! what that window may and may not do) and, **once Ubisoft has signed the user in**, reads
@@ -337,6 +339,9 @@ pub struct UbisoftLibrary {
     /// With an active Ubisoft+ subscription: how many of `games` it brought, and how many
     /// games it offers in all. `None` without a subscription.
     pub subscription: Option<(usize, usize)>,
+    /// Library ids of the games left out: an entry an earlier reading made of one of them is
+    /// not a game of a PC library.
+    pub not_for_pc: Vec<String>,
 }
 
 impl Default for UbisoftApi {
@@ -435,6 +440,7 @@ impl UbisoftApi {
             seen.push(game.game.id.clone());
             let platforms = platforms_of(node);
             if !playable_on_a_pc(&platforms) {
+                library.not_for_pc.push(game.game.id);
                 // Counted under the first platform named: enough to say why it is not listed
                 let platform = platforms.into_iter().next().unwrap_or_default();
                 match left_out.iter_mut().find(|(known, _)| *known == platform) {
@@ -570,18 +576,17 @@ fn platforms_of(node: &Value) -> Vec<String> {
     platforms
 }
 
-/// Machines a PC launcher has no use for: a game the account has only on these is not listed.
-const OTHER_MACHINES: &[&str] = &["PS", "PLAYSTATION", "SWITCH", "NINTENDO", "WII", "STADIA", "LUNA", "AMAZON", "IOS", "ANDROID", "MOBILE"];
+/// How the list names the PC among the platforms a game is owned on.
+const PC_PLATFORMS: &[&str] = &["PC", "UPLAY", "WINDOWS"];
 
-/// Whether a game the account has on `platforms` belongs in a PC library. It does unless
-/// every platform named is a machine of another kind. An Xbox platform is kept: that is how
-/// the games played on PC through Xbox Game Pass reach a Ubisoft account. So is a platform
-/// this code has never heard of, and a game with no platform named.
+/// Whether a game the account has on `platforms` belongs in a PC library: one of them has to
+/// be the PC. A game owned on a console only (PlayStation, Xbox, Switch) cannot be installed
+/// from here, and the games a subscription or Xbox Game Pass lets the account play on PC are
+/// not in this list at all: those are in the launcher's own records on the PC (see
+/// [`crate::scanner::ubisoft_cache`]). A game with no platform named is kept: better one
+/// entry too many than a library that silently lacks a game.
 fn playable_on_a_pc(platforms: &[String]) -> bool {
-    platforms.is_empty()
-        || platforms
-            .iter()
-            .any(|platform| !OTHER_MACHINES.iter().any(|other| platform.starts_with(other)))
+    platforms.is_empty() || platforms.iter().any(|platform| PC_PLATFORMS.iter().any(|pc| platform.starts_with(pc)))
 }
 
 /// The JSON of an answer, or why there is none. Ubisoft names what went wrong in `errorCode`.
@@ -851,10 +856,22 @@ pub(crate) mod tests {
         let titles: Vec<&str> = library.games.iter().map(|owned| owned.game.title.as_str()).collect();
         assert_eq!(
             titles,
-            ["Assassin's Creed\u{ae} Odyssey", "Anno 1800", "Far Cry\u{ae} 6", "Rayman Legends", "The Crew Motorfest"],
-            "for PC, with no platform named, or through Xbox (Game Pass)"
+            ["Assassin's Creed\u{ae} Odyssey", "Anno 1800", "Rayman Legends", "The Crew Motorfest"],
+            "for PC, or with no platform named"
         );
-        assert_eq!(library.left_out, [("PLAYSTATION".to_string(), 1), ("SWITCH".to_string(), 1)], "on other machines only");
+        assert_eq!(
+            library.left_out,
+            [("PLAYSTATION".to_string(), 1), ("SWITCH".to_string(), 1), ("XBOX".to_string(), 1)],
+            "on consoles only"
+        );
+        assert_eq!(
+            library.not_for_pc,
+            [
+                "ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000003",
+                "ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000008",
+                "ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000009"
+            ]
+        );
         assert_eq!(library.subscription, None, "the subscription service refused: no subscription");
 
         let odyssey = &library.games[0].game;
@@ -865,7 +882,7 @@ pub(crate) mod tests {
         assert_eq!(odyssey.cover_path.as_deref(), Some("https://ubiservices.cdn.ubi.com/covers/odyssey.jpg"));
         assert_eq!(odyssey.install_uri(), None, "the account does not know the launcher's own number");
         assert_eq!(library.games[1].game.cover_path, None, "only secure addresses become covers");
-        assert_eq!(library.games[3].game.id, "ubisoft:only-id");
+        assert_eq!(library.games[2].game.id, "ubisoft:only-id");
 
         // The session of the page itself is no longer good, and so is a spent ticket
         assert!(matches!(api.library(&from_page), Err(StoreError::Refused(_))));
@@ -879,7 +896,7 @@ pub(crate) mod tests {
 
         // The subscription service out of reach: the library is read all the same
         let api = UbisoftApi::with_services(&base_url, "http://127.0.0.1:9");
-        assert_eq!(api.library(&session).expect("library").games.len(), 5);
+        assert_eq!(api.library(&session).expect("library").games.len(), 4);
     }
 
     #[test]
@@ -899,7 +916,6 @@ pub(crate) mod tests {
                 ("ubisoft:5059", "Assassin's Creed Odyssey"),
                 ("ubisoft:13504", "Assassin's Creed\u{ae} Mirage"),
                 ("ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000002", "Anno 1800"),
-                ("ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000003", "Far Cry\u{ae} 6"),
                 ("ubisoft:only-id", "Rayman Legends"),
                 ("ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000010", "The Crew Motorfest"),
             ]
@@ -924,12 +940,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn only_games_on_other_machines_are_left_out() {
+    fn only_games_owned_for_pc_are_kept() {
         let platforms = |names: &[&str]| names.iter().map(|name| name.to_string()).collect::<Vec<_>>();
-        for kept in [&[][..], &["PC"], &["XBOX"], &["XONE", "PS4"], &["UPLAY"], &["SOMETHING NEW"], &["PLAYSTATION", "PC"]] {
+        for kept in [&[][..], &["PC"], &["UPLAY"], &["PLAYSTATION", "PC"], &["XBOX", "PC"]] {
             assert!(playable_on_a_pc(&platforms(kept)), "{kept:?}");
         }
-        for left_out in [&["PLAYSTATION"][..], &["PS4", "PS5"], &["SWITCH"], &["STADIA", "LUNA"], &["PSN", "NINTENDO"]] {
+        for left_out in
+            [&["PLAYSTATION"][..], &["PS4", "PS5"], &["SWITCH"], &["STADIA", "LUNA"], &["XBOX"], &["XONE", "PS4"], &["SOMETHING NEW"]]
+        {
             assert!(!playable_on_a_pc(&platforms(left_out)), "{left_out:?}");
         }
 

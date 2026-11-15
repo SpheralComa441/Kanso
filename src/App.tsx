@@ -42,6 +42,7 @@ import {
   setGameHidden,
   setGameStatus,
   subscribeToGameBatchUpdates,
+  subscribeToGameRemovals,
   subscribeToGameUpdates,
   syncLibraryMetadata,
   watchPluginBadges,
@@ -85,6 +86,7 @@ const INITIAL_CONFIG: AppConfig = {
   accessibility: DEFAULT_ACCESSIBILITY,
   trackPlaytime: true,
   plugins: {},
+  hasGamePass: false,
 };
 
 const SIDEBAR_PREF_KEY = "kanso.ui.sidebar";
@@ -400,12 +402,20 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     [runMetadataSync]
   );
 
+  /** Games the backend took out of the library (entries that should never have been there). */
+  const removeGamesFromState = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const gone = new Set(ids);
+    setReport((prev) => ({ ...prev, games: prev.games.filter((game) => !gone.has(game.id)) }));
+  }, []);
+
   // First scan once the settings (and with them the backend language) are in place
   useEffect(() => {
     if (!settingsLoaded) return;
     let mounted = true;
     let unlistenFn: (() => void) | null = null;
     let unlistenBatchFn: (() => void) | null = null;
+    let unlistenRemovalsFn: (() => void) | null = null;
 
     (async () => {
       unlistenFn = await subscribeToGameUpdates((updated) => {
@@ -414,6 +424,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       unlistenBatchFn = await subscribeToGameBatchUpdates((updated) => {
         if (mounted) upsertGamesInState(updated);
       });
+      unlistenRemovalsFn = await subscribeToGameRemovals((ids) => {
+        if (mounted) removeGamesFromState(ids);
+      });
       if (mounted) await performScan(false);
     })();
 
@@ -421,8 +434,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       mounted = false;
       if (unlistenFn) unlistenFn();
       if (unlistenBatchFn) unlistenBatchFn();
+      if (unlistenRemovalsFn) unlistenRemovalsFn();
     };
-  }, [settingsLoaded, performScan, upsertSingleGameInState, upsertGamesInState]);
+  }, [settingsLoaded, performScan, upsertSingleGameInState, upsertGamesInState, removeGamesFromState]);
 
   const handleSaveSettings = async (updated: AppConfig) => {
     const foldersChanged =
@@ -431,6 +445,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       Boolean(updated.steamgriddbApiKey.trim()) &&
       updated.steamgriddbApiKey.trim() !== config.steamgriddbApiKey.trim();
     const languageChanged = updated.language !== lang;
+    const gamePassChanged = updated.hasGamePass !== config.hasGamePass;
 
     const saved = await saveSettings(updated);
     onConfigChange(saved);
@@ -443,6 +458,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       // A new key can find covers earlier attempts could not; a new language means
       // descriptions and genres have to be fetched again
       void runMetadataSync(true);
+    }
+    // The games Game Pass brought have no cover yet: the background pass finds them
+    if (gamePassChanged && saved.hasGamePass) {
+      void completeLibraryInBackground().catch(() => {});
     }
   };
 

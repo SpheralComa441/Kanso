@@ -381,6 +381,8 @@ export const es: Dictionary = {
 
   "accounts.title": "Cuentas de las tiendas",
   "accounts.help": "Inicia sesión en una tienda para ver en la biblioteca también los juegos que tienes allí y no has instalado. El inicio de sesión se hace siempre en la página de la tienda: Kanso no ve la contraseña, no la guarda y no la envía a nadie. En el PC solo queda la sesión emitida por la tienda, que Kanso usa únicamente con esa tienda para leer la lista de tus juegos; «Cerrar sesión» la borra.",
+  "accounts.gamePass.title": "Tengo Xbox Game Pass vinculado a Battle.net",
+  "accounts.gamePass.help": "Añade a la biblioteca, como no instalados, los juegos que Game Pass para PC permite instalar desde Battle.net (Sea of Thieves, Avowed, DOOM: The Dark Ages, los Diablo…). Battle.net no le dice a Kanso si tienes Game Pass, así que lo indicas tú: la lista viene incluida en Kanso, no hace falta iniciar sesión y no se hace ninguna petición. Al desmarcarlo se quitan los que no están instalados.",
   "accounts.notConnected": "No conectada",
   "accounts.connectedAs": "Conectada como {name}",
   "accounts.connected": "Conectada",

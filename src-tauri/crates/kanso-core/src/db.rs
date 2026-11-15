@@ -326,6 +326,15 @@ impl LibraryDb {
         tx.commit().map_err(db_err)
     }
 
+    /// Removes the games with these ids; an id the library does not have is not an error.
+    pub fn delete_games(&self, ids: &[String]) -> Result<(), String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        for id in ids {
+            self.conn.execute("DELETE FROM games WHERE id = ?1", [id]).map_err(db_err)?;
+        }
+        Ok(())
+    }
+
     /// Makes the table contain exactly `games`, atomically: either every change is stored or,
     /// on any failure, the previous library is left untouched.
     pub fn replace_all_games(&mut self, games: &[DetectedGame]) -> Result<(), String> {

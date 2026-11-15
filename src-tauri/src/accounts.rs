@@ -18,7 +18,7 @@
 //! The interface never handles a token: it asks for a sign-in and is told who is signed in.
 
 use crate::signin_window::{self, Outcome};
-use crate::{resolve_app_data_dir, AppState, SharedDb, GAMES_UPDATED_EVENT};
+use crate::{resolve_app_data_dir, AppState, SharedDb, GAMES_REMOVED_EVENT, GAMES_UPDATED_EVENT};
 use kanso_core::accounts::{
     authorization_code_in, AccountStore, StoreAccount, StoreError, SESSION_IN_WINDOW_PROFILE,
 };
@@ -137,10 +137,51 @@ fn note_library(store: &Store, games: usize) {
     library_notes().get_or_insert_with(HashMap::new).insert(store.platform, note);
 }
 
-/// Notes what was made of the Ubisoft account's list: the games, the ones a subscription
-/// brought, the ones left out as not playable on a PC.
-fn note_ubisoft_library(store: &Store, library: &UbisoftLibrary) {
-    let mut parts = vec![T::AccountGames.s().replace("{n}", &library.games.len().to_string())];
+/// What a reading of the Ubisoft account means for the library, and the games to add.
+///
+/// The account's list says which games the account has on a console only: entries an earlier
+/// version of Kanso made of those are removed. What the account may install on this PC,
+/// including what a subscription or Xbox Game Pass gives, is in the Ubisoft Connect client's
+/// own records: those games go first, since they come with the number the launcher installs
+/// them by, and the account's list adds what the client does not know.
+fn ubisoft_games(app: &AppHandle, db: &SharedDb, store: &Store, library: UbisoftLibrary) -> Vec<OwnedGame> {
+    let removed = kanso_core::owned::remove_absent_games(db, &library.not_for_pc);
+    if !removed.is_empty() {
+        let _ = app.emit(GAMES_REMOVED_EVENT, &removed);
+    }
+    let mut games = kanso_core::scanner::ubisoft_cache::read_owned_ubisoft_games_of_this_pc();
+    note_ubisoft_library(store, &library, games.len());
+    games.extend(library.games);
+    games
+}
+
+/// The user said in the settings that they have (or no longer have) Xbox Game Pass linked to
+/// Battle.net: the games it makes installable there join the library, or leave it. A game
+/// that is installed stays; one the Battle.net account owns anyway comes back the next time
+/// the account is read.
+pub(crate) fn apply_game_pass(app: &AppHandle, db: &SharedDb, has_game_pass: bool) {
+    let games = battlenet_account::game_pass_games();
+    if has_game_pass {
+        add_to_library(db, games, &|added| {
+            let _ = app.emit(GAMES_UPDATED_EVENT, added);
+        });
+    } else {
+        let ids: Vec<String> = games.into_iter().map(|owned| owned.game.id).collect();
+        let removed = kanso_core::owned::remove_absent_games(db, &ids);
+        if !removed.is_empty() {
+            let _ = app.emit(GAMES_REMOVED_EVENT, &removed);
+        }
+    }
+}
+
+/// Notes what was made of the Ubisoft account's list: the games the client on this PC
+/// lists, the ones of the account, the ones a subscription brought, the ones left out as not
+/// playable on a PC.
+fn note_ubisoft_library(store: &Store, library: &UbisoftLibrary, from_this_pc: usize) {
+    let mut parts = vec![
+        T::ClientGames.s().replace("{n}", &from_this_pc.to_string()),
+        T::AccountGames.s().replace("{n}", &library.games.len().to_string()),
+    ];
     if let Some((mine, offered)) = library.subscription {
         parts.push(
             T::AccountSubscriptionGames
@@ -346,10 +387,7 @@ fn sign_in_with_window(app: &AppHandle, db: &SharedDb, store: &'static Store) ->
             // The session is in `accounts.json` from here on: the window's profile, with
             // the cookies of Ubisoft's page, is not needed again
             signin_window::remove_profile(&data_dir, store.slug);
-            let games = ubisoft_api().library(&session).map(|library| {
-                note_ubisoft_library(store, &library);
-                library.games
-            });
+            let games = ubisoft_api().library(&session).map(|library| ubisoft_games(app, db, store, library));
             (session.user_id.clone(), session.name.clone(), session.to_kept(), games)
         }
         EA => {
@@ -450,7 +488,7 @@ pub(crate) fn sync_store_accounts(app: &AppHandle, db: &SharedDb, on_added: &dyn
         let outcome = match store.platform {
             EPIC => sync_epic_account(&accounts, db, on_added),
             GOG => sync_gog_account(&accounts, db, on_added),
-            UBISOFT => sync_ubisoft_account(&accounts, db, on_added),
+            UBISOFT => sync_ubisoft_account(app, &accounts, db, on_added),
             _ => sync_window_account(app, &accounts, db, store, on_added),
         };
         match outcome {
@@ -539,6 +577,7 @@ fn sync_gog_account(
 /// Ubisoft: renews the session with the ticket Ubisoft issued for that (when the user chose
 /// to be remembered on Ubisoft's page) and reads the account's library. No window is opened.
 fn sync_ubisoft_account(
+    app: &AppHandle,
     accounts: &AccountStore,
     db: &SharedDb,
     on_added: &dyn Fn(&[DetectedGame]),
@@ -564,9 +603,8 @@ fn sync_ubisoft_account(
 
     let library = api.library(&session)?;
     if let Some(store) = STORES.iter().find(|store| store.platform == UBISOFT) {
-        note_ubisoft_library(store, &library);
+        add_to_library(db, ubisoft_games(app, db, store, library), on_added);
     }
-    add_to_library(db, library.games, on_added);
     Ok(())
 }
 
