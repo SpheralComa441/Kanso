@@ -38,23 +38,64 @@ const UBISERVICES: &str = "https://public-ubiservices.ubi.com";
 
 /// Ubisoft's sign-in site.
 const CONNECT_SITE: &str = "https://connect.ubisoft.com";
-/// The page of that site Ubisoft sends the browser to once the user is signed in.
+/// The address of that site Ubisoft sends the browser to once the user is signed in. Nothing
+/// is there to read (it answers "not found"): reaching it is the sign that the sign-in is
+/// over.
 const SIGNED_IN_PATH: &str = "/ready";
+/// A page of the same site with nothing on it, where the session the site keeps can be read
+/// (the one Lutris reads it on).
+const BLANK_PATH: &str = "/change_domain/";
+const SIGN_IN_PATH: &str = "/login";
+/// Readings of a page that is not one of the site's (an error page) before moving on.
+const UNREADABLE_LIMIT: u8 = 2;
+/// Readings of a page of the site that holds no session yet before moving on.
+const EMPTY_LIMIT: u8 = 6;
+/// Times the sign-in address is loaded afresh to read the session there.
+const FRESH_SIGN_IN_PAGES: u8 = 3;
+/// Times the window is sent to the blank page.
+const BLANK_PAGE_REQUESTS: u8 = 2;
 
-/// Ubisoft's own sign-in page, asked to end on its "ready" page.
+/// Ubisoft's own sign-in page, asked to end on its "ready" address.
 pub fn sign_in_url() -> String {
     sign_in_url_at(CONNECT_SITE)
 }
 
 fn sign_in_url_at(site: &str) -> String {
     let ready: String = url::form_urlencoded::byte_serialize(format!("{site}{SIGNED_IN_PATH}").as_bytes()).collect();
-    format!("{site}/login?appId={CLUB_APP_ID}&genomeId={CLUB_GENOME_ID}&lang=en-US&nextUrl={ready}")
+    format!("{site}{SIGN_IN_PATH}?appId={CLUB_APP_ID}&genomeId={CLUB_GENOME_ID}&lang=en-US&nextUrl={ready}")
 }
 
-/// The sign-in on Ubisoft's page: nothing happens until Ubisoft shows its "ready" page, where
-/// the session the page keeps is read.
+/// Where the sign-in stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    /// The user is on Ubisoft's sign-in page: nothing is run, nothing is read.
+    SigningIn,
+    /// Signed in; the window was sent to the blank page to read the session there.
+    BlankPage,
+    /// The blank page could not be read: the sign-in address was loaded afresh (a new page,
+    /// in which nothing has been typed), to read the session once, as soon as it shows.
+    FreshSignInPage(u8),
+    /// Nothing more to try.
+    GivenUp,
+}
+
+/// The sign-in on Ubisoft's page.
+///
+/// Nothing happens until Ubisoft sends the window to its "ready" address, which it does once
+/// the user is signed in. Only then is the session read, where the site keeps it for itself
+/// (the page's own storage): on a blank page of the site or, if that page cannot be read,
+/// on the sign-in address loaded afresh, once, the moment it shows. A page the user has
+/// typed into is never read: the sign-in address is read only after another page (the blank
+/// one, or the browser's error page in its place) has taken the place of the one the user
+/// signed in on.
 pub struct UbisoftFlow {
     site: String,
+    stage: Stage,
+    blank_requests: u8,
+    unreadable: u8,
+    empty: u8,
+    /// What the storage held the last time it was read (entries and field names, no values).
+    seen: String,
 }
 
 impl Default for UbisoftFlow {
@@ -70,7 +111,37 @@ impl UbisoftFlow {
 
     /// The same steps against another site (tests).
     pub fn at(site: &str) -> Self {
-        Self { site: site.trim_end_matches('/').to_string() }
+        Self {
+            site: site.trim_end_matches('/').to_string(),
+            stage: Stage::SigningIn,
+            blank_requests: 0,
+            unreadable: 0,
+            empty: 0,
+            seen: "never read".into(),
+        }
+    }
+
+    fn at_path(&self, url: &Url, path: &str) -> bool {
+        on_site(url, &self.site) && url.path().trim_end_matches('/') == path.trim_end_matches('/')
+    }
+
+    fn blank_page(&mut self) -> Step {
+        if self.blank_requests >= BLANK_PAGE_REQUESTS {
+            return self.fresh_sign_in_page(0);
+        }
+        self.blank_requests += 1;
+        self.stage = Stage::BlankPage;
+        Step::Go(format!("{}{BLANK_PATH}", self.site))
+    }
+
+    /// Loads the sign-in address afresh to read the session there, or gives up.
+    fn fresh_sign_in_page(&mut self, tried: u8) -> Step {
+        if tried >= FRESH_SIGN_IN_PAGES {
+            self.stage = Stage::GivenUp;
+            return Step::Failed(format!("Ubisoft's page keeps no session where it is expected ({})", self.seen));
+        }
+        self.stage = Stage::FreshSignInPage(tried + 1);
+        Step::Go(sign_in_url_at(&self.site))
     }
 }
 
@@ -79,21 +150,109 @@ impl SignInFlow for UbisoftFlow {
         sign_in_url_at(&self.site)
     }
 
+    /// Ubisoft sends the window to its "ready" address once the user is signed in. The page
+    /// there may never show as such (it answers "not found"): setting off for it is enough.
+    fn setting_off(&mut self, url: &Url) -> Step {
+        if self.stage == Stage::SigningIn && self.at_path(url, SIGNED_IN_PATH) {
+            return self.blank_page();
+        }
+        Step::Wait
+    }
+
     fn page_loaded(&mut self, url: &Url) -> Step {
-        if on_site(url, &self.site) && url.path().trim_end_matches('/') == SIGNED_IN_PATH {
-            Step::Read(READ_UBISOFT_SESSION_SCRIPT)
-        } else {
-            Step::Wait
+        let at_ready = self.at_path(url, SIGNED_IN_PATH);
+        let at_blank = on_site(url, &self.site) && url.path().starts_with(BLANK_PATH.trim_end_matches('/'));
+        match self.stage {
+            // Signed in: Ubisoft sent the window to its "ready" address
+            Stage::SigningIn if at_ready => self.blank_page(),
+            Stage::SigningIn => Step::Wait,
+            Stage::BlankPage if at_blank => Step::Read(READ_UBISOFT_SESSION_SCRIPT),
+            Stage::BlankPage if at_ready => self.blank_page(),
+            // The sign-in page reported once more as the window leaves it: it is not a new
+            // page, and is not read
+            Stage::BlankPage if self.at_path(url, SIGN_IN_PATH) => Step::Wait,
+            // The blank page led somewhere else
+            Stage::BlankPage => self.fresh_sign_in_page(0),
+            Stage::FreshSignInPage(_) if self.at_path(url, SIGN_IN_PATH) => Step::Read(READ_UBISOFT_SESSION_SCRIPT),
+            // The fresh page went on its way before the session could be read on it
+            Stage::FreshSignInPage(tried) if at_ready => self.fresh_sign_in_page(tried),
+            Stage::FreshSignInPage(_) | Stage::GivenUp => Step::Wait,
         }
     }
 
     fn script_returned(&mut self, _url: &Url, result: &str) -> Step {
-        match session_from_page(result).and_then(|session| serde_json::to_string(&session).ok()) {
-            Some(session) => Step::Captured(session),
-            // The page writes its storage a moment after it shows
-            None => Step::Retry,
+        if let Some(session) = session_from_page(result).and_then(|session| serde_json::to_string(&session).ok()) {
+            return Step::Captured(session);
+        }
+        let entries = storage_entries(result);
+        self.seen = describe_storage(entries.as_deref());
+        match self.stage {
+            Stage::BlankPage => {
+                // An error page is not a page of the site: its storage cannot be read at all
+                match entries {
+                    None => self.unreadable += 1,
+                    Some(_) => self.empty += 1,
+                }
+                if self.unreadable >= UNREADABLE_LIMIT || self.empty >= EMPTY_LIMIT {
+                    return self.fresh_sign_in_page(0);
+                }
+                Step::Retry
+            }
+            // One reading per fresh page, the moment it shows: a page the user could start
+            // typing into is not read again
+            Stage::FreshSignInPage(tried) => self.fresh_sign_in_page(tried),
+            Stage::SigningIn | Stage::GivenUp => Step::Wait,
         }
     }
+}
+
+/// The three storage entries in what [`READ_UBISOFT_SESSION_SCRIPT`] returned, each parsed
+/// (or null); `None` when the script could not read the storage at all. The value arrives as
+/// JSON text of a list of JSON texts (or nulls); a web view may wrap it once more.
+fn storage_entries(result: &str) -> Option<Vec<Value>> {
+    let mut value: Value = serde_json::from_str(result).ok()?;
+    // Unwrap the layers of JSON-in-a-string until the list shows
+    for _ in 0..3 {
+        match value {
+            Value::String(text) => value = serde_json::from_str(&text).ok()?,
+            _ => break,
+        }
+    }
+    let entries = value
+        .as_array()?
+        .iter()
+        .map(|entry| match entry {
+            Value::String(text) => serde_json::from_str(text).unwrap_or(Value::Null),
+            Value::Object(_) => entry.clone(),
+            _ => Value::Null,
+        })
+        .collect();
+    Some(entries)
+}
+
+/// What the storage held, for the message of a sign-in that fails: which entries were there
+/// and the names of their fields. Never a value.
+fn describe_storage(entries: Option<&[Value]>) -> String {
+    let Some(entries) = entries else {
+        return "the page's storage could not be read".into();
+    };
+    let described: Vec<String> = ["loginData", "rememberMe", "lastProfile"]
+        .iter()
+        .zip(entries)
+        .map(|(name, entry)| match entry.as_object() {
+            Some(fields) => {
+                let names: Vec<String> = fields
+                    .keys()
+                    .filter(|key| key.len() <= 32 && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+                    .take(16)
+                    .cloned()
+                    .collect();
+                format!("{name}: {}", names.join(" "))
+            }
+            None => format!("{name}: none"),
+        })
+        .collect();
+    described.join("; ")
 }
 
 /// A signed-in session, in the form it is kept between runs.
@@ -138,26 +297,9 @@ impl std::fmt::Debug for UbisoftSession {
     }
 }
 
-/// The session in what [`READ_UBISOFT_SESSION_SCRIPT`] returned, when the page holds one. The value
-/// arrives as JSON text of a list of JSON texts (or nulls); a web view may wrap it once more.
+/// The session in what [`READ_UBISOFT_SESSION_SCRIPT`] returned, when the page holds one.
 pub fn session_from_page(result: &str) -> Option<UbisoftSession> {
-    let mut value: Value = serde_json::from_str(result).ok()?;
-    // Unwrap the layers of JSON-in-a-string until the list shows
-    for _ in 0..3 {
-        match value {
-            Value::String(text) => value = serde_json::from_str(&text).ok()?,
-            _ => break,
-        }
-    }
-    let entries: Vec<Value> = value
-        .as_array()?
-        .iter()
-        .filter_map(|entry| match entry {
-            Value::String(text) => serde_json::from_str(text).ok(),
-            Value::Object(_) => Some(entry.clone()),
-            _ => None,
-        })
-        .collect();
+    let entries = storage_entries(result)?;
     let field = |name: &str| {
         entries
             .iter()
@@ -343,16 +485,21 @@ pub(crate) mod tests {
         serde_json::to_string(&list).unwrap()
     }
 
+    fn page(address: &str) -> Url {
+        Url::parse(address).unwrap()
+    }
+
+    const NOTHING_STORED: &str = "\"[null,null,null]\"";
+
     #[test]
-    fn the_flow_waits_for_ubisofts_ready_page_and_reads_the_session_there() {
+    fn nothing_is_read_until_ubisoft_says_the_user_is_signed_in() {
         let url = sign_in_url();
         assert!(url.starts_with("https://connect.ubisoft.com/login?appId="));
         assert!(url.ends_with("nextUrl=https%3A%2F%2Fconnect.ubisoft.com%2Fready"));
 
         let mut flow = UbisoftFlow::new();
         assert_eq!(flow.start_url(), url);
-        let page = |address: &str| Url::parse(address).unwrap();
-        // The sign-in form, and anything else on the way: hands off
+        // The sign-in page, the blank page before the sign-in, and anything else on the way
         for address in [
             url.as_str(),
             "https://connect.ubisoft.com/login",
@@ -364,14 +511,42 @@ pub(crate) mod tests {
         ] {
             assert_eq!(flow.page_loaded(&page(address)), Step::Wait, "{address}");
         }
-        let ready = page("https://connect.ubisoft.com/ready");
-        assert_eq!(flow.page_loaded(&ready), Step::Read(READ_UBISOFT_SESSION_SCRIPT));
-        assert_eq!(flow.page_loaded(&page("https://connect.ubisoft.com/ready/?x=1")), Step::Read(READ_UBISOFT_SESSION_SCRIPT));
+    }
+
+    #[test]
+    fn setting_off_for_the_ready_address_is_enough_to_know_the_sign_in_is_over() {
+        let mut flow = UbisoftFlow::new();
+        // While signing in, wherever the window goes: nothing
+        for address in [sign_in_url().as_str(), "https://connect.ubisoft.com/change_domain/", "https://accounts.google.com/"] {
+            assert_eq!(flow.setting_off(&page(address)), Step::Wait, "{address}");
+        }
+        // The page at "ready" may never show (a browser puts its own error page there)
+        assert_eq!(
+            flow.setting_off(&page("https://connect.ubisoft.com/ready")),
+            Step::Go("https://connect.ubisoft.com/change_domain/".into())
+        );
+        // Said once: the window's own moves after that are not taken for the store's
+        assert_eq!(flow.setting_off(&page("https://connect.ubisoft.com/ready")), Step::Wait);
+        assert_eq!(flow.setting_off(&page("https://connect.ubisoft.com/change_domain/")), Step::Wait);
+        let blank = page("https://connect.ubisoft.com/change_domain/");
+        assert_eq!(flow.page_loaded(&blank), Step::Read(READ_UBISOFT_SESSION_SCRIPT));
+        assert!(matches!(flow.script_returned(&blank, &page_result()), Step::Captured(_)));
+    }
+
+    #[test]
+    fn once_signed_in_the_session_is_read_on_the_blank_page() {
+        let mut flow = UbisoftFlow::new();
+        // "ready" answers "not found": nothing is read there, the window moves on
+        assert_eq!(
+            flow.page_loaded(&page("https://connect.ubisoft.com/ready")),
+            Step::Go("https://connect.ubisoft.com/change_domain/".into())
+        );
+        let blank = page("https://connect.ubisoft.com/change_domain/");
+        assert_eq!(flow.page_loaded(&blank), Step::Read(READ_UBISOFT_SESSION_SCRIPT));
 
         // Not written yet, then there
-        assert_eq!(flow.script_returned(&ready, "\"[null,null,null]\""), Step::Retry);
-        assert_eq!(flow.script_returned(&ready, "null"), Step::Retry);
-        let Step::Captured(kept) = flow.script_returned(&ready, &page_result()) else {
+        assert_eq!(flow.script_returned(&blank, NOTHING_STORED), Step::Retry);
+        let Step::Captured(kept) = flow.script_returned(&blank, &page_result()) else {
             panic!("the session is captured");
         };
         let session = UbisoftSession::from_kept(&kept).expect("kept form reads back");
@@ -380,6 +555,70 @@ pub(crate) mod tests {
         assert_eq!(UbisoftSession::from_kept(&session.to_kept()), Some(session));
         assert_eq!(UbisoftSession::from_kept("window"), None);
         assert_eq!(UbisoftSession::from_kept(r#"{"ticket":"","sessionId":"s"}"#), None);
+    }
+
+    #[test]
+    fn a_blank_page_that_cannot_be_read_gives_way_to_a_fresh_sign_in_page() {
+        let ready = page("https://connect.ubisoft.com/ready");
+        let blank = page("https://connect.ubisoft.com/change_domain/");
+        let fresh = page(&sign_in_url());
+
+        // The blank page is an error page too: its storage cannot be read at all
+        let mut flow = UbisoftFlow::new();
+        assert!(matches!(flow.page_loaded(&ready), Step::Go(_)));
+        assert_eq!(flow.page_loaded(&blank), Step::Read(READ_UBISOFT_SESSION_SCRIPT));
+        assert_eq!(flow.script_returned(&blank, "null"), Step::Retry);
+        assert_eq!(flow.script_returned(&blank, "null"), Step::Go(sign_in_url()));
+        // A new page, in which nothing has been typed: read as soon as it shows
+        assert_eq!(flow.page_loaded(&fresh), Step::Read(READ_UBISOFT_SESSION_SCRIPT));
+        assert!(matches!(flow.script_returned(&fresh, &page_result()), Step::Captured(_)));
+
+        // A blank page that can be read but holds nothing: a few tries, then the same way out
+        let mut flow = UbisoftFlow::new();
+        assert!(matches!(flow.page_loaded(&ready), Step::Go(_)));
+        for _ in 1..EMPTY_LIMIT {
+            assert_eq!(flow.script_returned(&blank, NOTHING_STORED), Step::Retry);
+        }
+        assert_eq!(flow.script_returned(&blank, NOTHING_STORED), Step::Go(sign_in_url()));
+
+        // The fresh page holds no session either: it is loaded once more, read once more,
+        // and then it is said, with what the storage held (names only). Never a second
+        // reading of the same page: the user could be typing in it by then
+        assert_eq!(flow.page_loaded(&fresh), Step::Read(READ_UBISOFT_SESSION_SCRIPT));
+        let half = serde_json::to_string(&serde_json::json!([r#"{"sessionId":"s","secret value":"x"}"#, null, r#"{"userId":"u"}"#]).to_string()).unwrap();
+        for _ in 1..FRESH_SIGN_IN_PAGES {
+            assert_eq!(flow.script_returned(&fresh, &half), Step::Go(sign_in_url()));
+            assert_eq!(flow.page_loaded(&fresh), Step::Read(READ_UBISOFT_SESSION_SCRIPT));
+        }
+        let Step::Failed(message) = flow.script_returned(&fresh, &half) else {
+            panic!("fails in the end");
+        };
+        assert!(message.contains("loginData: sessionId; rememberMe: none; lastProfile: userId"), "{message}");
+        assert!(!message.contains('"') && !message.contains("secret"), "{message}");
+        assert_eq!(flow.page_loaded(&ready), Step::Wait);
+        assert_eq!(flow.page_loaded(&fresh), Step::Wait);
+        assert_eq!(flow.script_returned(&fresh, &page_result()).clone(), Step::Captured(session_from_page(&page_result()).unwrap().to_kept()), "a reading already under way still counts");
+
+        // The fresh page went on to "ready" before it could be read: loaded again, then said
+        let mut flow = UbisoftFlow::new();
+        assert!(matches!(flow.page_loaded(&ready), Step::Go(_)));
+        assert_eq!(flow.script_returned(&blank, "null"), Step::Retry);
+        assert_eq!(flow.script_returned(&blank, "null"), Step::Go(sign_in_url()));
+        for _ in 1..FRESH_SIGN_IN_PAGES {
+            assert_eq!(flow.page_loaded(&ready), Step::Go(sign_in_url()));
+        }
+        assert!(matches!(flow.page_loaded(&ready), Step::Failed(_)));
+
+        // The blank page leads somewhere else, or back to "ready": the same way out. The
+        // page the user signed in on, reported again while the window leaves it, is not read
+        let mut flow = UbisoftFlow::new();
+        assert!(matches!(flow.page_loaded(&ready), Step::Go(_)));
+        assert_eq!(flow.page_loaded(&fresh), Step::Wait);
+        assert_eq!(flow.page_loaded(&page("https://www.ubisoft.com/en-us/")), Step::Go(sign_in_url()));
+        let mut flow = UbisoftFlow::new();
+        assert_eq!(flow.page_loaded(&ready), Step::Go("https://connect.ubisoft.com/change_domain/".into()));
+        assert_eq!(flow.page_loaded(&ready), Step::Go("https://connect.ubisoft.com/change_domain/".into()));
+        assert_eq!(flow.page_loaded(&ready), Step::Go(sign_in_url()));
     }
 
     #[test]

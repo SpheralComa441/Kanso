@@ -23,42 +23,105 @@ use url::Url;
 
 /// Battle.net's account site.
 const ACCOUNT_SITE: &str = "https://account.battle.net";
-/// What the account page reads its list of games from: answered with JSON.
+/// What the account page reads its list of games from: answered with JSON to a browser that
+/// is signed in. One that is not is sent back to the site's first page.
 const GAMES_PATH: &str = "/api/games-and-subs";
 /// Where the site starts a sign-in (or renews the one it has) and comes back from.
 const SIGN_IN_PATH: &str = "/oauth2/authorization/account-settings";
-/// How many times the window is sent back to the list before giving up.
-const MAX_LIST_REQUESTS: u8 = 3;
+/// Where the site ends a session, which leads to its sign-in form: the way Playnite gets to
+/// the form. Only ever opened in the window the user signs in through, after the site has
+/// said twice that nobody is signed in.
+const SIGN_OUT_PATH: &str = "/api/logout";
+/// How many times the window is sent to the list before giving up.
+const MAX_LIST_REQUESTS: u8 = 8;
 
-/// The sign-in on Battle.net's site. The window first asks for the list of games; if the site
-/// does not know who is asking, it is sent through Battle.net's sign-in and asks again once
-/// the account page shows.
+/// The sign-in on Battle.net's site.
+///
+/// The window first asks for the list of games. If the site does not answer with it (nobody
+/// is signed in), the window is sent to the site's sign-in, and asks for the list again once
+/// it is back on the account site. Nothing is run on Battle.net's sign-in pages.
+///
+/// A page of the account site showing in place of the list means "not signed in" only the
+/// second time in a row: a page load of the site's own can cross the request for the list,
+/// and must not be mistaken for a refusal.
 pub struct BattleNetFlow {
     site: String,
-    /// Times the window was sent through the site's sign-in.
+    /// The window is there for the user to sign in; otherwise it only renews a session.
+    visible: bool,
+    /// The window was sent to the list and has not got there yet.
+    awaiting_list: bool,
+    /// Times in a row a page of the account site showed in place of the list.
+    sent_back: u8,
+    /// The window has been to the site's sign-in (sent there, or shown its form) since the
+    /// list was last asked for.
+    signing_in: bool,
+    /// The site's sign-in form has shown in this window.
+    form_shown: bool,
+    /// Ways of reaching the site's sign-in tried so far.
     sign_ins: u8,
-    /// Times the window was sent back to the list from the account page.
     list_requests: u8,
 }
 
-impl Default for BattleNetFlow {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl BattleNetFlow {
-    pub fn new() -> Self {
-        Self::at(ACCOUNT_SITE)
+    /// `visible`: the window is shown to the user, who may sign in.
+    pub fn new(visible: bool) -> Self {
+        Self::at(ACCOUNT_SITE, visible)
     }
 
     /// The same steps against another site (tests).
-    pub fn at(site: &str) -> Self {
-        Self { site: site.trim_end_matches('/').to_string(), sign_ins: 0, list_requests: 0 }
+    pub fn at(site: &str, visible: bool) -> Self {
+        Self {
+            site: site.trim_end_matches('/').to_string(),
+            visible,
+            awaiting_list: true,
+            sent_back: 0,
+            signing_in: false,
+            form_shown: false,
+            sign_ins: 0,
+            list_requests: 0,
+        }
     }
 
     fn games_url(&self) -> String {
         format!("{}{GAMES_PATH}", self.site)
+    }
+
+    fn ask_for_the_list(&mut self) -> Step {
+        if self.list_requests >= MAX_LIST_REQUESTS {
+            return Step::Failed("Battle.net keeps returning to the account page without a list of games".into());
+        }
+        self.list_requests += 1;
+        self.awaiting_list = true;
+        Step::Go(self.games_url())
+    }
+
+    /// The site did not answer with the list: nobody is signed in.
+    fn not_signed_in(&mut self) -> Step {
+        self.awaiting_list = false;
+        self.sent_back = 0;
+        self.signing_in = false;
+        let way = match self.sign_ins {
+            // The site's own start of a sign-in: renews a session that only needs renewing,
+            // shows the form otherwise
+            0 => SIGN_IN_PATH,
+            // An unseen window stops here: the user has to sign in again. It never opens
+            // the sign-out address
+            _ if !self.visible => return Step::SignInNeeded,
+            // The first way showed no form: the one Playnite takes. Not once the form has
+            // shown: whoever has been through it is not signed out by Kanso
+            1 if !self.form_shown => SIGN_OUT_PATH,
+            // The user has been through the form and the list still does not come: said,
+            // rather than left to a window in which nothing happens
+            _ if self.form_shown => {
+                return Step::Failed("Battle.net does not give the list of games to this browser after the sign-in".into())
+            }
+            // Out of ways: the site is left alone, to show its form by itself or at the
+            // user's click
+            _ => return Step::Wait,
+        };
+        self.sign_ins += 1;
+        self.signing_in = true;
+        Step::Go(format!("{}{way}", self.site))
     }
 }
 
@@ -69,18 +132,34 @@ impl SignInFlow for BattleNetFlow {
 
     fn page_loaded(&mut self, url: &Url) -> Step {
         if on_site(url, &self.site) && url.path() == GAMES_PATH {
+            self.awaiting_list = false;
+            self.sent_back = 0;
             return Step::Read(READ_ANSWER_SCRIPT);
         }
         if is_sign_in_page(url) {
+            // Whoever comes back from the form is signed in
+            self.awaiting_list = false;
+            self.sent_back = 0;
+            self.signing_in = true;
+            self.form_shown = true;
             return Step::SignInNeeded;
         }
-        // The account page: the user is signed in
-        if on_site(url, &self.site) && matches!(url.path().trim_end_matches('/'), "" | "/overview") {
-            if self.list_requests >= MAX_LIST_REQUESTS {
-                return Step::Failed("Battle.net keeps returning to the account page without a list of games".into());
+        if !on_site(url, &self.site) {
+            return Step::Wait;
+        }
+        // A page of the account site
+        if self.awaiting_list {
+            // In place of the list: once may be chance, twice is the site's answer
+            self.sent_back += 1;
+            if self.sent_back < 2 {
+                return self.ask_for_the_list();
             }
-            self.list_requests += 1;
-            return Step::Go(self.games_url());
+            return self.not_signed_in();
+        }
+        if self.signing_in {
+            // Back from the sign-in
+            self.signing_in = false;
+            return self.ask_for_the_list();
         }
         Step::Wait
     }
@@ -92,13 +171,12 @@ impl SignInFlow for BattleNetFlow {
         if games_in(&text).is_some() {
             return Step::Captured(text);
         }
-        // The site does not know who is asking: through its sign-in (again, a few times, if
-        // the account page showed and the list still did not come)
-        if self.sign_ins >= MAX_LIST_REQUESTS {
-            return Step::Failed("Battle.net gave no list of games after the sign-in".into());
+        // An answer, but not the list: the site does not know who is asking
+        match self.not_signed_in() {
+            // Not left on a page that shows nothing but the site's refusal
+            Step::Wait => Step::Go(format!("{}/", self.site)),
+            step => step,
         }
-        self.sign_ins += 1;
-        Step::Go(format!("{}{SIGN_IN_PATH}", self.site))
     }
 }
 
@@ -221,55 +299,142 @@ pub(crate) mod tests {
 
     #[test]
     fn a_signed_in_profile_gets_its_list_straight_away() {
-        let mut flow = BattleNetFlow::new();
-        let start = flow.start_url();
-        assert_eq!(start, "https://account.battle.net/api/games-and-subs");
-        assert_eq!(flow.page_loaded(&page(&start)), Step::Read(READ_ANSWER_SCRIPT));
-        assert_eq!(flow.script_returned(&page(&start), "null"), Step::Retry);
-        assert_eq!(flow.script_returned(&page(&start), &body(GAMES_ANSWER)), Step::Captured(GAMES_ANSWER.to_string()));
+        for visible in [true, false] {
+            let mut flow = BattleNetFlow::new(visible);
+            let start = flow.start_url();
+            assert_eq!(start, "https://account.battle.net/api/games-and-subs");
+            assert_eq!(flow.page_loaded(&page(&start)), Step::Read(READ_ANSWER_SCRIPT));
+            assert_eq!(flow.script_returned(&page(&start), "null"), Step::Retry);
+            assert_eq!(flow.script_returned(&page(&start), &body(GAMES_ANSWER)), Step::Captured(GAMES_ANSWER.to_string()));
+        }
+    }
+
+    const SIGN_IN: &str = "https://account.battle.net/oauth2/authorization/account-settings";
+    const SIGN_OUT: &str = "https://account.battle.net/api/logout";
+    const FORM: &str = "https://eu.account.battle.net/login/it/?ref=https://account.battle.net/";
+
+    /// The window is sent back to the site's first page twice in a row: what the real site
+    /// does to a browser that is not signed in.
+    fn sent_back_twice(flow: &mut BattleNetFlow) -> Step {
+        let first_page = page("https://account.battle.net/");
+        assert_eq!(flow.page_loaded(&first_page), Step::Go(flow.games_url()), "once may be chance");
+        flow.page_loaded(&first_page)
     }
 
     #[test]
-    fn without_a_session_the_site_signs_the_user_in_and_the_list_is_asked_again() {
-        let mut flow = BattleNetFlow::new();
+    fn sent_back_to_the_first_page_the_window_goes_to_the_sign_in_and_asks_again() {
+        let mut flow = BattleNetFlow::new(true);
         let list = page(&flow.start_url());
-        let unknown = body(r#"{"error":"unauthorized","logoutUri":"https://account.battle.net/api/logout"}"#);
-        assert_eq!(
-            flow.script_returned(&list, &unknown),
-            Step::Go("https://account.battle.net/oauth2/authorization/account-settings".into())
-        );
+        assert_eq!(sent_back_twice(&mut flow), Step::Go(SIGN_IN.into()));
 
         // Battle.net's sign-in, wherever it lives: hands off
-        for address in [
-            "https://eu.account.battle.net/login/it/?ref=https://account.battle.net/",
-            "https://account.battle.net/login/en/",
-            "https://eu.account.battle.net/login/en/authenticator",
-        ] {
+        for address in [FORM, "https://account.battle.net/login/en/", "https://eu.account.battle.net/login/en/authenticator"] {
             assert_eq!(flow.page_loaded(&page(address)), Step::SignInNeeded, "{address}");
         }
         assert_eq!(flow.page_loaded(&page("https://oauth.battle.net/authorize")), Step::Wait);
         assert_eq!(flow.page_loaded(&page("https://account.battle.net.example.org/overview")), Step::Wait);
-        assert_eq!(flow.page_loaded(&page("https://account.battle.net/details")), Step::Wait);
 
         // Signed in: the account page, then the list
+        assert_eq!(flow.page_loaded(&page("https://account.battle.net/")), Step::Go(flow.games_url()));
+        // The site moves from its first page to the overview by itself, across the request
+        // for the list: asked again, and nobody is signed out
         assert_eq!(flow.page_loaded(&page("https://account.battle.net/overview")), Step::Go(flow.games_url()));
         assert_eq!(flow.page_loaded(&list), Step::Read(READ_ANSWER_SCRIPT));
         assert!(matches!(flow.script_returned(&list, &body(GAMES_ANSWER)), Step::Captured(_)));
     }
 
     #[test]
-    fn nothing_is_asked_forever() {
-        let mut flow = BattleNetFlow::new();
+    fn a_refusal_in_place_of_the_list_leads_to_the_sign_in_too() {
+        let mut flow = BattleNetFlow::new(true);
         let list = page(&flow.start_url());
-        let unknown = body(r#"{"error":"unauthorized"}"#);
-        for _ in 0..MAX_LIST_REQUESTS {
-            assert!(matches!(flow.script_returned(&list, &unknown), Step::Go(_)));
-        }
-        assert!(matches!(flow.script_returned(&list, &unknown), Step::Failed(_)), "the sign-in is offered a few times");
+        assert_eq!(flow.page_loaded(&list), Step::Read(READ_ANSWER_SCRIPT));
+        let refusal = body(r#"{"error":"unauthorized","logoutUri":"https://account.battle.net/api/logout"}"#);
+        assert_eq!(flow.script_returned(&list, &refusal), Step::Go(SIGN_IN.into()));
+        assert_eq!(flow.page_loaded(&page(FORM)), Step::SignInNeeded);
+        assert_eq!(flow.page_loaded(&page("https://account.battle.net/")), Step::Go(flow.games_url()));
+    }
 
+    #[test]
+    fn when_the_sign_in_address_shows_no_form_the_other_ways_are_tried() {
+        let mut flow = BattleNetFlow::new(true);
+        let first_page = page("https://account.battle.net/");
+        assert_eq!(sent_back_twice(&mut flow), Step::Go(SIGN_IN.into()));
+        // The sign-in address comes back without a form: it may have renewed a session
+        assert_eq!(flow.page_loaded(&first_page), Step::Go(flow.games_url()));
+        // Still no list: the way Playnite reaches the form
+        assert_eq!(sent_back_twice(&mut flow), Step::Go(SIGN_OUT.into()));
+        assert_eq!(flow.page_loaded(&first_page), Step::Go(flow.games_url()));
+        // Still nothing: the site is left alone, and the user can reach the form from it
+        assert_eq!(sent_back_twice(&mut flow), Step::Wait);
+        assert_eq!(flow.page_loaded(&first_page), Step::Wait);
+        assert_eq!(flow.page_loaded(&page(FORM)), Step::SignInNeeded);
+        assert_eq!(flow.page_loaded(&page("https://account.battle.net/overview")), Step::Go(flow.games_url()));
+        let list = page(&flow.start_url());
+        assert_eq!(flow.page_loaded(&list), Step::Read(READ_ANSWER_SCRIPT));
+        assert!(matches!(flow.script_returned(&list, &body(GAMES_ANSWER)), Step::Captured(_)));
+    }
+
+    #[test]
+    fn whoever_has_been_through_the_form_is_never_signed_out() {
+        let mut flow = BattleNetFlow::new(true);
+        assert_eq!(sent_back_twice(&mut flow), Step::Go(SIGN_IN.into()));
+        assert_eq!(flow.page_loaded(&page(FORM)), Step::SignInNeeded);
+        assert_eq!(flow.page_loaded(&page("https://account.battle.net/")), Step::Go(flow.games_url()));
+        // The list keeps not coming: it is said; the sign-out address is not opened
+        assert!(matches!(sent_back_twice(&mut flow), Step::Failed(_)));
+        let list = page(&flow.start_url());
+        let refusal = body(r#"{"error":"unauthorized"}"#);
+        assert!(matches!(flow.script_returned(&list, &refusal), Step::Failed(_)));
+    }
+
+    #[test]
+    fn an_unseen_window_never_signs_out_and_stops_where_a_sign_in_is_needed() {
+        let first_page = page("https://account.battle.net/");
+
+        // A session that only needed renewing
+        let mut flow = BattleNetFlow::new(false);
+        assert_eq!(sent_back_twice(&mut flow), Step::Go(SIGN_IN.into()));
+        assert_eq!(flow.page_loaded(&page("https://account.battle.net/overview")), Step::Go(flow.games_url()));
+        let list = page(&flow.start_url());
+        assert_eq!(flow.page_loaded(&list), Step::Read(READ_ANSWER_SCRIPT));
+
+        // No session: the form shows
+        let mut flow = BattleNetFlow::new(false);
+        assert_eq!(sent_back_twice(&mut flow), Step::Go(SIGN_IN.into()));
+        assert_eq!(flow.page_loaded(&page(FORM)), Step::SignInNeeded);
+
+        // No session and no form: the list is refused again
+        let mut flow = BattleNetFlow::new(false);
+        assert_eq!(sent_back_twice(&mut flow), Step::Go(SIGN_IN.into()));
+        assert_eq!(flow.page_loaded(&first_page), Step::Go(flow.games_url()));
+        assert_eq!(sent_back_twice(&mut flow), Step::SignInNeeded, "never to the sign-out address");
+
+        // A refusal in place of the list, twice
+        let mut flow = BattleNetFlow::new(false);
+        let refusal = body(r#"{"error":"unauthorized"}"#);
+        assert_eq!(flow.script_returned(&list, &refusal), Step::Go(SIGN_IN.into()));
+        assert_eq!(flow.script_returned(&list, &refusal), Step::SignInNeeded);
+    }
+
+    #[test]
+    fn nothing_is_asked_forever() {
+        let mut flow = BattleNetFlow::new(true);
+        let list = page(&flow.start_url());
+        let refusal = body(r#"{"error":"unauthorized"}"#);
+        assert_eq!(flow.script_returned(&list, &refusal), Step::Go(SIGN_IN.into()));
+        assert_eq!(flow.script_returned(&list, &refusal), Step::Go(SIGN_OUT.into()));
+        // Out of ways: shown the site's first page, and left to it
+        assert_eq!(flow.script_returned(&list, &refusal), Step::Go("https://account.battle.net/".into()));
+        assert_eq!(flow.page_loaded(&page("https://account.battle.net/")), Step::Wait);
+
+        // Coming back from the form time after time without a list
+        let mut flow = BattleNetFlow::new(true);
         for _ in 0..MAX_LIST_REQUESTS {
+            assert_eq!(flow.page_loaded(&page(FORM)), Step::SignInNeeded);
             assert!(matches!(flow.page_loaded(&page("https://account.battle.net/")), Step::Go(_)));
+            assert_eq!(flow.page_loaded(&list), Step::Read(READ_ANSWER_SCRIPT));
         }
+        assert_eq!(flow.page_loaded(&page(FORM)), Step::SignInNeeded);
         assert!(matches!(flow.page_loaded(&page("https://account.battle.net/overview")), Step::Failed(_)));
     }
 }

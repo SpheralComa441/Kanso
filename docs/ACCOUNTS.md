@@ -67,9 +67,15 @@ Che cosa fa e che cosa non fa quella finestra è scritto, come contratto, in
      codice di avvio. Non legge la pagina, e i comandi che servirebbe a chiamare sono rifiutati
      a questa finestra (punto 3).
 2. **Dopo che lo store ti ha fatto accedere**, Kanso esegue *uno* di due script, entrambi di
-   una riga e scritti per esteso in `signin.rs` (`SCRIPTS`):
-   - per Ubisoft, sulla pagina `connect.ubisoft.com/ready` (quella che Ubisoft mostra *dopo*
-     l'accesso): legge le tre voci in cui la pagina stessa tiene la sessione appena ottenuta;
+   una riga e scritti per esteso in `signin.rs` (`SCRIPTS`). Mai mentre stai accedendo, e mai
+   su una pagina in cui hai scritto qualcosa:
+   - per Ubisoft, lo script legge le tre voci in cui il sito stesso tiene la sessione appena
+     ottenuta. Non succede nulla finché Ubisoft non manda la finestra al suo indirizzo
+     `connect.ubisoft.com/ready`, cosa che fa solo ad accesso completato (lì non c'è niente da
+     leggere: oggi risponde «pagina non trovata»). A quel punto Kanso porta la finestra su una
+     pagina vuota dello stesso sito, `connect.ubisoft.com/change_domain/`, e legge lì. Solo se
+     quella pagina non è leggibile, ricarica da capo l'indirizzo di accesso (una pagina nuova,
+     in cui non è stato scritto nulla) e legge **una volta sola**, nell'istante in cui compare;
    - per EA e Battle.net, su un indirizzo che contiene solo la risposta dello store in formato
      JSON (il token temporaneo di EA; l'elenco dei giochi di Battle.net): legge il testo della
      pagina.
@@ -85,6 +91,12 @@ Che cosa fa e che cosa non fa quella finestra è scritto, come contratto, in
    ([`capabilities/default.json`](../src-tauri/capabilities/default.json)) e Tauri li rifiuta
    alle pagine che non sono dell'app. La pagina dello store non può quindi leggere impostazioni,
    chiavi API, libreria o file.
+   Per **Battle.net**, se nessuno ha effettuato l'accesso il sito non mostra da solo il modulo:
+   Kanso porta la finestra all'indirizzo con cui il sito avvia l'accesso e, solo se nemmeno
+   quello mostra il modulo, all'indirizzo di uscita del sito (che al modulo conduce; è la strada
+   usata da Playnite). Questo avviene soltanto nella finestra in cui stai accedendo, mai in
+   quella nascosta e mai dopo che il modulo è comparso; riguarda comunque solo il profilo di
+   quella finestra, non il tuo browser né l'app Battle.net.
 4. **Per Ubisoft il profilo del browser viene cancellato subito dopo l'accesso**: la sessione
    sta già, cifrata, in `accounts.json`. Per EA e Battle.net il profilo resta, perché *è* la
    sessione; viene cancellato quando esci.
@@ -192,9 +204,15 @@ code that opens it is `src-tauri/src/signin_window.rs`.
      It does not read the page, and the commands it would be used to call are refused to this
      window (point 3).
 2. **After the store has signed you in**, Kanso runs *one* of two scripts, both one line long
-   and written out in `signin.rs` (`SCRIPTS`):
-   - for Ubisoft, on `connect.ubisoft.com/ready` (the page Ubisoft shows *after* the sign-in):
-     it reads the three entries in which the page itself keeps the session it just obtained;
+   and written out in `signin.rs` (`SCRIPTS`). Never while you are signing in, and never on a
+   page you have typed into:
+   - for Ubisoft, the script reads the three entries in which the site itself keeps the
+     session it just obtained. Nothing happens until Ubisoft sends the window to its
+     `connect.ubisoft.com/ready` address, which it does only once the sign-in is complete
+     (there is nothing to read there: today it answers "page not found"). Kanso then takes the
+     window to a blank page of the same site, `connect.ubisoft.com/change_domain/`, and reads
+     there. Only if that page cannot be read does it load the sign-in address afresh (a new
+     page, in which nothing has been typed) and read **once**, the moment it shows;
    - for EA and Battle.net, on an address that holds nothing but the store's answer in JSON
      (EA's short-lived token; Battle.net's list of games): it reads the text of the page.
 
@@ -207,6 +225,12 @@ code that opens it is `src-tauri/src/signin_window.rs`.
    are granted to the main window alone (`capabilities/default.json`) and Tauri refuses them to
    pages that are not the app's own. The store's page therefore cannot read settings, API keys,
    the library or files.
+   For **Battle.net**, when nobody is signed in the site does not show its form by itself:
+   Kanso takes the window to the address the site starts a sign-in from and, only if that
+   shows no form either, to the site's sign-out address (which leads to the form; it is the
+   way Playnite takes). This happens only in the window you are signing in through, never in
+   the unseen one and never after the form has shown; in any case it concerns that window's
+   profile alone, not your browser nor the Battle.net app.
 4. **For Ubisoft the browser profile is deleted right after the sign-in**: the session is
    already in `accounts.json`, encrypted. For EA and Battle.net the profile stays, because it
    *is* the session; it is deleted when you sign out.

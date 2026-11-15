@@ -39,7 +39,7 @@ const MAX_READS: u8 = 30;
 /// session is gone: a store may pass through such a page on its way to renewing it.
 const SIGN_IN_PAGE_GRACE: Duration = Duration::from_secs(8);
 /// Pages remembered for the message of a sign-in that did not go through.
-const PAGES_REMEMBERED: usize = 8;
+const PAGES_REMEMBERED: usize = 12;
 
 const LABEL_PREFIX: &str = "signin-";
 
@@ -86,6 +86,16 @@ struct Run {
     outcome: Mutex<Sender<Outcome>>,
     /// The last pages that finished loading, as host and path.
     pages: Mutex<Vec<String>>,
+    /// The address the window last set off for. A browser shows a page of its own, with an
+    /// address of its own, where a site answers "not found": the page meant is this one.
+    heading_for: Mutex<Option<Url>>,
+    /// The page the window last began to show, as host and path.
+    in_window: Mutex<Option<String>>,
+}
+
+/// Whether the address is a page of the web (not a browser's own error or blank page).
+fn is_web_page(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https")
 }
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -168,7 +178,7 @@ fn read(window: &WebviewWindow, run: &Arc<Run>, url: &Url, script: &'static str,
                     std::thread::sleep(READ_RETRY_PAUSE);
                     match window.url() {
                         // Still on that page (whatever it did to its own query or fragment)
-                        Ok(now) if page_name(&now) == page_name(&url) => {
+                        Ok(now) if !is_web_page(&now) || page_name(&now) == page_name(&url) => {
                             read(&window, &run, &url, script, attempt + 1);
                         }
                         // It moved on without a page load: the flow decides afresh
@@ -227,9 +237,13 @@ pub(crate) fn run(
         visible,
         outcome: Mutex::new(sender),
         pages: Mutex::new(Vec::new()),
+        heading_for: Mutex::new(None),
+        in_window: Mutex::new(None),
     });
 
     let run_on_load = Arc::clone(&run);
+    let run_on_navigation = Arc::clone(&run);
+    let (app_on_navigation, label_on_navigation) = (app.clone(), label.clone());
     let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(start))
         .title(title)
         .inner_size(520.0, 760.0)
@@ -239,15 +253,49 @@ pub(crate) fn run(
         .focused(visible)
         .skip_taskbar(!visible)
         .data_directory(profile)
-        .on_navigation(may_open)
+        .on_navigation(move |url| {
+            if !may_open(url) {
+                return false;
+            }
+            *locked(&run_on_navigation.heading_for) = Some(url.clone());
+            // The flow is told where the window is going (the address, nothing else), off
+            // the web view's own thread. The window itself is not known yet while it is
+            // being built: by then there is nothing to act on
+            let (run, url, app) = (Arc::clone(&run_on_navigation), url.clone(), app_on_navigation.clone());
+            let label = label_on_navigation.clone();
+            std::thread::spawn(move || {
+                let step = locked(&run.flow).setting_off(&url);
+                if step == Step::Wait {
+                    return;
+                }
+                if let Some(window) = app.get_webview_window(&label) {
+                    act(&window, &run, &url, step);
+                }
+            });
+            true
+        })
         // A store's page may open a window of its own ("sign in with..."): secure pages only
         .on_new_window(|url, _| if may_open(&url) { NewWindowResponse::Allow } else { NewWindowResponse::Deny })
         .on_download(|_, _| false)
         .on_page_load(move |window, payload| {
-            if payload.event() != PageLoadEvent::Finished {
+            let run = Arc::clone(&run_on_load);
+            let url = match payload.url() {
+                loaded if is_web_page(loaded) => loaded.clone(),
+                // The browser's own error page: the page meant is the one it set off for
+                loaded => locked(&run.heading_for).clone().unwrap_or_else(|| loaded.clone()),
+            };
+            if payload.event() == PageLoadEvent::Started {
+                // The page now in the window
+                *locked(&run.in_window) = Some(page_name(&url));
                 return;
             }
-            let (run, url) = (Arc::clone(&run_on_load), payload.url().clone());
+            // A script must run in the page a flow asked to read, never in the one the window
+            // is leaving. On Windows the address of a finished load is always that of the
+            // page in the window. The Linux web view (development only) may instead give the
+            // address of a load that never took place: such a report is dropped.
+            if cfg!(not(windows)) && locked(&run.in_window).as_ref().is_some_and(|page| *page != page_name(&url)) {
+                return;
+            }
             // Off the web view's own thread, like everything that follows
             std::thread::spawn(move || {
                 run.remember(&url);

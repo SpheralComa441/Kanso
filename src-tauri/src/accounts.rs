@@ -172,7 +172,10 @@ fn flow_of(store: &Store, visible: bool) -> Box<dyn SignInFlow> {
             (Some(www), Some(accounts)) => EaFlow::at(&www, &accounts, visible),
             _ => EaFlow::new(visible),
         }),
-        _ => Box::new(test_site("battlenet").map_or_else(BattleNetFlow::new, |site| BattleNetFlow::at(&site))),
+        _ => Box::new(match test_site("battlenet") {
+            Some(site) => BattleNetFlow::at(&site, visible),
+            None => BattleNetFlow::new(visible),
+        }),
     }
 }
 

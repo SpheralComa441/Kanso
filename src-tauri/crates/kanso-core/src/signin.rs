@@ -9,16 +9,18 @@
 //! What Kanso does and does not do there:
 //!
 //! - **The password is never read, kept or sent by Kanso.** It is typed into the store's page
-//!   and travels from that page to the store, as in any browser. No script of Kanso runs on a
-//!   sign-in form, nothing watches the keyboard, no content of the page is read and no request
-//!   it makes is intercepted.
+//!   and travels from that page to the store, as in any browser. No script of Kanso runs
+//!   while the user is signing in, nor ever on a page the user has typed into; nothing watches
+//!   the keyboard, no content of a sign-in page is read and no request it makes is
+//!   intercepted.
 //! - **Kanso sees the address of each page the window opens**, and nothing more of it: that is
 //!   how a flow knows the store is done ([`SignInFlow::page_loaded`]). Addresses are not kept;
 //!   what may be shown in a message is the site and the path, never the query
 //!   ([`page_name`]).
-//! - **Only the scripts in [`SCRIPTS`] ever run in the window**, and only on the pages the
-//!   store shows *after* the sign-in. Each reads one thing the store just handed out: the
-//!   session of the page, or the answer the store gave to a question about the account.
+//! - **Only the scripts in [`SCRIPTS`] ever run in the window**, and only *after* the store
+//!   has signed the user in. Each reads one thing the store just handed out: the session the
+//!   site keeps for itself, or the answer the store gave to a question about the account.
+//!   Where each may run is said next to it, below.
 //! - **What is read goes to the store that issued it and nowhere else.** Kanso has no server:
 //!   there is no telemetry and no relay. The session is used from this PC to ask that same
 //!   store for the list of games.
@@ -57,15 +59,27 @@ pub enum Step {
 pub trait SignInFlow: Send {
     /// The address the window opens on.
     fn start_url(&self) -> String;
+    /// The window is setting off for `url` (sent there by the store's page, or by a step of
+    /// this flow). Only the address is known: nothing of that page has loaded yet. Most flows
+    /// wait for the page; one may need to know where a store sends the window even if the
+    /// page there never shows.
+    fn setting_off(&mut self, _url: &Url) -> Step {
+        Step::Wait
+    }
     /// A page finished loading.
     fn page_loaded(&mut self, url: &Url) -> Step;
     /// The script asked for with [`Step::Read`] returned `result` (JSON text) on `url`.
     fn script_returned(&mut self, url: &Url, result: &str) -> Step;
 }
 
-/// Reads the session Ubisoft's page keeps for itself once the user is signed in: the three
-/// entries of the page's own storage, and nothing else. Run on `connect.ubisoft.com/ready`
-/// only, the page Ubisoft shows after the sign-in.
+/// Reads the session Ubisoft's site keeps for itself once the user is signed in: three
+/// entries of the site's own storage, and nothing else.
+///
+/// Run only after Ubisoft has sent the window to its "ready" address, which it does once the
+/// sign-in is complete: on a blank page of the site (`connect.ubisoft.com/change_domain/`)
+/// or, when that page cannot be read, on the sign-in address loaded afresh (a new page, in
+/// which nothing has been typed), once, the moment it shows. See
+/// [`crate::ubisoft_account::UbisoftFlow`].
 pub const READ_UBISOFT_SESSION_SCRIPT: &str = r#"(() => { try { return JSON.stringify([localStorage.getItem("PRODloginData"), localStorage.getItem("PRODrememberMe"), localStorage.getItem("PRODlastProfile")]); } catch (_) { return null; } })()"#;
 
 /// Reads the text of the page. Run only on the two addresses that are nothing but a store's
