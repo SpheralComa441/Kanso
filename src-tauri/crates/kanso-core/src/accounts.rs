@@ -1,10 +1,22 @@
-//! The store accounts the user signed in to: who they are, and the token that keeps each
-//! session going.
+//! The store accounts the user signed in to: who they are, and what keeps each session going.
 //!
-//! One small file, `accounts.json`, next to the settings. A token is never written as it is:
-//! it goes through [`crate::secrets`], so the file is useless to another Windows user or on
-//! another PC. Passwords are never here at all: signing in happens on the store's own page,
-//! in the browser, and Kanso only ever receives the code that page hands out.
+//! One small file, `accounts.json`, next to the settings, on this PC only.
+//!
+//! **Passwords are never here, nor anywhere else in Kanso.** Signing in always happens on the
+//! store's own page: in the browser for Epic and GOG (Kanso receives the code that page ends
+//! on), in a window showing the store's page for Ubisoft, EA and Battle.net (see
+//! [`crate::signin`]). What the user types there goes to the store and to nobody else.
+//!
+//! What the file holds for each account is its name and, for the stores that issue one, the
+//! token that renews the session (Epic, GOG) or the session tickets (Ubisoft). A token is
+//! never written as it is: it goes through [`crate::secrets`], so the file is useless to
+//! another Windows user or on another PC. EA and Battle.net issue nothing to keep: their
+//! session is the cookies of the store's site, which stay in the browser profile of that
+//! store's sign-in window, and the file only records that someone signed in
+//! ([`SESSION_IN_WINDOW_PROFILE`]).
+//!
+//! A token is sent to the store that issued it and to nothing else. Signing out removes the
+//! account from the file (and deletes the window's browser profile).
 
 use crate::secrets::{self, Scheme};
 use base64::Engine as _;
@@ -14,6 +26,53 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const ACCOUNTS_FILE: &str = "accounts.json";
+
+/// What is kept in place of a token for the stores whose session is the cookies of their
+/// site, held by the browser profile of the store's sign-in window: a note that someone is
+/// signed in, of no use to anyone.
+pub const SESSION_IN_WINDOW_PROFILE: &str = "session-kept-by-the-sign-in-window";
+
+/// Why a call to a store's services gave nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreError {
+    /// The store refused the code or the session (the text is the store's own error code):
+    /// the user has to sign in again.
+    Refused(String),
+    /// The store could not be reached.
+    Unreachable,
+    /// The store answered something this code does not expect: which call, and what came back.
+    Unexpected(String),
+}
+
+impl std::fmt::Display for StoreError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StoreError::Refused(code) => write!(f, "refused by the store ({code})"),
+            StoreError::Unreachable => write!(f, "the store could not be reached"),
+            StoreError::Unexpected(detail) => write!(f, "unexpected answer from the store: {detail}"),
+        }
+    }
+}
+
+/// What the user pasted at the end of a sign-in, reduced to the authorization code: the code
+/// itself, the text the store's page shows (`{"authorizationCode":"..."}`), or the address of
+/// the page the browser landed on, which carries it as `code=`.
+pub fn authorization_code_in(pasted: &str) -> Option<String> {
+    let pasted = pasted.trim();
+    let candidate = serde_json::from_str::<serde_json::Value>(pasted)
+        .ok()
+        .and_then(|json| json.get("authorizationCode")?.as_str().map(str::to_string))
+        .or_else(|| {
+            let (_, after) = pasted.split_once("code=")?;
+            Some(after.split(['&', '#', '"', ' ']).next().unwrap_or_default().to_string())
+        })
+        .unwrap_or_else(|| pasted.trim_matches('"').to_string());
+    let plain = (8..=1024).contains(&candidate.len())
+        && candidate
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'!' | b'*' | b'$'));
+    plain.then_some(candidate)
+}
 
 /// An account as kept on disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +216,37 @@ mod tests {
             refresh_token: token.into(),
             connected_at: 1_700_000_000_000,
         }
+    }
+
+    #[test]
+    fn finds_the_code_in_whatever_the_user_pasted() {
+        let code = "0123456789abcdef0123456789abcdef";
+        assert_eq!(authorization_code_in(code).as_deref(), Some(code));
+        assert_eq!(authorization_code_in(&format!("  \"{code}\"\n")).as_deref(), Some(code));
+        assert_eq!(
+            authorization_code_in(&format!(r#"{{"redirectUrl":"https://localhost/launcher/authorized?code={code}","authorizationCode":"{code}","sid":null}}"#)).as_deref(),
+            Some(code)
+        );
+        assert_eq!(
+            authorization_code_in(&format!("https://localhost/launcher/authorized?code={code}&state=x")).as_deref(),
+            Some(code)
+        );
+        // The address of GOG's last page, and Microsoft's, whose codes carry other signs
+        assert_eq!(
+            authorization_code_in("https://embed.gog.com/on_login_success?origin=client&code=Ab3-_xYz0123456789").as_deref(),
+            Some("Ab3-_xYz0123456789")
+        );
+        assert_eq!(
+            authorization_code_in("https://login.live.com/oauth20_desktop.srf?code=M.C123_BAY.2.U.abc!def*gh$&lc=1040").as_deref(),
+            Some("M.C123_BAY.2.U.abc!def*gh$")
+        );
+        // Signed out in the browser: the page has no code yet
+        assert_eq!(authorization_code_in(r#"{"redirectUrl":null,"authorizationCode":null,"sid":null}"#), None);
+        assert_eq!(authorization_code_in(""), None);
+        assert_eq!(authorization_code_in("short"), None);
+        assert_eq!(authorization_code_in("not a code: has spaces and/slashes"), None);
+        assert_eq!(authorization_code_in("https://auth.gog.com/auth?client_id=1&response_type=code"), None);
+        assert_eq!(authorization_code_in(&"a".repeat(2000)), None);
     }
 
     #[test]

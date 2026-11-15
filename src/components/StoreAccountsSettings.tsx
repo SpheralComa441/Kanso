@@ -1,15 +1,31 @@
 import { useEffect, useState } from "react";
-import { ExternalLink, LogIn, LogOut } from "lucide-react";
-import { useI18n } from "../i18n";
+import { AppWindow, ExternalLink, LogIn, LogOut } from "lucide-react";
+import { useI18n, type MessageKey } from "../i18n";
 import {
   isRunningInTauri,
   listStoreAccounts,
   openStoreSignIn,
   storeSignIn,
+  storeSignInWindow,
   storeSignOut,
 } from "../lib/backend";
 import { PLATFORM_META } from "../lib/platforms";
 import type { GamePlatform, StoreAccountInfo } from "../types/game";
+
+/** What the sign-in page of each store ends on, and what to copy from it. */
+const STEP_TWO: Partial<Record<GamePlatform, MessageKey>> = {
+  epic: "accounts.step2.epic",
+  gog: "accounts.step2.gog",
+};
+
+/**
+ * What stays on the PC after a sign-in in the store's window: Ubisoft issues session tickets
+ * (kept encrypted), the other stores only their site's cookies (kept by the window's own
+ * browser profile).
+ */
+const KEPT_AFTER_WINDOW: Partial<Record<GamePlatform, MessageKey>> = {
+  ubisoft: "accounts.window.kept.ubisoft",
+};
 
 interface StoreAccountsSettingsProps {
   /** Re-read the accounts whenever the dialog opens: a session may have expired meanwhile. */
@@ -19,9 +35,11 @@ interface StoreAccountsSettingsProps {
 }
 
 /**
- * The stores Kanso can sign in to. Signing in happens on the store's own page, in the
- * browser; here the user only pastes the code that page ends on. Nothing in this panel waits
- * for the Save button of the dialog: an account is signed in or out as soon as it is asked.
+ * The stores Kanso can sign in to. Signing in always happens on the store's own page: in the
+ * browser, after which the user pastes here the code that page ends on, or in a window of
+ * Kanso that shows the store's page. The password never passes through this panel, nor
+ * through Kanso at all. Nothing here waits for the Save button of the dialog: an account is
+ * signed in or out as soon as it is asked.
  */
 export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSettingsProps) {
   const { t } = useI18n();
@@ -32,6 +50,10 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [justSignedIn, setJustSignedIn] = useState<GamePlatform | null>(null);
+  /** The store whose sign-in window is open, waiting for the user. */
+  const [windowOpenFor, setWindowOpenFor] = useState<GamePlatform | null>(null);
+  /** Something to say about the last sign-in in a window (closed, or library not read). */
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -39,6 +61,7 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
     setSigningIn(null);
     setPasted("");
     setError(null);
+    setNotice(null);
     setJustSignedIn(null);
     listStoreAccounts()
       .then((listed) => {
@@ -75,11 +98,35 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
     }
   };
 
-  const signOut = async (platform: GamePlatform) => {
+  /** Opens the store's own sign-in page in a window and waits for the user to be done. */
+  const signInInWindow = async (platform: GamePlatform) => {
+    setWindowOpenFor(platform);
     setError(null);
+    setNotice(null);
     try {
-      await storeSignOut(platform);
-      replace({ platform, connected: false, displayName: null, needsSignIn: false });
+      const outcome = await storeSignInWindow(platform);
+      replace(outcome.account);
+      if (outcome.signedIn) {
+        setSigningIn(null);
+        setJustSignedIn(platform);
+        setNotice(outcome.note);
+        onSignedIn();
+      } else {
+        setNotice(t("accounts.window.closed"));
+      }
+    } catch (err) {
+      failure(err);
+    } finally {
+      setWindowOpenFor(null);
+    }
+  };
+
+  const signOut = async (account: StoreAccountInfo) => {
+    setError(null);
+    setNotice(null);
+    try {
+      await storeSignOut(account.platform);
+      replace({ ...account, connected: false, displayName: null, needsSignIn: false });
       setJustSignedIn(null);
     } catch (err) {
       failure(err);
@@ -124,7 +171,7 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
                 <button
                   id={`account-sign-out-${account.platform}`}
                   type="button"
-                  onClick={() => void signOut(account.platform)}
+                  onClick={() => void signOut(account)}
                   className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-oled-border px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-600 hover:text-zinc-100"
                 >
                   <LogOut className="h-3.5 w-3.5" />
@@ -135,12 +182,14 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
                   id={`account-sign-in-${account.platform}`}
                   type="button"
                   aria-expanded={open}
+                  disabled={windowOpenFor !== null}
                   onClick={() => {
                     setSigningIn(open ? null : account.platform);
                     setPasted("");
                     setError(null);
+                    setNotice(null);
                   }}
-                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-oled-border px-2.5 py-1.5 text-xs text-zinc-200 transition-colors hover:border-zinc-600 hover:text-zinc-100"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-oled-border px-2.5 py-1.5 text-xs text-zinc-200 transition-colors hover:border-zinc-600 hover:text-zinc-100 disabled:opacity-50"
                 >
                   <LogIn className="h-3.5 w-3.5" />
                   <span>{t(open ? "accounts.cancel" : "accounts.signIn")}</span>
@@ -154,7 +203,37 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
               </p>
             )}
 
-            {open && (
+            {open && account.method === "window" && (
+              <div
+                data-account-window
+                className="mt-3 space-y-2.5 border-t border-oled-border pt-3 text-2xs leading-relaxed text-zinc-400"
+              >
+                <p>{t("accounts.window.explain", { store })}</p>
+                <p>
+                  {t(KEPT_AFTER_WINDOW[account.platform] ?? "accounts.window.kept.cookies", {
+                    store,
+                  })}
+                </p>
+                <button
+                  id={`account-open-window-${account.platform}`}
+                  type="button"
+                  disabled={windowOpenFor !== null}
+                  onClick={() => void signInInWindow(account.platform)}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover disabled:opacity-50"
+                >
+                  <AppWindow className="h-3.5 w-3.5" />
+                  <span>{t("accounts.window.open")}</span>
+                </button>
+                {windowOpenFor === account.platform && (
+                  <p role="status" className="text-zinc-300">
+                    {t("accounts.window.waiting", { store })}
+                  </p>
+                )}
+                {!isRunningInTauri() && <p className="text-zinc-500">{t("accounts.previewNote")}</p>}
+              </div>
+            )}
+
+            {open && account.method === "code" && (
               <ol className="mt-3 space-y-3 border-t border-oled-border pt-3 text-2xs leading-relaxed text-zinc-400">
                 <li className="space-y-1.5">
                   <p>
@@ -173,7 +252,8 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
                 </li>
                 <li className="space-y-1.5">
                   <label htmlFor={`account-code-${account.platform}`} className="block">
-                    <span className="font-semibold text-zinc-200">2.</span> {t("accounts.step2")}
+                    <span className="font-semibold text-zinc-200">2.</span>{" "}
+                    {t(STEP_TWO[account.platform] ?? "accounts.step2.epic")}
                   </label>
                   <div className="flex gap-2">
                     <input
@@ -211,6 +291,16 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
           </div>
         );
       })}
+
+      {notice && (
+        <p
+          role="status"
+          data-account-notice
+          className="select-text break-words text-2xs leading-relaxed text-amber-300"
+        >
+          {notice}
+        </p>
+      )}
 
       {error && (
         <p role="alert" className="select-text break-words text-2xs leading-relaxed text-red-300">

@@ -21,6 +21,7 @@ import type {
   SgdbGameMatch,
   StoreAccountInfo,
   Theme,
+  WindowSignIn,
 } from "../types/game";
 import { PREVIEW_MOCK_DEALS, PREVIEW_MOCK_GAMES } from "./previewData";
 import {
@@ -221,20 +222,48 @@ export async function completeLibraryInBackground(): Promise<void> {
 
 /* ----------------------------------------------------------- store accounts */
 
-// Preview only: one pretend account, so the sign-in panel can be tried in the browser
-let previewAccount: StoreAccountInfo = {
-  platform: "epic",
+// Preview only: pretend accounts, so the sign-in panel can be tried in the browser
+let previewAccounts: StoreAccountInfo[] = (
+  [
+    ["epic", "code"],
+    ["gog", "code"],
+    ["ubisoft", "window"],
+    ["ea", "window"],
+    ["Battle.net", "window"],
+  ] as const
+).map(([platform, method]) => ({
+  platform,
+  method,
   connected: false,
   displayName: null,
   needsSignIn: false,
-};
+}));
+
+function previewAccount(platform: GamePlatform): StoreAccountInfo {
+  return (
+    previewAccounts.find((account) => account.platform === platform) ?? {
+      platform,
+      method: "code",
+      connected: false,
+      displayName: null,
+      needsSignIn: false,
+    }
+  );
+}
+
+function setPreviewAccount(info: StoreAccountInfo): StoreAccountInfo {
+  previewAccounts = previewAccounts.map((account) =>
+    account.platform === info.platform ? info : account
+  );
+  return info;
+}
 
 /** The stores Kanso can sign in to, and who is signed in to each. */
 export async function listStoreAccounts(): Promise<StoreAccountInfo[]> {
   if (isTauri()) {
     return invoke<StoreAccountInfo[]>("list_store_accounts");
   }
-  return [previewAccount];
+  return previewAccounts;
 }
 
 /** Opens the store's own sign-in page in the browser (the backend builds the address). */
@@ -258,17 +287,49 @@ export async function storeSignIn(
   if (pasted.trim().length < 8) {
     throw "Non trovo un codice in quello che hai incollato.";
   }
-  previewAccount = { platform, connected: true, displayName: "Giocatore di prova", needsSignIn: false };
-  return previewAccount;
+  return setPreviewAccount({
+    ...previewAccount(platform),
+    connected: true,
+    displayName: "Giocatore di prova",
+    needsSignIn: false,
+  });
 }
 
-/** Forgets the store's session. Games already in the library stay. */
+/**
+ * Shows the store's own sign-in page in a window and resolves once the user has signed in
+ * there, or has closed the window. The password is typed on the store's page: neither the
+ * interface nor the backend ever handles it. Rejects with a message for the user when the
+ * store did not answer as expected.
+ */
+export async function storeSignInWindow(platform: GamePlatform): Promise<WindowSignIn> {
+  if (isTauri()) {
+    return invoke<WindowSignIn>("store_sign_in_window", { platform });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  const account = setPreviewAccount({
+    ...previewAccount(platform),
+    connected: true,
+    displayName: platform === "Battle.net" ? null : "Giocatore di prova",
+    needsSignIn: false,
+  });
+  return { signedIn: true, account, note: null };
+}
+
+/**
+ * Forgets the store's session (and the browser profile of its sign-in window). Games already
+ * in the library stay.
+ */
 export async function storeSignOut(platform: GamePlatform): Promise<void> {
   if (isTauri()) {
     await invoke("store_sign_out", { platform });
     return;
   }
-  previewAccount = { platform, connected: false, displayName: null, needsSignIn: false };
+  setPreviewAccount({
+    ...previewAccount(platform),
+    connected: false,
+    displayName: null,
+    needsSignIn: false,
+  });
 }
 
 export async function searchSteamGridDbGames(

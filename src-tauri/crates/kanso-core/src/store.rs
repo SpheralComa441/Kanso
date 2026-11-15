@@ -2,6 +2,7 @@ use crate::cleaner::{clean_game_title, is_placeholder_title};
 use crate::db::{sort_games_by_title, LibraryDb};
 use crate::i18n::T;
 use crate::metadata::{remove_existing_cover_variants, sanitize_filename_id};
+use crate::metadata::title_key;
 use crate::models::{
     now_timestamp_ms, DetectedGame, GameManualUpdate, GamePlatform, GameStatus, ScanReport,
 };
@@ -122,6 +123,42 @@ impl LibraryStore {
                 game
             })
             .collect();
+
+        // A game found on disk may already be in the library as not installed under another
+        // id: a store account or a client's records can know it by a different one than the
+        // scanner does. The entry on disk takes over what was the user's and the other goes,
+        // or the game would be listed twice.
+        let mut taken_over: HashSet<String> = HashSet::new();
+        for scanned in &mut report.games {
+            if scanned.platform == GamePlatform::Standalone || existing_by_id.contains_key(&scanned.id) {
+                continue;
+            }
+            let title = title_key(&scanned.clean_title);
+            let twin = gone.iter().find(|absent| {
+                absent.platform == scanned.platform
+                    && !title.is_empty()
+                    && title_key(&absent.clean_title) == title
+                    && !taken_over.contains(&absent.id)
+            });
+            if let Some(twin) = twin {
+                scanned.status = twin.status;
+                scanned.is_favorite = twin.is_favorite;
+                scanned.is_hidden = twin.is_hidden;
+                scanned.playtime_minutes = scanned.playtime_minutes.max(twin.playtime_minutes);
+                scanned.last_played_at = scanned.last_played_at.max(twin.last_played_at);
+                scanned.play_count = twin.play_count;
+                scanned.short_description = twin.short_description.clone();
+                scanned.genres = twin.genres.clone();
+                scanned.metadata_lang = twin.metadata_lang.clone();
+                scanned.tags = twin.tags.clone();
+                scanned.tags_lang = twin.tags_lang.clone();
+                scanned.steam_store_appid = twin.steam_store_appid.clone();
+                scanned.steamgriddb_id = twin.steamgriddb_id;
+                scanned.app_type = twin.app_type.clone();
+                taken_over.insert(twin.id.clone());
+            }
+        }
+        let gone = gone.into_iter().filter(|absent| !taken_over.contains(&absent.id));
         report.games.extend(gone);
 
         sort_games_by_title(&mut report.games);
@@ -317,6 +354,58 @@ mod tests {
     use super::*;
     use crate::models::GamePlatform;
     use tempfile::tempdir;
+
+    #[test]
+    fn a_game_installed_under_another_id_takes_the_place_of_its_not_installed_entry() {
+        // Listed by a store account under the store's own id, with what the user set on it
+        let mut from_account = DetectedGame::new_detected(
+            "ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000001".into(),
+            "Assassin's Creed\u{ae} Odyssey".into(),
+            "Assassin's Creed Odyssey".into(),
+            GamePlatform::Ubisoft,
+            None,
+            String::new(),
+            None,
+            None,
+        );
+        from_account.is_installed = false;
+        from_account.is_favorite = true;
+        from_account.status = Some(crate::models::GameStatus::Backlog);
+        from_account.genres = vec!["GDR".into()];
+        from_account.tags = vec!["Mondo aperto".into()];
+        from_account.steam_store_appid = Some("812140".into());
+        // Same title on another store: another copy, left alone
+        let mut on_epic = from_account.clone();
+        on_epic.id = "epic:odyssey".into();
+        on_epic.platform = GamePlatform::Epic;
+        let mut store = LibraryStore { games: vec![from_account, on_epic] };
+
+        // The scanner finds it installed, under the launcher's number
+        let scanned = DetectedGame::new_detected(
+            "ubisoft:5059".into(),
+            "Assassin's Creed Odyssey".into(),
+            "Assassin's Creed Odyssey".into(),
+            GamePlatform::Ubisoft,
+            Some("5059".into()),
+            "C:/Games/ACOdyssey".into(),
+            None,
+            Some("uplay://launch/5059/0".into()),
+        );
+        let report = store.merge_with_scan(ScanReport { games: vec![scanned], warnings: vec![] });
+
+        let mut ids: Vec<&str> = report.games.iter().map(|game| game.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(ids, ["epic:odyssey", "ubisoft:5059"], "one entry per copy, not two for Ubisoft's");
+        let installed = report.games.iter().find(|game| game.id == "ubisoft:5059").unwrap();
+        assert!(installed.is_installed);
+        assert!(installed.is_favorite);
+        assert_eq!(installed.status, Some(crate::models::GameStatus::Backlog));
+        assert_eq!(installed.genres, ["GDR"]);
+        assert_eq!(installed.steam_store_appid.as_deref(), Some("812140"));
+        assert_eq!(installed.launch_uri.as_deref(), Some("uplay://launch/5059/0"));
+        let on_epic = report.games.iter().find(|game| game.id == "epic:odyssey").unwrap();
+        assert!(!on_epic.is_installed);
+    }
 
     #[test]
     fn preserves_manual_overrides_across_rescans() {

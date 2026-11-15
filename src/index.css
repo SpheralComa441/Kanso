@@ -101,6 +101,17 @@
   transform: none !important;
 }
 
+/* The strips of the category tiles stand still, on their first covers */
+:root[data-reduce-motion] .category-strip {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .category-strip {
+    animation: none !important;
+  }
+}
+
 :root[data-strong-focus] :focus-visible {
   outline: 3px solid var(--accent-color) !important;
   outline-offset: 2px !important;
@@ -333,20 +344,29 @@
 
   /*
    * Genres and tags as tiles. A tile is a card (it takes the theme's shape, border and hover
-   * from .game-card) holding a fan of covers under a wash of the category's own hue.
+   * from .game-card) with a strip of covers drifting across it. Its colors are the covers'
+   * own: behind the strip runs a second copy of it, enlarged until one cover fills the tile
+   * and blurred, so that the tile is lit by whatever is passing through its middle.
+   *
+   * Every measure is in cqw, hundredths of the tile's width, so that the two strips keep
+   * step at any size. Both hold the same covers twice over and slide by half their length
+   * in the same time: one cover of the strip (33cqw with its gap) for one of the light
+   * (100cqw). The light starts where the cover in the middle of the tile is: with the
+   * strip's first cover at 5cqw, that is (5 + 15 - 50) * 100 / 33 = -90.9cqw.
    */
   .category-grid {
     display: grid;
     gap: var(--grid-gap);
-    grid-template-columns: repeat(auto-fill, minmax(calc(var(--card-min-width) * 1.15), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(calc(var(--card-min-width) * 1.5), 1fr));
   }
 
   .category-card {
     display: block;
-    aspect-ratio: 1;
+    aspect-ratio: 16 / 10;
+    container-type: inline-size;
     isolation: isolate;
     cursor: pointer;
-    background-color: hsl(var(--category-hue) 30% 16%);
+    text-align: left;
     /* Over artwork of any color: fixed light text, independent of the theme */
     color: #fff;
   }
@@ -356,80 +376,124 @@
     outline-offset: 2px;
   }
 
-  /* Larger than the tile and tilted: the covers run off every edge */
-  .category-card-collage {
-    position: absolute;
-    inset: -32%;
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    align-content: center;
-    gap: 0.625rem;
-    transform: rotate(-24deg);
-    filter: saturate(0.4) contrast(1.05);
-    transition: transform 0.35s ease;
+  .category-strip {
+    display: flex;
+    width: max-content;
+    height: 100%;
+    animation: category-drift var(--strip-duration, 64s) linear infinite;
+    animation-delay: var(--strip-delay, 0s);
+    will-change: transform;
   }
 
-  .category-card-collage img {
-    width: 100%;
-    aspect-ratio: 2 / 3;
-    border-radius: 3px;
+  .category-strip img {
+    flex: none;
+    height: 100%;
     object-fit: cover;
-    box-shadow: 0 6px 16px rgb(0 0 0 / 0.45);
   }
 
-  .game-card:hover .category-card-collage,
-  .game-card:focus-visible .category-card-collage {
-    transform: rotate(-24deg) scale(var(--card-hover-zoom));
+  @keyframes category-drift {
+    to {
+      transform: translate3d(-50%, 0, 0);
+    }
   }
 
-  /* Hue and saturation of the wash, brightness of the covers underneath */
-  .category-card-tint {
+  @keyframes category-appear {
+    from {
+      opacity: 0;
+    }
+  }
+
+  /* The light: taller than the tile, so that the blur has no edge to fade at */
+  .category-ambient {
     position: absolute;
-    inset: 0;
-    background-color: hsl(var(--category-hue) 62% 46%);
-    mix-blend-mode: color;
-    opacity: 0.9;
+    inset: -14cqw 0;
+    filter: blur(7cqw) saturate(1.65);
+    animation: category-appear 0.6s ease both;
   }
 
-  /* Darker towards the bottom, where the name is */
-  .category-card-shade {
+  .category-ambient .category-strip {
+    margin-left: -90.9cqw;
+  }
+
+  .category-ambient img {
+    width: 100cqw;
+  }
+
+  /* Over the light and under the covers: darker towards the bottom, where the name is */
+  .category-veil {
     position: absolute;
     inset: 0;
     background: linear-gradient(
       to bottom,
-      hsl(var(--category-hue) 45% 12% / 0.1),
-      hsl(var(--category-hue) 50% 9% / 0.62) 52%,
-      hsl(var(--category-hue) 55% 7% / 0.94)
+      rgb(0 0 0 / 0.06),
+      rgb(0 0 0 / 0.14) 55%,
+      rgb(0 0 0 / 0.5)
     );
   }
 
+  .category-covers {
+    position: absolute;
+    inset: 6cqw 0 auto;
+    height: 45cqw;
+    animation: category-appear 0.6s ease both;
+  }
+
+  .category-covers .category-strip {
+    margin-left: 5cqw;
+  }
+
+  .category-covers img {
+    width: 30cqw;
+    margin-right: 3cqw;
+    border-radius: min(var(--card-radius), 2cqw);
+    box-shadow:
+      0 1.4cqw 3.5cqw rgb(0 0 0 / 0.45),
+      0 0 0 1px rgb(255 255 255 / 0.08);
+  }
+
+  /* Under the pointer the covers stand still, to be looked at */
+  .game-card:hover .category-strip,
+  .game-card:focus-visible .category-strip {
+    animation-play-state: paused;
+  }
+
+  /* A name too long for one line climbs over the covers: it brings its own shade */
   .category-card-text {
     position: absolute;
     inset: auto 0 0;
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
-    padding: 0 0.875rem 1.125rem;
-    text-shadow: 0 1px 6px rgb(0 0 0 / 0.65);
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 3cqw;
+    padding: 7cqw 5cqw 4.2cqw;
+    background: linear-gradient(to bottom, transparent, rgb(0 0 0 / 0.42) 62%);
+    text-shadow: 0 1px 8px rgb(0 0 0 / 0.6);
   }
 
   .category-card-name {
-    max-width: 100%;
-    font-size: 0.9375rem;
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    font-size: clamp(0.8125rem, 5.4cqw, 1.125rem);
     font-weight: 600;
-    line-height: 1.3;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    text-wrap: balance;
+    line-height: 1.2;
+    letter-spacing: -0.005em;
     overflow-wrap: anywhere;
   }
 
+  /* A pane of the tile's own light */
   .category-card-count {
-    font-size: 0.6875rem;
+    flex: none;
+    padding: 0.2em 0.7em;
+    border: 1px solid rgb(255 255 255 / 0.16);
+    border-radius: 9999px;
+    background-color: rgb(255 255 255 / 0.14);
+    font-size: clamp(0.625rem, 3.5cqw, 0.75rem);
     font-variant-numeric: tabular-nums;
-    letter-spacing: 0.06em;
-    color: rgb(255 255 255 / 0.72);
+    line-height: 1.5;
+    white-space: nowrap;
+    text-shadow: none;
   }
 
   /* --------------------------------------------------------- window controls */

@@ -1,0 +1,241 @@
+# Account degli store: che cosa fa Kanso con il tuo accesso / Store accounts: what Kanso does with your sign-in
+
+Questa pagina dice, senza giri di parole, che cosa succede quando accedi a uno store da Kanso:
+che cosa Kanso vede, che cosa conserva, dove, a chi lo invia e come lo cancelli. Ogni
+affermazione rimanda al file del codice in cui la puoi verificare.
+*This page says plainly what happens when you sign in to a store from Kanso: what Kanso sees,
+what it keeps, where, whom it sends it to and how you delete it. Every statement points to the
+source file where you can check it. The English version follows the Italian one.*
+
+---
+
+## In breve
+
+- **La password non passa mai da Kanso.** La scrivi sulla pagina dello store (nel tuo browser, o
+  in una finestra che mostra la pagina dello store) e arriva solo allo store. Kanso non la
+  legge, non la salva, non la invia a nessuno. Vale anche per i codici a due fattori.
+- **Kanso non ha server.** Non esiste un servizio di Kanso a cui possa arrivare qualcosa: niente
+  telemetria, niente statistiche, niente copia "nel cloud". Tutto resta sul tuo PC.
+- **Sul PC resta solo la sessione** che lo store rilascia dopo l'accesso (un token, oppure i
+  cookie del sito dello store). Serve a una cosa sola: chiedere *a quello stesso store* l'elenco
+  dei tuoi giochi. Non viene mai inviata ad altri.
+- **Accedere è facoltativo.** Kanso funziona senza: l'accesso serve solo a vedere in libreria i
+  giochi che possiedi e non hai installato.
+- **«Esci» cancella tutto** ciò che riguarda quell'account: la voce in `accounts.json` e, per
+  gli store con finestra di accesso, il profilo del browser di quella finestra. I giochi già in
+  libreria restano.
+
+## Store per store
+
+Tutti i file stanno nella cartella dati di Kanso, `%LOCALAPPDATA%\com.kanso.launcher`.
+
+| Store | Dove accedi | Che cosa resta sul PC | Dove | A chi viene inviato |
+|---|---|---|---|---|
+| **Epic Games** | Nel tuo browser, sulla pagina di Epic; alla fine incolli in Kanso il codice mostrato | Il token di rinnovo della sessione | `accounts.json`, cifrato | Solo ai servizi di Epic (`*.ol.epicgames.com`, `*.on.epicgames.com`) |
+| **GOG** | Nel tuo browser, sulla pagina di GOG; alla fine incolli l'indirizzo della pagina | Il token di rinnovo della sessione | `accounts.json`, cifrato | Solo a GOG (`auth.gog.com`, `embed.gog.com`) |
+| **Ubisoft Connect** | In una finestra di Kanso che mostra la pagina di Ubisoft | I ticket di sessione rilasciati da Ubisoft | `accounts.json`, cifrato | Solo a Ubisoft (`public-ubiservices.ubi.com`) |
+| **EA app** | In una finestra di Kanso che mostra la pagina di EA | I cookie del sito di EA | `signin\ea\` (profilo del browser di quella finestra) | Solo a EA: i cookie li usa la finestra con `accounts.ea.com`; il token temporaneo che EA rilascia va a `service-aggregation-layer.juno.ea.com` e non viene salvato |
+| **Battle.net** | In una finestra di Kanso che mostra la pagina di Battle.net | I cookie del sito di Battle.net | `signin\battlenet\` (profilo del browser di quella finestra) | Solo a Blizzard: l'elenco dei giochi viene letto nella finestra stessa, da `account.battle.net` |
+
+- **Cifrato** significa protetto con la *Data Protection API* di Windows per il tuo utente: il
+  file non serve a nulla su un altro PC o a un altro utente dello stesso PC
+  ([`secrets.rs`](../src-tauri/crates/kanso-core/src/secrets.rs)).
+- In `accounts.json` c'è anche il nome dell'account, per mostrare «Collegato come ...».
+- Per EA e Battle.net il file contiene solo l'annotazione che qualcuno ha effettuato l'accesso:
+  questi store non rilasciano nulla da conservare
+  ([`accounts.rs`](../src-tauri/crates/kanso-core/src/accounts.rs)).
+- Steam e Xbox non hanno accesso in Kanso: la libreria di Steam viene letta dai file locali del
+  client, senza credenziali.
+
+## La finestra di accesso (Ubisoft, EA, Battle.net)
+
+Questi tre store non hanno un accesso "con codice da incollare": la sessione nasce e resta
+dentro la loro pagina. Per questo Kanso apre **la pagina dello store** in una finestra a parte.
+Che cosa fa e che cosa non fa quella finestra è scritto, come contratto, in
+[`signin.rs`](../src-tauri/crates/kanso-core/src/signin.rs); il codice che la apre è
+[`signin_window.rs`](../src-tauri/src/signin_window.rs). In concreto:
+
+1. **Mostra la pagina di accesso dello store, e basta.** Kanso non esegue nulla sul modulo di
+   accesso: nessuno script suo, nessun tasto osservato, nessun contenuto letto, nessuna
+   richiesta della pagina intercettata. Password e codici vanno dalla pagina allo store, come
+   in un normale browser. Per completezza, due cose che invece accadono:
+   - Kanso **vede l'indirizzo** di ogni pagina che la finestra apre: gli serve per capire
+     quando lo store ha finito e per rifiutare ciò che non è `https`. Gli indirizzi non vengono
+     salvati; in un messaggio d'errore possono comparire solo sito e percorso (mai la parte
+     dopo il `?`, che può contenere codici);
+   - **Tauri**, il framework con cui Kanso è costruito, aggiunge a ogni finestra il proprio
+     codice di avvio. Non legge la pagina, e i comandi che servirebbe a chiamare sono rifiutati
+     a questa finestra (punto 3).
+2. **Dopo che lo store ti ha fatto accedere**, Kanso esegue *uno* di due script, entrambi di
+   una riga e scritti per esteso in `signin.rs` (`SCRIPTS`):
+   - per Ubisoft, sulla pagina `connect.ubisoft.com/ready` (quella che Ubisoft mostra *dopo*
+     l'accesso): legge le tre voci in cui la pagina stessa tiene la sessione appena ottenuta;
+   - per EA e Battle.net, su un indirizzo che contiene solo la risposta dello store in formato
+     JSON (il token temporaneo di EA; l'elenco dei giochi di Battle.net): legge il testo della
+     pagina.
+
+   Nessun altro script può essere eseguito: la finestra rifiuta tutto ciò che non è in quell'elenco,
+   e un test controlla che quei due script non tocchino moduli, campi, cookie o rete
+   (`the_scripts_only_read_what_the_store_handed_out`).
+3. **È isolata dal resto di Kanso.** Ha un profilo del browser tutto suo, uno per store
+   (`signin\<store>\`): i suoi cookie non sono quelli dell'app né di un altro store. Può aprire
+   solo indirizzi `https` (anche nelle finestrelle che la pagina dello store apre da sé, per
+   esempio «accedi con...»), non scarica file, e non può chiamare nessun comando di Kanso: i
+   comandi sono concessi alla sola finestra principale
+   ([`capabilities/default.json`](../src-tauri/capabilities/default.json)) e Tauri li rifiuta
+   alle pagine che non sono dell'app. La pagina dello store non può quindi leggere impostazioni,
+   chiavi API, libreria o file.
+4. **Per Ubisoft il profilo del browser viene cancellato subito dopo l'accesso**: la sessione
+   sta già, cifrata, in `accounts.json`. Per EA e Battle.net il profilo resta, perché *è* la
+   sessione; viene cancellato quando esci.
+5. **Rinnovo senza disturbare.** Per EA e Battle.net, quando Kanso aggiorna la libreria riapre
+   la stessa finestra senza mostrarla, giusto il tempo di chiedere allo store la risposta di cui
+   sopra. Se lo store chiede di nuovo le credenziali, Kanso non fa nulla: segna la sessione come
+   scaduta e le Impostazioni ti invitano ad accedere di nuovo.
+
+**Restare collegati.** I cookie di EA e Battle.net sopravvivono alla chiusura di Kanso solo se
+sulla pagina dello store spunti l'opzione per restare collegato; il ticket di Ubisoft si
+rinnova solo con «Remember me». Senza, i giochi già importati restano in libreria, ma per
+vedere i nuovi acquisti dovrai accedere di nuovo.
+
+## Con che identità Kanso parla agli store
+
+Nessuno di questi store offre un'API pubblica per la libreria di un utente. Come gli altri
+launcher liberi che la mostrano (Heroic, Legendary, Lutris, Playnite), Kanso usa i servizi che
+usano i client e i siti degli store stessi, presentandosi con gli identificativi di
+applicazione che quei progetti pubblicano nel loro codice (l'id e il segreto del launcher di
+Epic e di GOG Galaxy, l'id del sito "Club" di Ubisoft, l'id del sito di EA). **Identificano il
+programma, non te**: nel codice di Kanso non c'è nulla che riguardi un utente.
+
+Questi servizi non sono documentati e possono cambiare: se uno store cambia qualcosa,
+l'accesso a quello store smette di funzionare finché Kanso non viene aggiornato. In quel caso
+Kanso lo dice (indicando su quali pagine si è fermato, senza mai mostrare codici o token) e non
+tenta altre strade.
+
+## Come cancellare tutto
+
+- **Un account:** Impostazioni → *Account degli store* → **Esci**.
+- **Tutto a mano:** chiudi Kanso e cancella `accounts.json` e la cartella `signin` in
+  `%LOCALAPPDATA%\com.kanso.launcher`.
+- **Dal lato dello store:** ogni store ha una pagina in cui vedere e revocare le sessioni
+  attive; revocarle lì rende inutile qualunque cosa sia rimasta sul PC.
+
+## Come verificare da te
+
+| Che cosa | Dove guardare |
+|---|---|
+| Il contratto della finestra e i due script | [`kanso-core/src/signin.rs`](../src-tauri/crates/kanso-core/src/signin.rs) |
+| La finestra: profilo separato, solo `https`, nessun download | [`src-tauri/src/signin_window.rs`](../src-tauri/src/signin_window.rs) |
+| I passi di ogni store, e i test che li percorrono | `ubisoft_account.rs`, `ea_account.rs`, `battlenet_account.rs` in [`kanso-core/src/`](../src-tauri/crates/kanso-core/src/) |
+| Accesso con codice (Epic, GOG) | `epic_account.rs`, `gog_account.rs` |
+| Che cosa finisce in `accounts.json` e come | [`accounts.rs`](../src-tauri/crates/kanso-core/src/accounts.rs), [`secrets.rs`](../src-tauri/crates/kanso-core/src/secrets.rs) |
+| I comandi dell'app (accedi, esci, aggiorna) | [`src-tauri/src/accounts.rs`](../src-tauri/src/accounts.rs) |
+| I permessi delle finestre | [`src-tauri/capabilities/default.json`](../src-tauri/capabilities/default.json) |
+
+Gli indirizzi contattati per gli account sono tutti scritti come costanti in quei file: non ce
+ne sono altri.
+
+---
+
+## In short (English)
+
+- **Your password never passes through Kanso.** You type it on the store's page (in your
+  browser, or in a window showing the store's page) and it reaches the store only. Kanso does
+  not read it, save it or send it to anyone. The same goes for two-factor codes.
+- **Kanso has no server.** There is no Kanso service anything could be sent to: no telemetry,
+  no statistics, no "cloud" copy. Everything stays on your PC.
+- **Only the session stays on the PC**: what the store issues after the sign-in (a token, or
+  the cookies of the store's site). It is used for one thing: asking *that same store* for the
+  list of your games. It is never sent to anyone else.
+- **Signing in is optional.** Kanso works without it: it only adds to the library the games you
+  own and have not installed.
+- **"Sign out" deletes everything** about that account: its entry in `accounts.json` and, for
+  the stores with a sign-in window, that window's browser profile. Games already in the library
+  stay.
+
+## Store by store
+
+All files are in Kanso's data folder, `%LOCALAPPDATA%\com.kanso.launcher`.
+
+| Store | Where you sign in | What stays on the PC | Where | Whom it is sent to |
+|---|---|---|---|---|
+| **Epic Games** | In your browser, on Epic's page; you paste the code shown at the end | The token that renews the session | `accounts.json`, encrypted | Epic's services only (`*.ol.epicgames.com`, `*.on.epicgames.com`) |
+| **GOG** | In your browser, on GOG's page; you paste the address of the last page | The token that renews the session | `accounts.json`, encrypted | GOG only (`auth.gog.com`, `embed.gog.com`) |
+| **Ubisoft Connect** | In a window of Kanso showing Ubisoft's page | The session tickets Ubisoft issued | `accounts.json`, encrypted | Ubisoft only (`public-ubiservices.ubi.com`) |
+| **EA app** | In a window of Kanso showing EA's page | The cookies of EA's site | `signin\ea\` (that window's browser profile) | EA only: the window uses the cookies with `accounts.ea.com`; the short-lived token EA issues goes to `service-aggregation-layer.juno.ea.com` and is never saved |
+| **Battle.net** | In a window of Kanso showing Battle.net's page | The cookies of Battle.net's site | `signin\battlenet\` (that window's browser profile) | Blizzard only: the list of games is read in the window itself, from `account.battle.net` |
+
+- **Encrypted** means protected with the Windows *Data Protection API* for your user: the file
+  is useless on another PC or to another user of the same PC (`secrets.rs`).
+- `accounts.json` also holds the account's name, to show "Signed in as ...".
+- For EA and Battle.net the file only notes that someone signed in: these stores issue nothing
+  to keep.
+- Steam and Xbox have no sign-in in Kanso: the Steam library is read from the client's local
+  files, with no credentials.
+
+## The sign-in window (Ubisoft, EA, Battle.net)
+
+These three stores have no sign-in that ends on a code to paste: the session is born and stays
+inside their page. So Kanso opens **the store's own page** in a separate window. What that
+window may and may not do is written down, as a contract, in `kanso-core/src/signin.rs`; the
+code that opens it is `src-tauri/src/signin_window.rs`.
+
+1. **It shows the store's sign-in page, and that is all.** Kanso runs nothing on the sign-in
+   form: no script of its own, no key press observed, no content read, no request of the page
+   intercepted. Passwords and codes go from the page to the store, as in any browser. For
+   completeness, two things that do happen:
+   - Kanso **sees the address** of each page the window opens: it needs it to tell when the
+     store is done and to refuse anything that is not `https`. Addresses are not saved; an
+     error message may show the site and path only (never the part after the `?`, which may
+     carry codes);
+   - **Tauri**, the framework Kanso is built with, adds its own startup code to every window.
+     It does not read the page, and the commands it would be used to call are refused to this
+     window (point 3).
+2. **After the store has signed you in**, Kanso runs *one* of two scripts, both one line long
+   and written out in `signin.rs` (`SCRIPTS`):
+   - for Ubisoft, on `connect.ubisoft.com/ready` (the page Ubisoft shows *after* the sign-in):
+     it reads the three entries in which the page itself keeps the session it just obtained;
+   - for EA and Battle.net, on an address that holds nothing but the store's answer in JSON
+     (EA's short-lived token; Battle.net's list of games): it reads the text of the page.
+
+   No other script can run: the window refuses anything not on that list, and a test checks
+   that those two scripts touch no form, field, cookie or network call.
+3. **It is cut off from the rest of Kanso.** It has a browser profile of its own, one per store
+   (`signin\<store>\`): its cookies are neither the app's nor another store's. It may open
+   `https` addresses only (also in the small windows the store's page opens by itself, such as
+   "sign in with..."), downloads nothing, and cannot call any command of Kanso: commands
+   are granted to the main window alone (`capabilities/default.json`) and Tauri refuses them to
+   pages that are not the app's own. The store's page therefore cannot read settings, API keys,
+   the library or files.
+4. **For Ubisoft the browser profile is deleted right after the sign-in**: the session is
+   already in `accounts.json`, encrypted. For EA and Battle.net the profile stays, because it
+   *is* the session; it is deleted when you sign out.
+5. **Renewal without getting in the way.** For EA and Battle.net, when Kanso refreshes the
+   library it reopens the same window without showing it, just long enough to ask the store for
+   the answer described above. If the store asks for credentials again, Kanso does nothing: it
+   marks the session as expired and Settings invites you to sign in again.
+
+**Staying signed in.** The cookies of EA and Battle.net outlive Kanso only if you tick the
+option to stay signed in on the store's page; Ubisoft's ticket renews only with "Remember me".
+Without it, the games already imported stay in the library, but to see new purchases you will
+have to sign in again.
+
+## The identity Kanso uses with the stores
+
+None of these stores offers a public API for a user's library. Like the other free launchers
+that show it (Heroic, Legendary, Lutris, Playnite), Kanso uses the services the stores' own
+clients and sites use, with the application identifiers those projects publish in their code
+(the id and secret of Epic's launcher and of GOG Galaxy, the id of Ubisoft's "Club" site, the
+id of EA's site). **They name the program, not you**: nothing in Kanso's code concerns a user.
+
+These services are undocumented and may change: if a store changes something, signing in to
+that store stops working until Kanso is updated. Kanso then says so (naming the pages it
+stopped on, never showing codes or tokens) and tries nothing else.
+
+## Deleting everything
+
+- **One account:** Settings → *Store accounts* → **Sign out**.
+- **By hand:** close Kanso and delete `accounts.json` and the `signin` folder in
+  `%LOCALAPPDATA%\com.kanso.launcher`.
+- **On the store's side:** every store has a page to see and revoke active sessions; revoking
+  them there makes whatever is left on the PC useless.

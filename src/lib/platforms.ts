@@ -64,14 +64,26 @@ export function platformLabel(
     : PLATFORM_META[platform].label;
 }
 
-/** Stores whose client can be asked to install a game (the backend builds the address). */
-const INSTALLABLE_PLATFORMS: readonly GamePlatform[] = ["steam", "epic", "gog", "ubisoft"];
-
-/** Whether Kanso can hand a game that is not on disk to its store's client for installing. */
+/**
+ * Whether Kanso can hand a game that is not on disk to its store's client for installing.
+ * Mirrors what the backend can build an address from (`DetectedGame::install_uri`): a game
+ * listed by an account may lack what its client knows it by.
+ */
 export function canInstall(game: DetectedGame): boolean {
-  return (
-    !game.isInstalled &&
-    INSTALLABLE_PLATFORMS.includes(game.platform) &&
-    Boolean(game.platformAppId || game.launchUri)
-  );
+  if (game.isInstalled) return false;
+  const appId = game.platformAppId?.trim() ?? "";
+  const launchUri = game.launchUri ?? "";
+  switch (game.platform) {
+    case "steam":
+    case "gog":
+      return /^\d+$/.test(appId);
+    case "epic":
+      return launchUri.startsWith("com.epicgames.launcher://apps/");
+    case "ubisoft":
+      return launchUri.startsWith("uplay://");
+    case "Battle.net":
+      return launchUri.startsWith("battlenet://");
+    default:
+      return false;
+  }
 }

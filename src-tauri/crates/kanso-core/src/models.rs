@@ -293,10 +293,13 @@ impl DetectedGame {
                 .launch_uri
                 .clone()
                 .filter(|uri| uri.starts_with("uplay://")),
-            GamePlatform::Ea
-            | GamePlatform::Xbox
-            | GamePlatform::BattleNet
-            | GamePlatform::Standalone => None,
+            // The Battle.net app opens on the game, where it offers the download. Only a
+            // game listed by the account knows the code the app calls it by
+            GamePlatform::BattleNet => self
+                .launch_uri
+                .clone()
+                .filter(|uri| uri.starts_with("battlenet://")),
+            GamePlatform::Ea | GamePlatform::Xbox | GamePlatform::Standalone => None,
         }
     }
 

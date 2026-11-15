@@ -1,10 +1,13 @@
 pub mod accounts;
 pub mod achievements;
+pub mod battlenet_account;
 pub mod cleaner;
 pub mod config;
 pub mod db;
 pub mod deals;
+pub mod ea_account;
 pub mod epic_account;
+pub mod gog_account;
 pub mod i18n;
 pub mod metadata;
 pub mod models;
@@ -13,8 +16,12 @@ pub mod playtime;
 pub mod plugins;
 pub mod scanner;
 pub mod secrets;
+pub mod signin;
 pub mod store;
+#[cfg(test)]
+mod test_http;
 pub mod theme;
+pub mod ubisoft_account;
 pub mod vdf;
 
 pub use achievements::{Achievement, GameAchievements};
