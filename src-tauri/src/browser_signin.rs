@@ -9,7 +9,7 @@
 //! arrives, the user gives up or the time is up.
 
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -18,6 +18,8 @@ const SIGN_IN_TIME: Duration = Duration::from_secs(10 * 60);
 /// A request line with a code in it is a few hundred bytes: more than this is not one.
 const MAX_REQUEST_BYTES: usize = 8 * 1024;
 const POLL_EVERY: Duration = Duration::from_millis(120);
+/// How long the listener stays after the answer, for a browser that asks again.
+const LINGER: Duration = Duration::from_millis(1500);
 
 /// How waiting for the browser ended.
 #[derive(Debug, PartialEq, Eq)]
@@ -71,8 +73,24 @@ impl Listener {
             for socket in &self.sockets {
                 if let Ok((stream, _)) = socket.accept() {
                     if let Some(answer) = serve(stream, read) {
+                        self.linger(read);
                         return Wait::Answered(answer);
                     }
+                }
+            }
+            std::thread::sleep(POLL_EVERY);
+        }
+    }
+
+    /// Stays a moment longer after the answer: a browser that did not get the page the first
+    /// time (it opens more than one connection, and may ask twice) asks again, and would
+    /// otherwise find nobody and show an error over a sign-in that went through.
+    fn linger<T>(&self, read: Reader<'_, T>) {
+        let until = Instant::now() + LINGER;
+        while Instant::now() < until {
+            for socket in &self.sockets {
+                if let Ok((stream, _)) = socket.accept() {
+                    let _ = serve(stream, read);
                 }
             }
             std::thread::sleep(POLL_EVERY);
@@ -88,16 +106,23 @@ impl Listener {
 /// "not found" for anything else.
 fn serve<T>(mut stream: TcpStream, read: Reader<'_, T>) -> Option<T> {
     let _ = stream.set_nonblocking(false);
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
 
+    // The whole request is read, headers included, before answering: a connection closed
+    // with part of the request still unread is reset rather than closed, and the browser
+    // then throws the answer away
     let mut request = Vec::new();
     let mut buffer = [0u8; 1024];
-    while !request.windows(2).any(|pair| pair == b"\r\n") && request.len() < MAX_REQUEST_BYTES {
+    while !request.windows(4).any(|end| end == b"\r\n\r\n") && request.len() < MAX_REQUEST_BYTES {
         match stream.read(&mut buffer) {
             Ok(0) | Err(_) => break,
             Ok(read) => request.extend_from_slice(&buffer[..read]),
         }
+    }
+    // A connection the browser opened ahead of time and sent nothing on
+    if request.is_empty() {
+        return None;
     }
     let text = String::from_utf8_lossy(&request);
     let first_line = text.lines().next().unwrap_or_default();
@@ -116,6 +141,11 @@ fn serve<T>(mut stream: TcpStream, read: Reader<'_, T>) -> Option<T> {
     );
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
+    // Closed in order: this side says it is done, then waits for the browser to close its
+    // own, so that the answer is delivered before the connection goes
+    let _ = stream.shutdown(Shutdown::Write);
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    while matches!(stream.read(&mut buffer), Ok(read) if read > 0) {}
     answer
 }
 
@@ -158,9 +188,42 @@ mod tests {
         assert!(answer.contains("Fatto &lt;ok&gt; &amp; chiuso"), "the page is text, never markup");
         assert!(answer.contains("Cache-Control: no-store"));
 
+        // A browser that asks again right after still finds the page
+        let again = get(port, "/xbox?code=abc123");
+        assert!(again.starts_with("HTTP/1.1 200 OK"), "{again}");
+
         assert_eq!(waiting.join().unwrap(), Wait::Answered("abc123".to_string()));
         // The listener is gone with the wait
         assert!(TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_err());
+    }
+
+    #[test]
+    fn the_answer_reaches_a_browser_that_sends_long_headers_and_opens_spare_connections() {
+        let listener = Listener::on(0).expect("a free port");
+        let port = listener.port();
+        let cancel = Arc::new(AtomicBool::new(false));
+        let waiting = {
+            let cancel = Arc::clone(&cancel);
+            std::thread::spawn(move || listener.wait(&reader, &cancel, Duration::from_secs(20)))
+        };
+
+        // A connection opened ahead of time, on which nothing is ever sent
+        let spare = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+
+        // The request, with the headers a browser sends, arriving in two pieces
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).unwrap();
+        stream.write_all(b"GET /xbox?code=abc123 HTTP/1.1\r\nHost: localhost\r\n").unwrap();
+        stream.flush().unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        let headers = format!("User-Agent: {}\r\nAccept: text/html\r\nCookie: {}\r\n\r\n", "Mozilla/5.0 ".repeat(20), "a=b; ".repeat(300));
+        stream.write_all(headers.as_bytes()).unwrap();
+        let mut answer = String::new();
+        stream.read_to_string(&mut answer).expect("the connection is closed, not reset");
+        assert!(answer.starts_with("HTTP/1.1 200 OK"), "{answer}");
+        assert!(answer.ends_with("</html>"), "the whole page arrived");
+
+        assert_eq!(waiting.join().unwrap(), Wait::Answered("abc123".to_string()));
+        drop(spare);
     }
 
     #[test]
