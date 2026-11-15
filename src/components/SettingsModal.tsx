@@ -107,6 +107,7 @@ export function SettingsModal({
   );
   const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
   const [hasGamePass, setHasGamePass] = useState(initialConfig.hasGamePass);
+  const [gamePassCatalog, setGamePassCatalog] = useState(initialConfig.gamePassCatalog);
   const [pluginStates, setPluginStates] = useState<Record<string, PluginState>>(
     initialConfig.plugins
   );
@@ -127,6 +128,7 @@ export function SettingsModal({
       setAccessibility(initialConfig.accessibility);
       setTrackPlaytime(initialConfig.trackPlaytime);
       setHasGamePass(initialConfig.hasGamePass);
+      setGamePassCatalog(initialConfig.gamePassCatalog);
       setPluginStates(initialConfig.plugins);
       setManualFolderInput("");
       setShowKey(false);
@@ -267,6 +269,7 @@ export function SettingsModal({
         trackPlaytime,
         plugins: pluginStates,
         hasGamePass,
+        gamePassCatalog,
       });
       onPreviewTheme(null);
       onPreviewAccessibility(null);
@@ -600,26 +603,31 @@ export function SettingsModal({
             <p className="text-2xs leading-relaxed text-zinc-500">{t("accounts.help")}</p>
             <StoreAccountsSettings isOpen={isOpen} onSignedIn={onStoreSignedIn} />
             {/* Nothing tells Kanso about a Game Pass subscription: the user does */}
-            <div className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
-              <div>
-                <label
-                  htmlFor="game-pass-checkbox"
-                  className="block text-xs font-medium text-zinc-200"
-                >
-                  {t("accounts.gamePass.title")}
-                </label>
-                <p className="text-2xs leading-relaxed text-zinc-500">
-                  {t("accounts.gamePass.help")}
-                </p>
+            {(
+              [
+                ["game-pass-catalog-checkbox", "accounts.gamePassCatalog", gamePassCatalog, setGamePassCatalog],
+                ["game-pass-checkbox", "accounts.gamePass", hasGamePass, setHasGamePass],
+              ] as const
+            ).map(([id, key, checked, setChecked]) => (
+              <div
+                key={id}
+                className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5"
+              >
+                <div>
+                  <label htmlFor={id} className="block text-xs font-medium text-zinc-200">
+                    {t(`${key}.title`)}
+                  </label>
+                  <p className="text-2xs leading-relaxed text-zinc-500">{t(`${key}.help`)}</p>
+                </div>
+                <input
+                  id={id}
+                  type="checkbox"
+                  checked={checked}
+                  onChange={(e) => setChecked(e.target.checked)}
+                  className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                />
               </div>
-              <input
-                id="game-pass-checkbox"
-                type="checkbox"
-                checked={hasGamePass}
-                onChange={(e) => setHasGamePass(e.target.checked)}
-                className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
-              />
-            </div>
+            ))}
           </section>
 
           {/* SteamGridDB API Key */}

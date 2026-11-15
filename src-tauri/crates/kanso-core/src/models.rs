@@ -299,7 +299,13 @@ impl DetectedGame {
                 .launch_uri
                 .clone()
                 .filter(|uri| uri.starts_with("battlenet://")),
-            GamePlatform::Ea | GamePlatform::Xbox | GamePlatform::Standalone => None,
+            // The Xbox app, or the Microsoft Store, opens on the game's page, where it
+            // offers the download: the address an account or the Game Pass catalog gave
+            GamePlatform::Xbox => self
+                .launch_uri
+                .clone()
+                .filter(|uri| uri.starts_with("msxbox://game/?productId=") || uri.starts_with("ms-windows-store://pdp/?PFN=")),
+            GamePlatform::Ea | GamePlatform::Standalone => None,
         }
     }
 

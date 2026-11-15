@@ -1,6 +1,7 @@
 mod accounts;
 mod playtime;
 mod plugins;
+mod gamepass;
 mod signin_window;
 
 use kanso_core::deals::is_allowed_store_url;
@@ -117,11 +118,15 @@ fn save_settings(
     config: AppConfig,
 ) -> Result<AppConfig, String> {
     let config_path = resolve_config_path(&app)?;
-    let had_game_pass = load_config(&app).has_game_pass;
+    let before = load_config(&app);
+    let (had_game_pass, listed_catalog) = (before.has_game_pass, before.game_pass_catalog);
     let saved = config.save_to_file(&config_path)?;
     apply_language(&app, saved.lang().unwrap_or(FALLBACK_LANGUAGE));
     if saved.has_game_pass != had_game_pass {
         accounts::apply_game_pass(&app, &state.db, saved.has_game_pass);
+    }
+    if saved.game_pass_catalog != listed_catalog {
+        gamepass::apply_setting(&app, &state.db, saved.game_pass_catalog);
     }
     // A plugin may have been switched on, or its settings changed
     state.plugins.wake_background_fill();
@@ -374,14 +379,19 @@ async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<
         again.store(true, Ordering::SeqCst);
         return Ok(());
     }
-    let config = load_config(&app);
     let covers_dir = resolve_covers_dir(&app)?;
     let db = Arc::clone(&state.db);
 
     let outcome = tauri::async_runtime::spawn_blocking(move || loop {
+        // Read at each pass: a pass asked for while another runs follows a change of settings
+        let config = load_config(&app);
         accounts::sync_store_accounts(&app, &db, &|added| {
             let _ = app.emit(GAMES_UPDATED_EVENT, added);
         });
+        // The Game Pass catalog, where the user asked for it: public, read once a day
+        if config.game_pass_catalog {
+            gamepass::sync_catalog(&app, &db, config.lang().unwrap_or(FALLBACK_LANGUAGE));
+        }
 
         let client =
             MetadataClient::new().with_language(config.lang().unwrap_or(FALLBACK_LANGUAGE));

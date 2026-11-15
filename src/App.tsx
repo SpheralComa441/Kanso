@@ -87,6 +87,7 @@ const INITIAL_CONFIG: AppConfig = {
   trackPlaytime: true,
   plugins: {},
   hasGamePass: false,
+  gamePassCatalog: false,
 };
 
 const SIDEBAR_PREF_KEY = "kanso.ui.sidebar";
@@ -445,7 +446,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       Boolean(updated.steamgriddbApiKey.trim()) &&
       updated.steamgriddbApiKey.trim() !== config.steamgriddbApiKey.trim();
     const languageChanged = updated.language !== lang;
-    const gamePassChanged = updated.hasGamePass !== config.hasGamePass;
+    // Games to add: the ones Game Pass gives on Battle.net, or its catalog for PC
+    const gamePassAdded =
+      (updated.hasGamePass && !config.hasGamePass) ||
+      (updated.gamePassCatalog && !config.gamePassCatalog);
 
     const saved = await saveSettings(updated);
     onConfigChange(saved);
@@ -459,8 +463,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       // descriptions and genres have to be fetched again
       void runMetadataSync(true);
     }
-    // The games Game Pass brought have no cover yet: the background pass finds them
-    if (gamePassChanged && saved.hasGamePass) {
+    // The background pass reads the catalog, and finds the covers the games still lack
+    if (gamePassAdded) {
       void completeLibraryInBackground().catch(() => {});
     }
   };

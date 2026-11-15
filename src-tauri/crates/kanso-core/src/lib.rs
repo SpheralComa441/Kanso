@@ -7,6 +7,7 @@ pub mod db;
 pub mod deals;
 pub mod ea_account;
 pub mod epic_account;
+pub mod gamepass;
 pub mod gog_account;
 pub mod i18n;
 pub mod metadata;
@@ -22,6 +23,7 @@ pub mod store;
 mod test_http;
 pub mod theme;
 pub mod ubisoft_account;
+pub mod xbox_account;
 pub mod vdf;
 
 pub use achievements::{Achievement, GameAchievements};

@@ -154,6 +154,34 @@ pub fn remove_absent_games(db: &Mutex<LibraryDb>, ids: &[String]) -> Vec<String>
     }
 }
 
+/// Makes the library hold the games of the Game Pass catalog as `catalog` lists them today:
+/// the ones it does not have yet join it as not installed, and the entries an earlier catalog
+/// brought that are no longer in it leave, unless the game has been installed since. Entries
+/// that came from anywhere else are never touched. Returns the games added, as stored, and
+/// the ids removed.
+pub fn sync_game_pass_catalog(
+    db: &Mutex<LibraryDb>,
+    catalog: Vec<OwnedGame>,
+    now_ms: u64,
+) -> (Vec<DetectedGame>, Vec<String>) {
+    let listed: HashSet<String> = catalog.iter().map(|owned| owned.game.id.to_ascii_lowercase()).collect();
+    let gone: Vec<String> = lock(db)
+        .load_games()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|game| crate::gamepass::is_catalog_entry(game) && !listed.contains(&game.id.to_ascii_lowercase()))
+        .map(|game| game.id)
+        .collect();
+    let removed = remove_absent_games(db, &gone);
+    (merge_owned_games(db, catalog, now_ms), removed)
+}
+
+/// Takes out of the library every entry the Game Pass catalog brought that is not installed:
+/// the user no longer wants the catalog listed. Returns the ids removed.
+pub fn remove_game_pass_catalog(db: &Mutex<LibraryDb>) -> Vec<String> {
+    sync_game_pass_catalog(db, Vec::new(), 0).1
+}
+
 /// Items of an Epic account described by the catalog in one [`sync_epic_library_step`].
 pub const EPIC_STEP: usize = 15;
 
@@ -901,6 +929,56 @@ mod tests {
             None,
             Some(format!("https://cdn.example/{id}.jpg")),
         )
+    }
+
+    #[test]
+    fn the_game_pass_catalog_comes_and_goes_without_touching_anything_else() {
+        let from_catalog = |id: &str, title: &str, product: &str| {
+            let mut game = owned(GamePlatform::Xbox, id, title);
+            game.game.launch_uri = Some(format!("{}{product}", crate::gamepass::XBOX_APP_PAGE_PREFIX));
+            game
+        };
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        // A game the account has played, and a game of another store
+        let mut played = owned(GamePlatform::Xbox, "xbox:Studio.Played", "Played Before");
+        played.game.launch_uri = Some("ms-windows-store://pdp/?PFN=Studio.Played_abc".into());
+        merge_owned_games(&db, vec![played, owned(GamePlatform::Gog, "gog:1", "Elsewhere")], 1);
+
+        let (added, removed) = sync_game_pass_catalog(
+            &db,
+            vec![
+                from_catalog("xbox:Studio.One", "One", "9AAAAAAAAAAA"),
+                from_catalog("xbox:Studio.Two", "Two", "9BBBBBBBBBBB"),
+                from_catalog("xbox:Studio.Three", "Three", "9CCCCCCCCCCC"),
+                // In the catalog too, but already in the library from the account
+                from_catalog("xbox:Studio.Played", "Played Before", "9DDDDDDDDDDD"),
+            ],
+            2,
+        );
+        assert_eq!(added.len(), 3);
+        assert!(removed.is_empty());
+
+        // Two is installed meanwhile; then One and Two leave the catalog
+        {
+            let db = lock(&db);
+            let mut two = db.get_game("xbox:Studio.Two").unwrap().unwrap();
+            two.is_installed = true;
+            db.upsert_game(&two).unwrap();
+        }
+        let (added, removed) =
+            sync_game_pass_catalog(&db, vec![from_catalog("xbox:studio.three", "Three", "9CCCCCCCCCCC")], 3);
+        assert!(added.is_empty(), "the same package, whatever the case of its name");
+        assert_eq!(removed, ["xbox:Studio.One"]);
+        let ids = |db: &Mutex<LibraryDb>| -> Vec<String> {
+            let mut ids: Vec<String> = lock(db).load_games().unwrap().into_iter().map(|game| game.id).collect();
+            ids.sort();
+            ids
+        };
+        assert_eq!(ids(&db), ["gog:1", "xbox:Studio.Played", "xbox:Studio.Three", "xbox:Studio.Two"]);
+
+        // The user no longer wants the catalog: what it brought and is not installed goes
+        assert_eq!(remove_game_pass_catalog(&db), ["xbox:Studio.Three"]);
+        assert_eq!(ids(&db), ["gog:1", "xbox:Studio.Played", "xbox:Studio.Two"]);
     }
 
     #[test]

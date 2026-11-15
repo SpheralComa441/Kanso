@@ -112,6 +112,10 @@ pub struct AppConfig {
     /// the games it makes installable there are listed (see
     /// [`crate::battlenet_account::game_pass_games`]). Kanso cannot find this out by itself.
     pub has_game_pass: bool,
+    /// The user asked for the games of the Game Pass catalog for PC to be listed as not
+    /// installed (see [`crate::gamepass`]): a few hundred games, from Microsoft's public
+    /// catalog.
+    pub game_pass_catalog: bool,
 }
 
 impl Default for AppConfig {
@@ -126,6 +130,7 @@ impl Default for AppConfig {
             track_playtime: true,
             plugins: BTreeMap::new(),
             has_game_pass: false,
+            game_pass_catalog: false,
         }
     }
 }
@@ -173,6 +178,7 @@ impl AppConfig {
             accessibility: self.accessibility.sanitized(),
             track_playtime: self.track_playtime,
             has_game_pass: self.has_game_pass,
+            game_pass_catalog: self.game_pass_catalog,
             plugins: self
                 .plugins
                 .into_iter()
@@ -267,6 +273,7 @@ mod tests {
             },
             track_playtime: false,
             has_game_pass: true,
+            game_pass_catalog: true,
             plugins: BTreeMap::from([
                 (
                     "price-history".to_string(),

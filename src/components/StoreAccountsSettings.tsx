@@ -16,6 +16,7 @@ import type { GamePlatform, StoreAccountInfo } from "../types/game";
 const STEP_TWO: Partial<Record<GamePlatform, MessageKey>> = {
   epic: "accounts.step2.epic",
   gog: "accounts.step2.gog",
+  xbox: "accounts.step2.xbox",
 };
 
 /**

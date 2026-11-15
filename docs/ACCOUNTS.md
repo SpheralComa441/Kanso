@@ -36,6 +36,7 @@ Tutti i file stanno nella cartella dati di Kanso, `%LOCALAPPDATA%\com.kanso.laun
 | **Ubisoft Connect** | In una finestra di Kanso che mostra la pagina di Ubisoft | I ticket di sessione rilasciati da Ubisoft | `accounts.json`, cifrato | Solo a Ubisoft (`public-ubiservices.ubi.com` per la sessione e l'elenco dei giochi; `api-uplayplusvault.ubi.com` per i giochi dell'abbonamento Ubisoft+) |
 | **EA app** | In una finestra di Kanso che mostra la pagina di EA | I cookie del sito di EA | `signin\ea\` (profilo del browser di quella finestra) | Solo a EA: i cookie li usa la finestra con `accounts.ea.com`; il token temporaneo che EA rilascia va a `service-aggregation-layer.juno.ea.com` e non viene salvato |
 | **Battle.net** | In una finestra di Kanso che mostra la pagina di Battle.net | I cookie del sito di Battle.net | `signin\battlenet\` (profilo del browser di quella finestra) | Solo a Blizzard: l'elenco dei giochi viene letto nella finestra stessa, da `account.battle.net` |
+| **Xbox** | Nel tuo browser, sulla pagina di Microsoft; alla fine incolli l'indirizzo della pagina | Il token di rinnovo della sessione Microsoft | `accounts.json`, cifrato | Solo a Microsoft (`login.live.com` per la sessione; `user.auth.xboxlive.com` e `xsts.auth.xboxlive.com` per entrare in Xbox Live; `titlehub.xboxlive.com` per l'elenco dei giochi) |
 
 - **Cifrato** significa protetto con la *Data Protection API* di Windows per il tuo utente: il
   file non serve a nulla su un altro PC o a un altro utente dello stesso PC
@@ -44,8 +45,15 @@ Tutti i file stanno nella cartella dati di Kanso, `%LOCALAPPDATA%\com.kanso.laun
 - Per EA e Battle.net il file contiene solo l'annotazione che qualcuno ha effettuato l'accesso:
   questi store non rilasciano nulla da conservare
   ([`accounts.rs`](../src-tauri/crates/kanso-core/src/accounts.rs)).
-- Steam e Xbox non hanno accesso in Kanso: la libreria di Steam viene letta dai file locali del
-  client, senza credenziali.
+- Steam non ha accesso in Kanso: la sua libreria viene letta dai file locali del client, senza
+  credenziali.
+- **Xbox:** l'accesso chiede a Microsoft il solo permesso di entrare in Xbox Live
+  (`Xboxlive.signin`, più quello di restare collegati): non la posta, non i file, non il
+  profilo dell'account Microsoft. Da Xbox Live Kanso legge il gamertag, per mostrarlo, e la
+  cronologia dei titoli. **Che cosa contiene quell'elenco:** i giochi che l'account ha *avviato
+  almeno una volta* su un PC. Un gioco comprato e mai avviato non c'è, e Microsoft non dà a un
+  programma esterno l'elenco degli acquisti. Nemmeno dice in modo affidabile se l'account ha
+  Game Pass: per questo il catalogo Game Pass è un'opzione a parte (vedi sotto).
 
 **Che cosa viene letto dall'account.** Solo l'elenco dei giochi: titolo, identificativo, e la
 copertina dove lo store la dà. Per Ubisoft anche le piattaforme su cui possiedi ogni gioco: un
@@ -82,12 +90,27 @@ da Ubisoft+ o da Xbox Game Pass (l'elenco dell'account su internet non li contie
 
 **Xbox Game Pass su Battle.net: lo dici tu.** Il sito di Battle.net non dice se un account ha
 Game Pass e non elenca i giochi che Game Pass rende installabili finché non li avvii una volta.
-Kanso non accede a Xbox. Per questo nelle Impostazioni c'è la spunta *«Ho Xbox Game Pass
+Nemmeno l'accesso a Xbox lo dice in modo affidabile. Per questo nelle Impostazioni c'è la spunta *«Ho Xbox Game Pass
 collegato a Battle.net»*: se la metti, Kanso aggiunge come «non installati» i giochi di un
 elenco incluso nel programma ([`battlenet_account.rs`](../src-tauri/crates/kanso-core/src/battlenet_account.rs)),
 preso dalla pagina di supporto di Blizzard. È solo una tua dichiarazione salvata in
 `config.json`: **non parte alcuna richiesta e nessuno viene informato**. Se un gioco non è
 compreso nel tuo piano, Battle.net semplicemente non te lo farà installare.
+
+**Il catalogo di Xbox Game Pass per PC: un'altra spunta, e questa volta una richiesta parte.**
+Con *«Aggiungi il catalogo di Xbox Game Pass per PC»* Kanso legge il catalogo **pubblico** di
+Microsoft, lo stesso che mostrano l'app Xbox e xbox.com, e ne aggiunge i giochi come «non
+installati», con il pulsante che li apre nell'app Xbox
+([`gamepass.rs`](../src-tauri/crates/kanso-core/src/gamepass.rs)).
+
+- Le richieste vanno a `catalog.gamepass.com` (l'elenco) e a `displaycatalog.mp.microsoft.com`
+  (nome, copertina e pacchetto di ogni gioco). Rispondono a chiunque: **non serve un account e
+  non viene inviato nulla che ti riguardi**, nemmeno se hai effettuato l'accesso a Xbox. L'unica
+  cosa che Microsoft apprende è ciò che apprende ogni sito: l'indirizzo IP da cui arriva la
+  richiesta. Il paese del catalogo è dedotto dalla lingua dell'interfaccia.
+- Il catalogo viene letto al più una volta al giorno. Un gioco che ne esce viene tolto dalla
+  libreria, se non è installato; togliendo la spunta escono tutti quelli non installati.
+- La spunta è spenta finché non la metti tu: senza, nessuna di queste richieste parte.
 
 ## La finestra di accesso (Ubisoft, EA, Battle.net)
 
@@ -161,6 +184,13 @@ applicazione che quei progetti pubblicano nel loro codice (l'id e il segreto del
 Epic e di GOG Galaxy, l'id del sito "Club" di Ubisoft, l'id del sito di EA). **Identificano il
 programma, non te**: nel codice di Kanso non c'è nulla che riguardi un utente.
 
+**Per Xbox c'è una differenza che è giusto dire.** Microsoft chiede che ogni programma sia
+registrato presso di lei. Kanso si presenta con l'id con cui è registrato il launcher libero
+Playnite (pubblicato nel suo codice): la pagina di consenso di Microsoft mostra quindi il nome
+di quella registrazione, non «Kanso». L'id è una sola costante in
+[`xbox_account.rs`](../src-tauri/crates/kanso-core/src/xbox_account.rs): chi mantiene il
+progetto può sostituirla con una registrazione propria.
+
 Questi servizi non sono documentati e possono cambiare: se uno store cambia qualcosa,
 l'accesso a quello store smette di funzionare finché Kanso non viene aggiornato. In quel caso
 Kanso lo dice (indicando su quali pagine si è fermato, senza mai mostrare codici o token) e non
@@ -181,7 +211,8 @@ tenta altre strade.
 | Il contratto della finestra e i due script | [`kanso-core/src/signin.rs`](../src-tauri/crates/kanso-core/src/signin.rs) |
 | La finestra: profilo separato, solo `https`, nessun download | [`src-tauri/src/signin_window.rs`](../src-tauri/src/signin_window.rs) |
 | I passi di ogni store, e i test che li percorrono | `ubisoft_account.rs`, `ea_account.rs`, `battlenet_account.rs` in [`kanso-core/src/`](../src-tauri/crates/kanso-core/src/) |
-| Accesso con codice (Epic, GOG) | `epic_account.rs`, `gog_account.rs` |
+| Accesso con codice (Epic, GOG, Xbox) | `epic_account.rs`, `gog_account.rs`, `xbox_account.rs` |
+| Catalogo Game Pass (pubblico, senza account) | [`gamepass.rs`](../src-tauri/crates/kanso-core/src/gamepass.rs) |
 | Che cosa finisce in `accounts.json` e come | [`accounts.rs`](../src-tauri/crates/kanso-core/src/accounts.rs), [`secrets.rs`](../src-tauri/crates/kanso-core/src/secrets.rs) |
 | I comandi dell'app (accedi, esci, aggiorna) | [`src-tauri/src/accounts.rs`](../src-tauri/src/accounts.rs) |
 | I permessi delle finestre | [`src-tauri/capabilities/default.json`](../src-tauri/capabilities/default.json) |
@@ -218,14 +249,22 @@ All files are in Kanso's data folder, `%LOCALAPPDATA%\com.kanso.launcher`.
 | **Ubisoft Connect** | In a window of Kanso showing Ubisoft's page | The session tickets Ubisoft issued | `accounts.json`, encrypted | Ubisoft only (`public-ubiservices.ubi.com` for the session and the list of games; `api-uplayplusvault.ubi.com` for the games of the Ubisoft+ subscription) |
 | **EA app** | In a window of Kanso showing EA's page | The cookies of EA's site | `signin\ea\` (that window's browser profile) | EA only: the window uses the cookies with `accounts.ea.com`; the short-lived token EA issues goes to `service-aggregation-layer.juno.ea.com` and is never saved |
 | **Battle.net** | In a window of Kanso showing Battle.net's page | The cookies of Battle.net's site | `signin\battlenet\` (that window's browser profile) | Blizzard only: the list of games is read in the window itself, from `account.battle.net` |
+| **Xbox** | In your browser, on Microsoft's page; at the end you paste the page's address | The refresh token of the Microsoft session | `accounts.json`, encrypted | Microsoft only (`login.live.com` for the session; `user.auth.xboxlive.com` and `xsts.auth.xboxlive.com` to sign in to Xbox Live; `titlehub.xboxlive.com` for the list of games) |
 
 - **Encrypted** means protected with the Windows *Data Protection API* for your user: the file
   is useless on another PC or to another user of the same PC (`secrets.rs`).
 - `accounts.json` also holds the account's name, to show "Signed in as ...".
 - For EA and Battle.net the file only notes that someone signed in: these stores issue nothing
   to keep.
-- Steam and Xbox have no sign-in in Kanso: the Steam library is read from the client's local
-  files, with no credentials.
+- Steam has no sign-in in Kanso: its library is read from the client's local files, with no
+  credentials.
+- **Xbox:** the sign-in asks Microsoft for the permission to sign in to Xbox Live alone
+  (`Xboxlive.signin`, plus the one to stay signed in): not mail, not files, not the profile of
+  the Microsoft account. From Xbox Live Kanso reads the gamertag, to show it, and the title
+  history. **What that list holds:** the games the account has *started at least once* on a
+  PC. A game bought and never started is not in it, and Microsoft gives an outside program no
+  list of purchases. Nor does it say reliably whether the account has Game Pass: that is why
+  the Game Pass catalog is a separate option (see below).
 
 **What is read from the account.** Only the list of games: title, identifier, and the cover
 where the store gives one. For Ubisoft also the platforms you have each game on: a game joins
@@ -262,12 +301,26 @@ Game Pass give you (the account's list on the internet does not have them).
 
 **Xbox Game Pass on Battle.net: you say so.** Battle.net's site does not say whether an account
 has Game Pass, and does not list the games Game Pass makes installable until they have been
-started once. Kanso does not sign in to Xbox. Hence the *"I have Xbox Game Pass linked to
+started once. Signing in to Xbox does not say it reliably either. Hence the *"I have Xbox Game Pass linked to
 Battle.net"* tick in Settings: with it, Kanso adds as "not installed" the games of a list that
 ships with the program ([`battlenet_account.rs`](../src-tauri/crates/kanso-core/src/battlenet_account.rs)),
 taken from Blizzard's support page. It is only your own statement, saved in `config.json`: **no
 request is made and nobody is told**. If your plan does not include a game, Battle.net will
 simply not let you install it.
+
+**The Xbox Game Pass catalog for PC: another tick, and this time a request is made.** With
+*"Add the Xbox Game Pass catalog for PC"* Kanso reads Microsoft's **public** catalog, the one
+the Xbox app and xbox.com show, and adds its games as "not installed", with the button that
+opens them in the Xbox app ([`gamepass.rs`](../src-tauri/crates/kanso-core/src/gamepass.rs)).
+
+- The requests go to `catalog.gamepass.com` (the list) and `displaycatalog.mp.microsoft.com`
+  (name, cover and package of each game). They answer anyone: **no account is needed and
+  nothing about you is sent**, not even when you are signed in to Xbox. The only thing
+  Microsoft learns is what any site learns: the IP address the request comes from. The
+  catalog's country is taken from the language of the interface.
+- The catalog is read at most once a day. A game that leaves it is removed from the library,
+  unless it is installed; unticking removes all the ones not installed.
+- The tick is off until you set it: without it, none of these requests is made.
 
 ## The sign-in window (Ubisoft, EA, Battle.net)
 
@@ -335,6 +388,13 @@ that show it (Heroic, Legendary, Lutris, Playnite), Kanso uses the services the 
 clients and sites use, with the application identifiers those projects publish in their code
 (the id and secret of Epic's launcher and of GOG Galaxy, the id of Ubisoft's "Club" site, the
 id of EA's site). **They name the program, not you**: nothing in Kanso's code concerns a user.
+
+**For Xbox there is a difference that should be said.** Microsoft wants every program
+registered with it. Kanso presents itself with the id the free launcher Playnite is registered
+under (published in its code): Microsoft's consent page therefore shows the name of that
+registration, not "Kanso". The id is a single constant in
+[`xbox_account.rs`](../src-tauri/crates/kanso-core/src/xbox_account.rs): whoever maintains the
+project can replace it with a registration of their own.
 
 These services are undocumented and may change: if a store changes something, signing in to
 that store stops working until Kanso is updated. Kanso then says so (naming the pages it
