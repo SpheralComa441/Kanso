@@ -248,7 +248,7 @@ let previewAccounts: StoreAccountInfo[] = (
     ["ubisoft", "window"],
     ["ea", "window"],
     ["Battle.net", "window"],
-    ["xbox", "code"],
+    ["xbox", "browser"],
   ] as const
 ).map(([platform, method]) => ({
   platform,
@@ -315,6 +315,25 @@ export async function storeSignIn(
     needsSignIn: false,
     library: null,
   });
+}
+
+/** The user gave up on the sign-in they started in the browser. */
+export async function cancelStoreSignInBrowser(): Promise<void> {
+  if (isTauri()) {
+    await invoke("cancel_store_sign_in_browser");
+  }
+}
+
+/**
+ * Opens the store's own sign-in page in the user's browser and resolves once the store has
+ * sent the browser back to Kanso (on this PC), or the user has given up. The password is
+ * typed on the store's page, in the browser: Kanso never handles it.
+ */
+export async function storeSignInBrowser(platform: GamePlatform): Promise<WindowSignIn> {
+  if (isTauri()) {
+    return invoke<WindowSignIn>("store_sign_in_browser", { platform });
+  }
+  return storeSignInWindow(platform);
 }
 
 /**
