@@ -141,6 +141,8 @@ export interface AppConfig {
    * installable there are listed. Kanso cannot find this out by itself.
    */
   hasGamePass: boolean;
+  /** List the games of the Game Pass catalog for PC (Microsoft's public catalog). */
+  gamePassCatalog: boolean;
 }
 
 export interface PluginState {

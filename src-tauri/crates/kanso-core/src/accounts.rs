@@ -64,7 +64,8 @@ pub fn authorization_code_in(pasted: &str) -> Option<String> {
         .and_then(|json| json.get("authorizationCode")?.as_str().map(str::to_string))
         .or_else(|| {
             let (_, after) = pasted.split_once("code=")?;
-            Some(after.split(['&', '#', '"', ' ']).next().unwrap_or_default().to_string())
+            // In an address a code may be written with escapes (`%21` for `!`)
+            Some(percent_decode(after.split(['&', '#', '"', ' ']).next().unwrap_or_default()))
         })
         .unwrap_or_else(|| pasted.trim_matches('"').to_string());
     let plain = (8..=1024).contains(&candidate.len())
@@ -72,6 +73,30 @@ pub fn authorization_code_in(pasted: &str) -> Option<String> {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'!' | b'*' | b'$'));
     plain.then_some(candidate)
+}
+
+/// Text with the `%XX` escapes of an address turned back into the characters they stand for.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut position = 0;
+    while position < bytes.len() {
+        let escaped = (bytes[position] == b'%')
+            .then(|| text.get(position + 1..position + 3))
+            .flatten()
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match escaped {
+            Some(byte) => {
+                out.push(byte);
+                position += 3;
+            }
+            None => {
+                out.push(bytes[position]);
+                position += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// An account as kept on disk.

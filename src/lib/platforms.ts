@@ -83,6 +83,11 @@ export function canInstall(game: DetectedGame): boolean {
       return launchUri.startsWith("uplay://");
     case "Battle.net":
       return launchUri.startsWith("battlenet://");
+    case "xbox":
+      return (
+        launchUri.startsWith("msxbox://game/?productId=") ||
+        launchUri.startsWith("ms-windows-store://pdp/?PFN=")
+      );
     default:
       return false;
   }

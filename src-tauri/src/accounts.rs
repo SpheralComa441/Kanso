@@ -3,13 +3,13 @@
 //! Two ways of signing in, and in neither does Kanso see, keep or send the password: it is
 //! typed on the store's own page and goes to the store.
 //!
-//! - **Epic and GOG** sign in in the user's browser and end on a code, which the user pastes
-//!   here. Kanso exchanges the code with the store for a session token.
+//! - **Epic, GOG and Xbox** sign in in the user's browser and end on a code, which the user
+//!   pastes here. Kanso exchanges the code with the store for a session token.
 //! - **Ubisoft, EA and Battle.net** have no such code: the store's own page is shown in a
 //!   window of Kanso ([`crate::signin_window`]), and once the store has signed the user in
 //!   Kanso reads what the page was handed ([`kanso_core::signin`] says exactly what).
 //!
-//! What stays on the PC afterwards, and nowhere else: for Epic, GOG and Ubisoft a session
+//! What stays on the PC afterwards, and nowhere else: for Epic, GOG, Xbox and Ubisoft a session
 //! token in `accounts.json`, encrypted by Windows for the current user; for EA and Battle.net
 //! the cookies of the store's site, in the browser profile of that store's window. Each is
 //! sent only to the store it came from, to renew the session and to read the list of games.
@@ -30,6 +30,7 @@ use kanso_core::models::{now_timestamp_ms, DetectedGame};
 use kanso_core::owned::{merge_owned_games, OwnedGame};
 use kanso_core::signin::SignInFlow;
 use kanso_core::ubisoft_account::{UbisoftApi, UbisoftFlow, UbisoftLibrary, UbisoftSession};
+use kanso_core::xbox_account::{self, XboxApi};
 use kanso_core::T;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -50,6 +51,7 @@ const GOG: &str = "gog";
 const UBISOFT: &str = "ubisoft";
 const EA: &str = "ea";
 const BATTLENET: &str = "Battle.net";
+const XBOX: &str = "xbox";
 
 /// How the user signs in to a store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -77,6 +79,7 @@ const STORES: &[Store] = &[
     Store { platform: UBISOFT, slug: "ubisoft", name: "Ubisoft Connect", method: Method::Window },
     Store { platform: EA, slug: "ea", name: "EA app", method: Method::Window },
     Store { platform: BATTLENET, slug: "battlenet", name: "Battle.net", method: Method::Window },
+    Store { platform: XBOX, slug: "xbox", name: "Xbox", method: Method::Code },
 ];
 
 /// What the interface shows about a store's account.
@@ -231,7 +234,7 @@ fn store_failure(error: &StoreError) -> String {
 /// The addresses of the stores' sites and services. Always the real ones in the program that
 /// is distributed; a debug build can be pointed at stand-ins on this PC, to try the sign-in
 /// windows without an account (`KANSO_SIGNIN_TEST_SITES`, a list of `name=address`).
-fn test_site(name: &str) -> Option<String> {
+pub(crate) fn test_site(name: &str) -> Option<String> {
     if !cfg!(debug_assertions) {
         return None;
     }
@@ -244,6 +247,10 @@ fn test_site(name: &str) -> Option<String> {
 
 fn ubisoft_api() -> UbisoftApi {
     test_site("ubisoft_api").map_or_else(UbisoftApi::new, |site| UbisoftApi::with_services(&site, &site))
+}
+
+fn xbox_api() -> XboxApi {
+    test_site("xbox").map_or_else(XboxApi::new, |site| XboxApi::with_services(&site, &site, &site, &site))
 }
 
 fn ea_api() -> EaApi {
@@ -295,6 +302,7 @@ pub(crate) fn list_store_accounts(app: AppHandle) -> Result<Vec<StoreAccountInfo
 pub(crate) fn open_store_sign_in(app: AppHandle, platform: String) -> Result<(), String> {
     let url = match supported(&platform, Method::Code)?.platform {
         EPIC => epic_account::sign_in_url(),
+        XBOX => xbox_account::sign_in_url(),
         _ => gog_account::sign_in_url(),
     };
     app.opener()
@@ -319,6 +327,14 @@ pub(crate) async fn store_sign_in(
         EPIC => EpicApi::new().exchange_code(&code).map(|session| {
             (session.account_id.clone(), session.display_name.clone(), session.refresh_token.clone())
         }),
+        XBOX => {
+            let api = xbox_api();
+            let session = api.exchange_code(&code)?;
+            // Signing in to Xbox Live is part of the sign-in: an account Xbox Live refuses
+            // (no Xbox profile) has no library to read
+            let identity = api.identity(&session)?;
+            Ok((identity.xuid.clone(), identity.gamertag.clone(), session.refresh_token.clone()))
+        }
         _ => {
             let api = GogApi::new();
             let session = api.exchange_code(&code)?;
@@ -488,6 +504,7 @@ pub(crate) fn sync_store_accounts(app: &AppHandle, db: &SharedDb, on_added: &dyn
         let outcome = match store.platform {
             EPIC => sync_epic_account(&accounts, db, on_added),
             GOG => sync_gog_account(&accounts, db, on_added),
+            XBOX => sync_xbox_account(&accounts, db, on_added),
             UBISOFT => sync_ubisoft_account(app, &accounts, db, on_added),
             _ => sync_window_account(app, &accounts, db, store, on_added),
         };
@@ -568,6 +585,32 @@ fn sync_gog_account(
 
     let games = api.library(&session)?;
     if let Some(store) = STORES.iter().find(|store| store.platform == GOG) {
+        note_library(store, games.len());
+    }
+    add_to_library(db, games, on_added);
+    Ok(())
+}
+
+/// Xbox: renews the Microsoft session, signs it in to Xbox Live and reads the PC games the
+/// account has played.
+fn sync_xbox_account(
+    accounts: &AccountStore,
+    db: &SharedDb,
+    on_added: &dyn Fn(&[DetectedGame]),
+) -> Result<(), StoreError> {
+    let Some(account) = accounts.load(XBOX) else {
+        return Ok(());
+    };
+    let api = xbox_api();
+    let session = api.refresh(&account.refresh_token)?;
+    // Renewing may replace the token: the new one has to be kept before anything else
+    let renewed = StoreAccount { refresh_token: session.refresh_token.clone(), ..account };
+    if accounts.save(XBOX, &renewed).is_err() {
+        return Ok(());
+    }
+
+    let games = api.library(&api.identity(&session)?)?;
+    if let Some(store) = STORES.iter().find(|store| store.platform == XBOX) {
         note_library(store, games.len());
     }
     add_to_library(db, games, on_added);

@@ -52,6 +52,7 @@ const DEFAULT_CONFIG: AppConfig = {
   trackPlaytime: true,
   plugins: {},
   hasGamePass: false,
+  gamePassCatalog: false,
 };
 
 /** Keeps only well-formed per-plugin choices (the preview reads them from localStorage). */
@@ -134,6 +135,7 @@ export async function getSettings(): Promise<AppConfig> {
       trackPlaytime: parsed.trackPlaytime !== false,
       plugins: withPluginDefaults(parsed.plugins),
       hasGamePass: parsed.hasGamePass === true,
+      gamePassCatalog: parsed.gamePassCatalog === true,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -153,6 +155,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     trackPlaytime: config.trackPlaytime,
     plugins: withPluginDefaults(config.plugins),
     hasGamePass: config.hasGamePass === true,
+    gamePassCatalog: config.gamePassCatalog === true,
   };
 
   if (isTauri()) {
@@ -245,6 +248,7 @@ let previewAccounts: StoreAccountInfo[] = (
     ["ubisoft", "window"],
     ["ea", "window"],
     ["Battle.net", "window"],
+    ["xbox", "code"],
   ] as const
 ).map(([platform, method]) => ({
   platform,
