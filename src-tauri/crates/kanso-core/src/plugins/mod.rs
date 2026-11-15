@@ -191,6 +191,7 @@ pub fn game_payload(game: &DetectedGame) -> Value {
         "genres": game.genres,
         "tags": game.tags,
         "isFavorite": game.is_favorite,
+        "installed": game.is_installed,
         "status": game.status.map(|status| status.as_str()),
         "playtimeMinutes": game.playtime_minutes,
         "lastPlayedAt": game.last_played_at,
@@ -350,12 +351,22 @@ impl PluginEngine {
         match self.call(plugin, &settings, &storage, lang, "gameDetails", &game_payload(game)) {
             Ok(output) => {
                 let data = parse_game_data(&output.value);
+                // An answer may ask to be kept for less than the plugin's usual time (data
+                // not out yet, a service that could not be reached), never for longer
+                let cache_hours = output
+                    .value
+                    .get("cacheHours")
+                    .and_then(Value::as_f64)
+                    .filter(|hours| hours.is_finite() && *hours > 0.0)
+                    .map_or(plugin.manifest.cache_hours, |hours| {
+                        (hours.ceil() as u64).clamp(1, plugin.manifest.cache_hours)
+                    });
                 let entry = PluginCacheEntry {
                     data: serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string()),
                     ok: true,
                     signature,
                     fetched_at: now_ms,
-                    expires_at: now_ms + plugin.manifest.cache_hours * 3_600_000,
+                    expires_at: now_ms + cache_hours * 3_600_000,
                 };
                 let mut db = lock(db);
                 let _ = db.put_plugin_cache(plugin_id, &game.id, &entry);
@@ -634,6 +645,31 @@ mod tests {
         hidden_badge.plugins.get_mut("demo").unwrap().show_badge = false;
         assert!(engine.badges(&lock(&db), &plugins, &hidden_badge, Lang::En).is_empty());
         assert!(engine.badges(&lock(&db), &plugins, &AppConfig::default(), Lang::En).is_empty());
+    }
+
+    #[test]
+    fn an_answer_may_ask_to_be_cached_for_less_but_never_for_longer() {
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let engine = PluginEngine::with_transport(FakeTransport::offline(), "0.1.0");
+        let config = enabled(&[]);
+        let hour = 3_600_000;
+        let expiry = |code: &str, id: &str| {
+            let plugin = test_plugin(code);
+            let game = game(id, "Any");
+            engine.game_data(&db, &plugin, &config, Lang::En, &game, false, 0);
+            lock(&db).get_plugin_cache("demo", id).unwrap().unwrap().expires_at
+        };
+
+        // The test plugin's manifest says two hours
+        let reply = |hours: &str| {
+            format!("kanso.plugin({{ gameDetails: () => ({{ cacheHours: {hours}, sections: [] }}) }});")
+        };
+        assert_eq!(expiry(&reply("undefined"), "g:default"), 2 * hour);
+        assert_eq!(expiry(&reply("1"), "g:shorter"), hour);
+        assert_eq!(expiry(&reply("0.2"), "g:fraction"), hour, "at least one hour");
+        assert_eq!(expiry(&reply("500"), "g:longer"), 2 * hour, "capped at the manifest's");
+        assert_eq!(expiry(&reply("-3"), "g:negative"), 2 * hour);
+        assert_eq!(expiry(&reply("'soon'"), "g:text"), 2 * hour);
     }
 
     #[test]

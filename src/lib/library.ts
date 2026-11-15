@@ -3,9 +3,10 @@ import { PLATFORM_ORDER } from "./platforms";
 
 /**
  * Which slice of the library is shown. Hidden games appear in `hidden` only; every other
- * collection, count and filter ignores them.
+ * collection, count and filter ignores them. Games that are not on disk appear in
+ * `notInstalled`, in search results and wherever a status is asked for.
  */
-export type LibraryCollection = "all" | "favorites" | "recent" | "hidden";
+export type LibraryCollection = "all" | "favorites" | "recent" | "notInstalled" | "hidden";
 
 /** Quick filters combined with AND; `"all"` / `null` means "no constraint". */
 export interface LibraryFilters {
@@ -52,10 +53,12 @@ export interface GenreSummary {
 }
 
 export interface LibraryCounts {
-  /** Games shown in the library (hidden ones excluded). */
+  /** Games shown in the library: on disk and not hidden. */
   visible: number;
   favorites: number;
   recent: number;
+  /** In the library but not on disk (hidden ones excluded). */
+  notInstalled: number;
   hidden: number;
   byPlatform: Record<GamePlatform, number>;
   byStatus: Record<GameStatus, number>;
@@ -93,7 +96,7 @@ export function genreKey(genre: string): string {
 export function summarizeGenres(games: DetectedGame[]): GenreSummary[] {
   const byKey = new Map<string, GenreSummary>();
   for (const game of games) {
-    if (game.isHidden) continue;
+    if (game.isHidden || !game.isInstalled) continue;
     const seenInGame = new Set<string>();
     for (const raw of game.genres) {
       const key = genreKey(raw);
@@ -123,7 +126,7 @@ export function summarizeTags(
   const genreKeys = new Set(genres.map((genre) => genre.key));
   const byKey = new Map<string, GenreSummary>();
   for (const game of games) {
-    if (game.isHidden) continue;
+    if (game.isHidden || !game.isInstalled) continue;
     const seenInGame = new Set<string>();
     for (const raw of game.tags) {
       const key = genreKey(raw);
@@ -150,6 +153,7 @@ export function countLibrary(games: DetectedGame[]): LibraryCounts {
     visible: 0,
     favorites: 0,
     recent: 0,
+    notInstalled: 0,
     hidden: 0,
     byPlatform,
     byStatus: { backlog: 0, playing: 0, finished: 0, abandoned: 0 },
@@ -159,10 +163,15 @@ export function countLibrary(games: DetectedGame[]): LibraryCounts {
       counts.hidden += 1;
       continue;
     }
+    // A status is about the player: it counts whether or not the game is on disk
+    if (game.status) counts.byStatus[game.status] += 1;
+    if (!game.isInstalled) {
+      counts.notInstalled += 1;
+      continue;
+    }
     counts.visible += 1;
     if (game.isFavorite) counts.favorites += 1;
     if (isRecentlyPlayed(game)) counts.recent += 1;
-    if (game.status) counts.byStatus[game.status] += 1;
     byPlatform[game.platform] = (byPlatform[game.platform] ?? 0) + 1;
   }
   return counts;
@@ -175,9 +184,14 @@ export function applyLibraryFilters(
 ): DetectedGame[] {
   const q = searchQuery.trim().toLowerCase();
   const wantHidden = filters.collection === "hidden";
+  const wantAbsent = filters.collection === "notInstalled";
 
   const matching = games.filter((g) => {
     if (g.isHidden !== wantHidden) return false;
+    if (wantAbsent && g.isInstalled) return false;
+    // Elsewhere only what is on disk, unless a status or a search asks for more: "finished"
+    // is about the player, and whoever types a title wants to find it wherever it is
+    if (!wantHidden && !wantAbsent && !g.isInstalled && !filters.status && !q) return false;
     if (filters.collection === "favorites" && !g.isFavorite) return false;
     if (filters.collection === "recent" && !isRecentlyPlayed(g)) return false;
     if (filters.platform && g.platform !== filters.platform) return false;

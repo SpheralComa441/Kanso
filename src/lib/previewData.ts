@@ -65,12 +65,45 @@ function seed(game: PreviewSeed): DetectedGame {
     achievementsUnlocked: null,
     achievementsTotal: null,
     steamStoreAppid: null,
+    isInstalled: true,
     updatedAt: 1700000000000,
     ...rest,
   };
 }
 
 export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
+  // In the library but not on disk: one finished long ago, one never installed here
+  seed({
+    id: "steam:620",
+    title: "Portal 2",
+    platform: "steam",
+    platformAppId: "620",
+    installDir: "",
+    launchUri: "steam://rungameid/620",
+    genres: ["Azione", "Avventura"],
+    tags: ["Rompicapo", "Co-op online", "Giocatore singolo"],
+    shortDescription:
+      "Il seguito di Portal: nuovi personaggi, nuovi enigmi e una modalità cooperativa.",
+    colors: ["#1f6fa8", "#0b1c2c"],
+    isInstalled: false,
+    status: "finished",
+    playtimeMinutes: 1260,
+    lastPlayedAt: Date.now() - 400 * 24 * 60 * 60 * 1000,
+    achievementsUnlocked: 38,
+    achievementsTotal: 51,
+  }),
+  seed({
+    id: "ea:dead-space",
+    title: "Dead Space",
+    platform: "ea",
+    installDir: "",
+    genres: ["Azione", "Horror"],
+    shortDescription: "Un classico dell'horror fantascientifico, ricostruito da zero.",
+    colors: ["#3a4a52", "#0c1114"],
+    isInstalled: false,
+    playtimeMinutes: 95,
+    lastPlayedAt: Date.now() - 200 * 24 * 60 * 60 * 1000,
+  }),
   seed({
     id: "steam:1321440",
     status: "playing",

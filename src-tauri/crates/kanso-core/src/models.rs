@@ -114,6 +114,10 @@ pub struct PlaySession {
     pub source: String,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// Unified representation of an installed game discovered on the system,
 /// enriched with cached cover art, metadata, and optional user overrides.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -205,6 +209,10 @@ pub struct DetectedGame {
     /// when there is none. Read it through [`DetectedGame::steam_store_id`].
     #[serde(default)]
     pub steam_store_appid: Option<String>,
+    /// `false` for a game that is in the library but not on disk: uninstalled since Kanso
+    /// first saw it, or known to be owned without ever having been installed here.
+    #[serde(default = "default_true")]
+    pub is_installed: bool,
     /// Last metadata/cover update timestamp in ms (also used for UI image cache busting).
     #[serde(default)]
     pub updated_at: u64,
@@ -253,7 +261,42 @@ impl DetectedGame {
             achievements_unlocked: None,
             achievements_total: None,
             steam_store_appid: None,
+            is_installed: true,
             updated_at: now_timestamp_ms(),
+        }
+    }
+
+    /// Address that asks the game's own client to install it, for the stores that have one.
+    /// Built from what is stored for the game, never from the interface.
+    pub fn install_uri(&self) -> Option<String> {
+        let app_id = self
+            .platform_app_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        match self.platform {
+            GamePlatform::Steam => app_id
+                .filter(|id| id.bytes().all(|b| b.is_ascii_digit()))
+                .map(|id| format!("steam://install/{id}")),
+            // Same address as launching, with another action
+            GamePlatform::Epic => self
+                .launch_uri
+                .as_deref()
+                .and_then(|uri| uri.split('?').next())
+                .filter(|base| base.starts_with("com.epicgames.launcher://apps/"))
+                .map(|base| format!("{base}?action=install")),
+            GamePlatform::Gog => app_id
+                .filter(|id| id.bytes().all(|b| b.is_ascii_digit()))
+                .map(|id| format!("goggalaxy://openGameView/{id}")),
+            // Ubisoft Connect opens on the game, where it offers the download
+            GamePlatform::Ubisoft => self
+                .launch_uri
+                .clone()
+                .filter(|uri| uri.starts_with("uplay://")),
+            GamePlatform::Ea
+            | GamePlatform::Xbox
+            | GamePlatform::BattleNet
+            | GamePlatform::Standalone => None,
         }
     }
 

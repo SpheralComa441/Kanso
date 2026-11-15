@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { EyeOff, History, Star, X } from "lucide-react";
+import { CloudDownload, EyeOff, History, Star, X } from "lucide-react";
 import { ApiKeyBanner } from "./components/ApiKeyBanner";
 import { DealsView } from "./components/DealsView";
 import { EditGameModal } from "./components/EditGameModal";
@@ -24,7 +24,9 @@ import {
   type MessageKey,
 } from "./i18n";
 import {
+  completeGameDetails,
   getSettings,
+  installGame,
   isRunningInTauri,
   launchGame,
   listPlugins,
@@ -88,6 +90,7 @@ const COLLECTION_KEYS: Record<LibraryCollection, MessageKey> = {
   all: "collection.all",
   favorites: "collection.favorites",
   recent: "collection.recent",
+  notInstalled: "collection.notInstalled",
   hidden: "collection.hidden",
 };
 
@@ -407,15 +410,23 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     }
   };
 
+  /** Starts a game, or hands one that is not on disk to its store's client for installing. */
   const handleLaunchGame = async (game: DetectedGame) => {
     setLaunchingId(game.id);
     setStatusMessage(null);
     try {
-      if (!isRunningInTauri()) throw t("app.launchPreview");
-      await launchGame(game);
+      if (!game.isInstalled) {
+        if (!isRunningInTauri()) throw t("app.installPreview");
+        await installGame(game);
+      } else {
+        if (!isRunningInTauri()) throw t("app.launchPreview");
+        await launchGame(game);
+      }
     } catch (err) {
       setStatusMessage(
-        typeof err === "string" ? err : t("app.launchError", { title: game.title })
+        typeof err === "string"
+          ? err
+          : t(game.isInstalled ? "app.launchError" : "app.installError", { title: game.title })
       );
     } finally {
       setLaunchingId(null);
@@ -557,6 +568,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     }
   }, [filters.collection, counts.hidden]);
 
+  // Same when the last game that was not on disk gets installed (or hidden)
+  useEffect(() => {
+    if (filters.collection === "notInstalled" && counts.notInstalled === 0 && games.length > 0) {
+      setFilters(EMPTY_FILTERS);
+    }
+  }, [filters.collection, counts.notInstalled, games.length]);
+
   const detailGame = useMemo(
     () => games.find((g) => g.id === detailGameId) ?? null,
     [games, detailGameId]
@@ -566,11 +584,40 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     [games, editingGameId]
   );
 
+  // A game that is not on disk arrives with name and cover only: the rest is looked up the
+  // first time its sheet is opened (once per session, whether or not anything is found)
+  const completedIds = useRef(new Set<string>());
+  useEffect(() => {
+    const game = detailGame;
+    if (
+      !game ||
+      game.isInstalled ||
+      game.shortDescription ||
+      game.genres.length > 0 ||
+      completedIds.current.has(game.id)
+    ) {
+      return;
+    }
+    completedIds.current.add(game.id);
+    completeGameDetails(game)
+      .then(upsertSingleGameInState)
+      .catch(() => {
+        // The sheet simply stays as it is; opening it in a later session tries again
+      });
+  }, [detailGame, upsertSingleGameInState]);
+
   const hasApiKey = config.steamgriddbApiKey.trim().length > 0;
   const filterCount = activeFilterCount(filters);
   const isNarrowed = hasActiveFilters(filters) || searchQuery.trim().length > 0;
-  // What "N of M" is measured against: the hidden pool or the visible library
-  const poolSize = filters.collection === "hidden" ? counts.hidden : counts.visible;
+  // What "N of M" is measured against: the pool the current view draws from
+  const poolSize =
+    filters.collection === "hidden"
+      ? counts.hidden
+      : filters.collection === "notInstalled"
+        ? counts.notInstalled
+        : filters.status || searchQuery.trim()
+          ? counts.visible + counts.notInstalled
+          : counts.visible;
 
   return (
     <div className="flex h-full flex-col text-zinc-100">
@@ -651,6 +698,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                           <Star className="h-3 w-3 fill-accent text-accent" />
                         ) : filters.collection === "recent" ? (
                           <History className="h-3 w-3 text-zinc-400" />
+                        ) : filters.collection === "notInstalled" ? (
+                          <CloudDownload className="h-3 w-3 text-zinc-400" />
                         ) : (
                           <EyeOff className="h-3 w-3 text-zinc-400" />
                         )

@@ -348,4 +348,14 @@ export const es: Dictionary = {
   "stats.empty": "Aún no hay horas de juego que mostrar. Las horas de Steam llegan con el escaneo; para los demás juegos Kanso empieza a contarlas desde ahora.",
   "stats.loadError": "No se pudo leer el historial de sesiones.",
   "game.statusBadge": "Estado: {status}",
+
+  "collection.notInstalled": "No instalados",
+  "common.install": "Instalar",
+  "game.installNamed": "Instalar {title}",
+  "game.notInstalled": "No instalado",
+  "detail.installVia": "Abre {client} para instalarlo",
+  "detail.installManually": "No instalado: instálalo desde el cliente de {client}",
+  "detail.installLocal": "Ya no está en su carpeta",
+  "app.installError": "No se pudo iniciar la instalación de «{title}».",
+  "app.installPreview": "La instalación está disponible en la app de Windows.",
 };

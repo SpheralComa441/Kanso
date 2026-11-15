@@ -7,7 +7,7 @@
     "es": "¿A qué juego esta noche?",
     "ru": "Во что поиграть сегодня?"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Kanso",
   "description": {
     "en": "Suggests three games from your library: one to continue, one from the backlog, one to rediscover. Works offline.",

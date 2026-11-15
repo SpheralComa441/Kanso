@@ -54,13 +54,13 @@ pub struct ProcessMatcher {
 }
 
 impl ProcessMatcher {
-    /// Every game except Steam's is a candidate. A game is recognised by any executable inside
+    /// Every installed game except Steam's is a candidate. A game is recognised by any executable inside
     /// its install folder, or only by its own executable when that folder is a filesystem root
     /// or also contains other games.
     pub fn new(games: &[DetectedGame]) -> Self {
         let mut candidates: Vec<Candidate> = games
             .iter()
-            .filter(|game| game.platform != GamePlatform::Steam)
+            .filter(|game| game.platform != GamePlatform::Steam && game.is_installed)
             .map(|game| Candidate {
                 id: game.id.clone(),
                 dir: Some(path_key(&game.install_dir)).filter(|dir| !is_root_key(dir)),

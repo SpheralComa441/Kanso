@@ -55,8 +55,12 @@ kanso.plugin({
     pick(context) {
       const now = context.now;
       const includeFinished = kanso.settings.includeFinished === "true";
+      // Only what can be started right now: games that are not installed are left out
       const games = context.games.filter(
-        (game) => game.status !== "abandoned" && (includeFinished || game.status !== "finished")
+        (game) =>
+          game.installed !== false &&
+          game.status !== "abandoned" &&
+          (includeFinished || game.status !== "finished")
       );
 
       const started = (game) => (game.playtimeMinutes || 0) > 0 || game.playCount > 0;

@@ -141,7 +141,11 @@ fn play_tonight_suggests_one_to_continue_one_from_the_backlog_and_one_to_redisco
     abandoned.status = Some(GameStatus::Abandoned);
     let mut hidden = other_game("gog:hidden", "Nascosto");
     hidden.is_hidden = true;
-    let games = [playing, never, old, finished, abandoned, hidden];
+    // In progress, but not on disk: nothing to start tonight
+    let mut absent = other_game("gog:absent", "Disinstallato");
+    absent.status = Some(GameStatus::Playing);
+    absent.is_installed = false;
+    let games = [playing, never, old, finished, abandoned, hidden, absent];
 
     for _ in 0..5 {
         let view = bench.command(&plugin, &config, &games, now);
@@ -391,25 +395,41 @@ fn howlongtobeat_looks_the_endpoint_up_again_when_the_remembered_one_stops_answe
     assert!(stored["searchPath"].contains("api/find/new1"), "{stored:?}");
 }
 
+/// Source of a wiki page in the shape PCGamingWiki's articles have.
+const PCGW_PAGE: &str = "{{Infobox game\n|cover = Hogwarts Legacy cover.jpg\n|developers =\n{{Infobox game/row/developer|Avalanche Software}}\n}}\n\n==Video==\n{{Video\n|wsgf link                  = \n|ultrawidescreen wsgf award = \n|multimonitor               = true\n|ultrawidescreen            = true\n|ultrawidescreen notes      = Cutscenes are {{term|pillarboxed}}.\n|4k ultra hd                = true\n|120 fps                    = true\n|hdr                        = hackable\n|hdr notes                  = Use [[Special K]].\n|ray tracing                = unknown\n|color blind                = false\n}}\n\n==Input==\n{{Input\n|key remap                 = true\n|controller support        = true\n|full controller           = false\n|controller remap          = limited\n}}\n";
+
+fn wiki_page(title: &str, text: &str) -> Result<HttpResponse, String> {
+    ok_json(json!({"batchcomplete": true, "query": {"pages": [{"pageid": 148771, "ns": 0, "title": title,
+        "revisions": [{"slots": {"main": {"contentmodel": "wikitext", "contentformat": "text/x-wiki", "content": text}}}]}]}}))
+}
+
+fn redirect(location: &str) -> Result<HttpResponse, String> {
+    Ok(HttpResponse {
+        status: 302,
+        headers: vec![("location".to_string(), location.to_string())],
+        body: String::new(),
+    })
+}
+
 #[test]
-fn pcgamingwiki_shows_technical_facts_and_survives_a_table_that_does_not_answer() {
+fn pcgamingwiki_finds_the_page_and_reads_the_facts_from_its_source() {
     let bench = Bench::new(|request| {
         let url = request.url.as_str();
-        assert!(url.starts_with("https://www.pcgamingwiki.com/w/api.php?action=cargoquery&format=json"), "{url}");
-        if url.contains("tables=Infobox_game") && url.contains("Steam_AppID%20HOLDS%20%22990080%22") {
-            ok_json(json!({"cargoquery": [{"title": {"Page": "Hogwarts Legacy", "PageID": "148771"}}]}))
-        } else if url.contains("tables=Infobox_game") && url.contains("_pageName%3D%22Disco%20Elysium%22") {
-            ok_json(json!({"cargoquery": [{"title": {"Page": "Disco Elysium", "PageID": "77"}}]}))
-        } else if url.contains("tables=Video") && url.contains("148771") {
-            ok_json(json!({"cargoquery": [{"title": {"Ultrawide": "true", "FourK": "true", "Hdr": "hackable",
-                                                      "Fps120": "true", "RayTracing": "unknown"}}]}))
-        } else if url.contains("tables=Input") && url.contains("148771") {
-            ok_json(json!({"cargoquery": [{"title": {"Controller": "true", "FullController": "false"}}]}))
-        } else if url.contains("tables=Video") {
-            // What the wiki answers when a field is not known
-            ok_json(json!({"error": {"code": "internal_api_error_MWException", "info": "Error: no field named X"}}))
+        if url.contains("cargoquery") {
+            // What the wiki answers to anonymous Cargo queries
+            ok_json(json!({"error": {"code": "permissiondenied", "info": "You don't have permission to run arbitrary Cargo queries."}}))
+        } else if url == "https://www.pcgamingwiki.com/api/appid.php?appid=990080" {
+            redirect("https://www.pcgamingwiki.com/wiki/Hogwarts_Legacy")
+        } else if url.contains("prop=revisions") && url.ends_with("&titles=Hogwarts%20Legacy") {
+            wiki_page("Hogwarts Legacy", PCGW_PAGE)
+        } else if url.contains("prop=revisions") && url.ends_with("&titles=Disco%20Elysium") {
+            // Older answer shape: pages by id, the text under "*"
+            ok_json(json!({"query": {"pages": {"77": {"pageid": 77, "title": "Disco Elysium",
+                "revisions": [{"*": "{{Video|ultrawidescreen = false}}\n{{Input\n|controller support = true\n}}"}]}}}}))
+        } else if url.contains("prop=revisions") {
+            ok_json(json!({"batchcomplete": true, "query": {"pages": [{"ns": 0, "title": "Whatever", "missing": true}]}}))
         } else {
-            ok_json(json!({"cargoquery": []}))
+            status(404, "not found")
         }
     });
     let plugin = plugin("pcgamingwiki");
@@ -418,17 +438,72 @@ fn pcgamingwiki_shows_technical_facts_and_survives_a_table_that_does_not_answer(
     let data = bench.details(&plugin, &config, Lang::It, &steam_game("990080", "Hogwarts Legacy"));
     assert_eq!(data.sections[0].title.as_deref(), Some("PCGamingWiki"));
     assert_eq!(stat(&data, "Ultrawide"), Some("Sì"));
+    assert_eq!(stat(&data, "4K"), Some("Sì"));
+    assert_eq!(stat(&data, "120+ FPS"), Some("Sì"));
     assert_eq!(stat(&data, "HDR"), Some("Con una modifica"));
     assert_eq!(stat(&data, "Ray tracing"), None, "unknown values are left out");
     assert_eq!(stat(&data, "Controller"), Some("Sì"));
     assert_eq!(stat(&data, "Controller: supporto completo"), Some("No"));
     assert_eq!(links(&data), ["https://www.pcgamingwiki.com/wiki/Hogwarts_Legacy"]);
+    let urls = bench.transport.urls();
+    assert_eq!(urls.len(), 2, "the redirect, then the page: {urls:?}");
+    assert!(urls.iter().all(|url| !url.contains("cargoquery")), "{urls:?}");
 
-    // No Steam page: found by title; the link is there even when the facts cannot be read
+    // No Steam page: found by title
     let data = bench.details(&plugin, &config, Lang::En, &other_game("gog:disco", "Disco Elysium"));
+    assert_eq!(stat(&data, "Ultrawide"), Some("No"));
+    assert_eq!(stat(&data, "Controller"), Some("Yes"));
     assert_eq!(links(&data), ["https://www.pcgamingwiki.com/wiki/Disco_Elysium"]);
-    assert_eq!(stat(&data, "Ultrawide"), None);
+
+    // A game the wiki does not have shows nothing
     assert!(bench.details(&plugin, &config, Lang::En, &other_game("gog:none", "Nothing Like This")).is_empty());
+}
+
+#[test]
+fn pcgamingwiki_still_links_to_the_wiki_when_its_api_refuses() {
+    let hour = 3_600_000;
+    let expires = |bench: &Bench, id: &str| {
+        lock(&bench.db).get_plugin_cache("pcgamingwiki", id).unwrap().unwrap().expires_at - 1_000
+    };
+    let plugin = plugin("pcgamingwiki");
+    let config = config_with("pcgamingwiki", &[]);
+
+    // The redirect works, reading the page does not (what the wiki answers to a refused action)
+    let bench = Bench::new(|request| {
+        if request.url.contains("/api/appid.php") {
+            redirect("/wiki/Hogwarts_Legacy")
+        } else {
+            ok_json(json!({"error": {"code": "readapidenied", "info": "You need read permission to use this module."}}))
+        }
+    });
+    let game = steam_game("990080", "Hogwarts Legacy");
+    let data = bench.details(&plugin, &config, Lang::It, &game);
+    assert_eq!(links(&data), ["https://www.pcgamingwiki.com/wiki/Hogwarts_Legacy"]);
+    assert_eq!(stat(&data, "Ultrawide"), None);
+    assert_eq!(expires(&bench, &game.id), 12 * hour, "asked again soon, not in a month");
+
+    // Nothing answers at all: the link goes through the wiki's own redirect, or its search
+    let bench = Bench::new(|_| Err("connection refused".to_string()));
+    let data = bench.details(&plugin, &config, Lang::It, &game);
+    assert_eq!(links(&data), ["https://www.pcgamingwiki.com/api/appid.php?appid=990080"]);
+    let other = other_game("gog:disco", "Disco Elysium");
+    let data = bench.details(&plugin, &config, Lang::It, &other);
+    assert_eq!(links(&data), ["https://www.pcgamingwiki.com/w/index.php?search=Disco%20Elysium"]);
+    assert_eq!(expires(&bench, &other.id), 12 * hour);
+
+    // An appid the wiki does not know (no redirect to a page) falls back to the title
+    let bench = Bench::new(|request| {
+        if request.url.contains("/api/appid.php") {
+            redirect("https://www.pcgamingwiki.com/wiki/Special:Search?search=1")
+        } else if request.url.ends_with("&titles=Tiny%20Indie") {
+            wiki_page("Tiny Indie", "{{Video\n|hdr = true\n}}")
+        } else {
+            status(500, "")
+        }
+    });
+    let data = bench.details(&plugin, &config, Lang::En, &steam_game("123", "Tiny Indie"));
+    assert_eq!(stat(&data, "HDR"), Some("Yes"));
+    assert_eq!(links(&data), ["https://www.pcgamingwiki.com/wiki/Tiny_Indie"]);
 }
 
 #[test]

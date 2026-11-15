@@ -343,4 +343,14 @@ export const en: Dictionary = {
   "stats.empty": "There is no play time to show yet. Steam's hours arrive with the scan; for other games Kanso starts counting from now.",
   "stats.loadError": "Could not read the play history.",
   "game.statusBadge": "Status: {status}",
+
+  "collection.notInstalled": "Not installed",
+  "common.install": "Install",
+  "game.installNamed": "Install {title}",
+  "game.notInstalled": "Not installed",
+  "detail.installVia": "Opens {client} to install it",
+  "detail.installManually": "Not installed: install it from the {client} client",
+  "detail.installLocal": "No longer in its folder",
+  "app.installError": "Could not start installing “{title}”.",
+  "app.installPreview": "Installing is available in the Windows app.",
 };

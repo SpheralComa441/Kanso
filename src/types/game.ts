@@ -55,6 +55,8 @@ export interface DetectedGame {
   achievementsTotal: number | null;
   /** Steam store page matched to a game from another store (empty when there is none). */
   steamStoreAppid: string | null;
+  /** `false` for a game in the library that is not on disk (uninstalled, or owned only). */
+  isInstalled: boolean;
   updatedAt: number;
 }
 

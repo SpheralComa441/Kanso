@@ -1,7 +1,15 @@
-import { AlertTriangle, FolderOpen, Gamepad2, Play, Star } from "lucide-react";
+import {
+  AlertTriangle,
+  CloudDownload,
+  Download,
+  FolderOpen,
+  Gamepad2,
+  Play,
+  Star,
+} from "lucide-react";
 import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
-import { PLATFORM_META, platformLabel } from "../lib/platforms";
+import { PLATFORM_META, canInstall, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { BadgeEntry, DetectedGame } from "../types/game";
 import { Cover } from "./Cover";
@@ -153,14 +161,20 @@ export function GameList({
                 key={game.id}
                 className={`game-card group ${coverUrl ? "" : "game-card-no-art"}`}
               >
-                {/* 2:3 vertical cover */}
+                {/* 2:3 vertical cover; washed out for a game that is not on disk */}
                 <div className="game-card-cover relative w-full overflow-hidden bg-oled-bg">
                   {coverUrl ? (
-                    <Cover
-                      url={coverUrl}
-                      zoomOnHover
-                      onError={() => markBroken(coverUrl)}
-                    />
+                    <div
+                      className={`h-full w-full ${
+                        game.isInstalled ? "" : "opacity-45 grayscale"
+                      }`}
+                    >
+                      <Cover
+                        url={coverUrl}
+                        zoomOnHover
+                        onError={() => markBroken(coverUrl)}
+                      />
+                    </div>
                   ) : (
                     <div className="flex h-full w-full flex-col justify-end bg-gradient-to-b from-oled-elevated/50 to-oled-bg p-4">
                       <p className="line-clamp-4 text-sm font-semibold leading-snug text-zinc-300">
@@ -192,6 +206,15 @@ export function GameList({
                         <span className="block h-2 w-2 rounded-full bg-emerald-400" />
                       </span>
                     )}
+                    {!game.isInstalled && (
+                      <span
+                        data-not-installed={game.id}
+                        title={t("game.notInstalled")}
+                        className="shrink-0 rounded-md border border-white/15 bg-black/60 p-1 text-white backdrop-blur-md"
+                      >
+                        <CloudDownload className="h-3 w-3" aria-hidden="true" />
+                      </span>
+                    )}
                   </div>
 
                   {/* Whole cover opens the detail view */}
@@ -211,22 +234,36 @@ export function GameList({
                     }`}
                   />
 
-                  {/* Hover play bar */}
-                  <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/90 via-black/55 to-transparent p-3 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
-                    <button
-                      id={`launch-grid-${game.id}`}
-                      type="button"
-                      onClick={() => onLaunch(game)}
-                      disabled={isLaunching}
-                      aria-label={t("game.launchNamed", { title: game.title })}
-                      className="pointer-events-auto inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-xs font-semibold text-zinc-950 shadow-lg transition-colors hover:bg-accent-hover disabled:opacity-60"
-                    >
-                      <Play className="h-3.5 w-3.5 fill-current" />
-                      <span>
-                        {isLaunching ? t("common.launching") : t("common.play")}
-                      </span>
-                    </button>
-                  </div>
+                  {/* Hover bar: play, or install through the store's client. A game that is
+                      not on disk and cannot be installed from here has no bar. */}
+                  {(game.isInstalled || canInstall(game)) && (
+                    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/90 via-black/55 to-transparent p-3 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                      <button
+                        id={`launch-grid-${game.id}`}
+                        type="button"
+                        onClick={() => onLaunch(game)}
+                        disabled={isLaunching}
+                        aria-label={t(
+                          game.isInstalled ? "game.launchNamed" : "game.installNamed",
+                          { title: game.title }
+                        )}
+                        className="pointer-events-auto inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-accent py-1.5 text-xs font-semibold text-zinc-950 shadow-lg transition-colors hover:bg-accent-hover disabled:opacity-60"
+                      >
+                        {game.isInstalled ? (
+                          <Play className="h-3.5 w-3.5 fill-current" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" />
+                        )}
+                        <span>
+                          {!game.isInstalled
+                            ? t("common.install")
+                            : isLaunching
+                              ? t("common.launching")
+                              : t("common.play")}
+                        </span>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Card caption */}
@@ -255,6 +292,7 @@ export function GameList({
           <ul className="divide-y divide-oled-border">
             {games.map((game) => {
               const platformMeta = PLATFORM_META[game.platform];
+              const label = platformLabel(game.platform, t);
               const isLaunching = launchingId === game.id;
               const coverUrl = usableCover(
                 resolveCoverUrl(game.coverPath, game.updatedAt)
@@ -272,7 +310,11 @@ export function GameList({
                     aria-label={t("game.openDetails", { title: game.title })}
                     className="flex min-w-0 flex-1 items-center gap-3.5 rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   >
-                    <div className="relative h-14 w-[38px] shrink-0 overflow-hidden rounded border border-oled-border bg-oled-bg">
+                    <div
+                      className={`relative h-14 w-[38px] shrink-0 overflow-hidden rounded border border-oled-border bg-oled-bg ${
+                        game.isInstalled ? "" : "opacity-45 grayscale"
+                      }`}
+                    >
                       {coverUrl && (
                         <Cover url={coverUrl} onError={() => markBroken(coverUrl)} />
                       )}
@@ -306,11 +348,20 @@ export function GameList({
                             {t("detail.running")}
                           </span>
                         )}
+                        {!game.isInstalled && (
+                          <span
+                            data-not-installed={game.id}
+                            className="inline-flex shrink-0 items-center gap-1 text-3xs text-zinc-400"
+                          >
+                            <CloudDownload className="h-3 w-3" aria-hidden="true" />
+                            {t("game.notInstalled")}
+                          </span>
+                        )}
                       </div>
                       <p className="truncate text-2xs text-zinc-500">
                         {game.genres.length > 0
                           ? game.genres.slice(0, 4).join(" · ")
-                          : (game.executablePath ?? game.installDir)}
+                          : (game.executablePath ?? game.installDir) || label}
                       </p>
                     </div>
                   </button>
@@ -324,18 +375,28 @@ export function GameList({
                       onToggle={onToggleFavorite}
                       className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-oled-elevated hover:text-zinc-200"
                     />
-                    <button
-                      id={`launch-list-${game.id}`}
-                      type="button"
-                      onClick={() => onLaunch(game)}
-                      disabled={isLaunching}
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-60"
-                    >
-                      <Play className="h-3.5 w-3.5 fill-current" />
-                      <span>
-                        {isLaunching ? t("common.launching") : t("common.play")}
-                      </span>
-                    </button>
+                    {(game.isInstalled || canInstall(game)) && (
+                      <button
+                        id={`launch-list-${game.id}`}
+                        type="button"
+                        onClick={() => onLaunch(game)}
+                        disabled={isLaunching}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-1.5 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {game.isInstalled ? (
+                          <Play className="h-3.5 w-3.5 fill-current" />
+                        ) : (
+                          <Download className="h-3.5 w-3.5" />
+                        )}
+                        <span>
+                          {!game.isInstalled
+                            ? t("common.install")
+                            : isLaunching
+                              ? t("common.launching")
+                              : t("common.play")}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </li>
               );

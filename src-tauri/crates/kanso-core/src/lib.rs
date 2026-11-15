@@ -6,6 +6,7 @@ pub mod deals;
 pub mod i18n;
 pub mod metadata;
 pub mod models;
+pub mod owned;
 pub mod playtime;
 pub mod plugins;
 pub mod scanner;
@@ -21,7 +22,7 @@ pub use deals::{Deal, DealStore, DealsClient, DealsReport};
 pub use i18n::{current_language, set_language, Lang, T};
 pub use metadata::{
     is_metadata_sync_due, needs_metadata, EnrichOutcome, MetadataClient, SgdbResolution,
-    SteamStoreLookup, SteamStoreMetadata, METADATA_RETRY_INTERVAL_MS,
+    SteamAppSummary, SteamStoreLookup, SteamStoreMetadata, METADATA_RETRY_INTERVAL_MS,
 };
 pub use models::{
     now_timestamp_ms, DetectedGame, GameManualUpdate, GamePlatform, GameStatus, PlaySession,

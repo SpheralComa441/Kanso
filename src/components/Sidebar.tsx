@@ -1,4 +1,12 @@
-import { ChartNoAxesColumn, EyeOff, History, Home, Library, Star } from "lucide-react";
+import {
+  ChartNoAxesColumn,
+  CloudDownload,
+  EyeOff,
+  History,
+  Home,
+  Library,
+  Star,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import {
@@ -195,6 +203,16 @@ export function Sidebar({
               icon={<History className="h-3.5 w-3.5 shrink-0" />}
               onClick={() => toggleCollection("recent")}
             />
+            {(counts.notInstalled > 0 || collectionActive("notInstalled")) && (
+              <NavRow
+                id="filter-not-installed"
+                label={t("collection.notInstalled")}
+                count={counts.notInstalled}
+                active={collectionActive("notInstalled")}
+                icon={<CloudDownload className="h-3.5 w-3.5 shrink-0" />}
+                onClick={() => toggleCollection("notInstalled")}
+              />
+            )}
             {(counts.hidden > 0 || viewingHidden) && (
               <NavRow
                 id="filter-hidden"
