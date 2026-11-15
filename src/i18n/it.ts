@@ -41,7 +41,7 @@ export const it = {
   "sidebar.home": "Home",
   "sidebar.library": "Libreria",
   "sidebar.platform": "Piattaforma",
-  "sidebar.genre": "Genere",
+  "sidebar.genre": "Generi",
   "sidebar.genresEmpty":
     "I generi compaiono qui man mano che i metadata vengono sincronizzati.",
   "collection.all": "Tutti i giochi",
@@ -363,6 +363,26 @@ export const it = {
   "detail.installLocal": "Non più presente nella sua cartella",
   "app.installError": "Impossibile avviare l'installazione di «{title}».",
   "app.installPreview": "L'installazione è disponibile nell'app Windows.",
+
+  "sidebar.installedOnly": "Solo installati",
+  "sidebar.installedOnlyHint": "Mostra solo i giochi installati in raccolte, generi e tag",
+  "sidebar.browseGenres": "Generi: apri la griglia e l'elenco",
+  "sidebar.browseTags": "Tag: apri la griglia e l'elenco",
+  "filters.absentMatches.one": "+{count} non installato",
+  "filters.absentMatches.few": "+{count} non installati",
+  "filters.absentMatches.many": "+{count} non installati",
+  "filters.absentMatches.other": "+{count} non installati",
+  "filters.absentMatchesHint": "Mostra anche i giochi non installati",
+  "overview.genres": "Generi",
+  "overview.tags": "Tag",
+  "overview.allGenres": "Tutti i generi",
+  "overview.allTags": "Tutti i tag",
+  "overview.open": "{label}: {games}",
+  "overview.tagsEmpty": "I tag compaiono dopo la sincronizzazione con Steam.",
+  "overview.count.one": "{count} voce",
+  "overview.count.few": "{count} voci",
+  "overview.count.many": "{count} voci",
+  "overview.count.other": "{count} voci",
 } as const;
 
 export type MessageKey = keyof typeof it;

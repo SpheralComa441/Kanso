@@ -66,8 +66,18 @@ function withPluginDefaults(raw: unknown): Record<string, PluginState> {
   return states;
 }
 
+/**
+ * The browser preview's library: the built-in samples, or the games a page put in
+ * `__KANSO_PREVIEW_GAMES__` before the app loaded (screenshots and interface tests against a
+ * library of realistic size). The desktop app never reads either.
+ */
+function previewLibrary(): DetectedGame[] {
+  const supplied = (globalThis as { __KANSO_PREVIEW_GAMES__?: unknown }).__KANSO_PREVIEW_GAMES__;
+  return Array.isArray(supplied) ? (supplied as DetectedGame[]) : PREVIEW_MOCK_GAMES;
+}
+
 // Same ordering the desktop backend applies to a real scan
-let previewGamesState: DetectedGame[] = [...PREVIEW_MOCK_GAMES].sort((a, b) =>
+let previewGamesState: DetectedGame[] = [...previewLibrary()].sort((a, b) =>
   a.title.toLowerCase().localeCompare(b.title.toLowerCase())
 );
 
