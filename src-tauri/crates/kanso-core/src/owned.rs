@@ -20,6 +20,7 @@
 
 use crate::cleaner::clean_game_title;
 use crate::db::LibraryDb;
+use crate::epic_account::{EpicApi, EpicAsset, EpicError, EpicSession};
 use crate::i18n::Lang;
 use crate::metadata::{title_key, MetadataClient, SteamAppDetails};
 use crate::models::{DetectedGame, GamePlatform};
@@ -131,6 +132,92 @@ pub fn merge_owned_games(
         return Vec::new();
     }
     changed
+}
+
+/// Items of an Epic account described by the catalog in one [`sync_epic_library_step`].
+pub const EPIC_STEP: usize = 15;
+
+/// What one step over a signed-in account's library did.
+#[derive(Debug, Default)]
+pub struct AccountStep {
+    /// Games added to the library, as stored.
+    pub added: Vec<DetectedGame>,
+    /// Items of the account still to be looked at.
+    pub remaining: usize,
+}
+
+/// Brings into the library, as not installed, up to [`EPIC_STEP`] of the games a signed-in
+/// Epic account owns and the library does not have yet. `assets` is the account's library as
+/// [`EpicApi::library`] lists it (names of apps); the catalog is asked about each item the
+/// library does not know, one request per item, `pause` apart, and the rules of
+/// [`crate::scanner::epic_catalog`] decide whether it is a game. What turns out not to be one
+/// (add-ons, extra content, games another store's client runs) is remembered and not asked
+/// about again. Callers repeat the step until nothing remains.
+///
+/// An item the catalog cannot be asked about right now ends the step with the error; what
+/// was learned before it is kept. The database is never locked while Epic is being asked.
+pub fn sync_epic_library_step(
+    db: &Mutex<LibraryDb>,
+    api: &EpicApi,
+    session: &EpicSession,
+    assets: &[EpicAsset],
+    pause: std::time::Duration,
+    now_ms: u64,
+) -> Result<AccountStep, EpicError> {
+    const PLATFORM: &str = "epic";
+    let unknown: Vec<&EpicAsset> = {
+        let db = lock(db);
+        let in_library: HashSet<String> =
+            db.load_games().unwrap_or_default().into_iter().map(|game| game.id).collect();
+        let not_games = db.known_store_non_games(PLATFORM).unwrap_or_default();
+        assets
+            .iter()
+            .filter(|asset| {
+                !in_library.contains(&format!("epic:{}", asset.app_name))
+                    && !not_games.contains(&asset.app_name)
+            })
+            .collect()
+    };
+
+    let mut games: Vec<OwnedGame> = Vec::new();
+    let mut not_games: Vec<String> = Vec::new();
+    let mut failure: Option<EpicError> = None;
+    for (index, asset) in unknown.iter().take(EPIC_STEP).enumerate() {
+        if index > 0 && !pause.is_zero() {
+            std::thread::sleep(pause);
+        }
+        match api.catalog_item(session, asset) {
+            Ok(item) => match item
+                .and_then(|item| crate::scanner::epic_catalog::game_of(&item, Some(&asset.app_name)))
+            {
+                Some(game) => games.push(game),
+                None => not_games.push(asset.app_name.clone()),
+            },
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
+        }
+    }
+    let looked_at = games.len() + not_games.len();
+
+    // A game the library already has under another id (same store, same title) is not added:
+    // note it too, or it would be asked about at every sync
+    let candidates: Vec<String> = games.iter().map(|owned| owned.game.id.clone()).collect();
+    let added = merge_owned_games(db, games, now_ms);
+    let added_ids: HashSet<&str> = added.iter().map(|game| game.id.as_str()).collect();
+    not_games.extend(
+        candidates
+            .iter()
+            .filter(|id| !added_ids.contains(id.as_str()))
+            .filter_map(|id| id.strip_prefix("epic:").map(str::to_string)),
+    );
+    let _ = lock(db).remember_store_non_games(PLATFORM, &not_games, now_ms);
+
+    match failure {
+        Some(error) => Err(error),
+        None => Ok(AccountStep { added, remaining: unknown.len() - looked_at }),
+    }
 }
 
 /// Games looked up on Steam in one [`match_absent_games_step`].
@@ -1016,6 +1103,87 @@ mod tests {
             );
         }
         assert!(matched > 0);
+    }
+
+    #[test]
+    fn the_games_of_a_signed_in_epic_account_join_the_library() {
+        use crate::epic_account::tests::{mock_api, spawn_mock_epic};
+
+        let (base_url, seen) = spawn_mock_epic();
+        let api = mock_api(&base_url);
+        let session = api.exchange_code("goodcode1234").unwrap();
+        let assets = api.library(&session).unwrap();
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        // Already in the library: installed, found by the scanner under the same app name
+        let mut rocket = installed("0", "Rocket League");
+        rocket.id = "epic:Sugar".into();
+        rocket.platform = GamePlatform::Epic;
+        lock(&db).upsert_game(&rocket).unwrap();
+        let catalog_requests = |seen: &crate::epic_account::tests::Seen| {
+            seen.lock().unwrap().iter().filter(|(request, _, _)| request.contains("/catalog/")).count()
+        };
+
+        let step = sync_epic_library_step(&db, &api, &session, &assets, std::time::Duration::ZERO, 10)
+            .expect("Epic answered");
+        assert_eq!(step.remaining, 0);
+        let mut added: Vec<(&str, &str)> =
+            step.added.iter().map(|game| (game.id.as_str(), game.title.as_str())).collect();
+        added.sort();
+        assert_eq!(
+            added,
+            [("epic:Calluna", "Control"), ("epic:dc9d2e595d0e4650b35d659f90d41059", "Alan Wake 2")],
+            "the games; not the add-on, not what the catalog no longer has, not what is installed"
+        );
+        assert_eq!(catalog_requests(&seen), 4, "one request per item the library did not know");
+
+        let alan = lock(&db).get_game("epic:dc9d2e595d0e4650b35d659f90d41059").unwrap().unwrap();
+        assert!(!alan.is_installed);
+        assert_eq!(alan.platform, GamePlatform::Epic);
+        assert_eq!(alan.cover_path.as_deref(), Some("https://cdn1.epicgames.com/alan/tall.jpg?w=600&h=900&resize=1"));
+        assert_eq!(
+            alan.install_uri().as_deref(),
+            Some("com.epicgames.launcher://apps/alanwake2%3Acat-alan%3Adc9d2e595d0e4650b35d659f90d41059?action=install")
+        );
+        // The library names the app even when the catalog item lists no release
+        let control = lock(&db).get_game("epic:Calluna").unwrap().unwrap();
+        assert_eq!(control.platform_app_id.as_deref(), Some("Calluna"));
+        assert!(lock(&db).get_game("epic:Sugar").unwrap().unwrap().is_installed, "left as it was");
+
+        // Next time everything is known: nothing is asked
+        let step = sync_epic_library_step(&db, &api, &session, &assets, std::time::Duration::ZERO, 20).unwrap();
+        assert_eq!((step.added.len(), step.remaining), (0, 0));
+        assert_eq!(catalog_requests(&seen), 4);
+        assert_eq!(
+            lock(&db).known_store_non_games("epic").unwrap(),
+            HashSet::from(["nightsprings".to_string(), "Gone".to_string()])
+        );
+    }
+
+    #[test]
+    fn an_epic_library_is_taken_a_few_items_at_a_time_and_a_refused_session_stops_it() {
+        use crate::epic_account::tests::{mock_api, spawn_mock_epic};
+
+        let (base_url, _seen) = spawn_mock_epic();
+        let api = mock_api(&base_url);
+        let session = api.exchange_code("goodcode1234").unwrap();
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        // More items than a step takes, none of which the catalog knows
+        let many: Vec<EpicAsset> = (0..EPIC_STEP + 4)
+            .map(|n| EpicAsset { app_name: format!("App{n}"), namespace: "gone".into(), catalog_item_id: format!("cat{n}") })
+            .collect();
+
+        let step = sync_epic_library_step(&db, &api, &session, &many, std::time::Duration::ZERO, 1).unwrap();
+        assert_eq!((step.added.len(), step.remaining), (0, 4));
+        let step = sync_epic_library_step(&db, &api, &session, &many, std::time::Duration::ZERO, 2).unwrap();
+        assert_eq!((step.added.len(), step.remaining), (0, 0));
+
+        // Signing in again elsewhere made this session stale: the step says so, adds nothing
+        let _newer = api.exchange_code("goodcode1234").unwrap();
+        let assets = [EpicAsset { app_name: "Calluna".into(), namespace: "control".into(), catalog_item_id: "cat-control".into() }];
+        let refused = sync_epic_library_step(&db, &api, &session, &assets, std::time::Duration::ZERO, 3);
+        assert!(matches!(refused, Err(EpicError::Refused(_))), "{refused:?}");
+        assert_eq!(lock(&db).game_count().unwrap(), 0);
+        assert!(!lock(&db).known_store_non_games("epic").unwrap().contains("Calluna"));
     }
 
     #[test]

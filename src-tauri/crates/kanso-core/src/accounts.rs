@@ -1,0 +1,238 @@
+//! The store accounts the user signed in to: who they are, and the token that keeps each
+//! session going.
+//!
+//! One small file, `accounts.json`, next to the settings. A token is never written as it is:
+//! it goes through [`crate::secrets`], so the file is useless to another Windows user or on
+//! another PC. Passwords are never here at all: signing in happens on the store's own page,
+//! in the browser, and Kanso only ever receives the code that page hands out.
+
+use crate::secrets::{self, Scheme};
+use base64::Engine as _;
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+pub const ACCOUNTS_FILE: &str = "accounts.json";
+
+/// An account as kept on disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredAccount {
+    account_id: String,
+    display_name: String,
+    /// The refresh token, protected and base64-encoded; empty once the store refused it.
+    #[serde(default)]
+    token: String,
+    scheme: Scheme,
+    #[serde(default)]
+    connected_at: u64,
+}
+
+/// An account ready to be used.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoreAccount {
+    pub account_id: String,
+    pub display_name: String,
+    pub refresh_token: String,
+    pub connected_at: u64,
+}
+
+/// What the interface may know about an account: never the token.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSummary {
+    pub platform: String,
+    pub display_name: String,
+    pub connected_at: u64,
+    /// The store no longer accepts the saved session: the user has to sign in again.
+    pub needs_sign_in: bool,
+}
+
+/// The accounts file of one Kanso data folder.
+#[derive(Debug, Clone)]
+pub struct AccountStore {
+    path: PathBuf,
+}
+
+impl AccountStore {
+    pub fn new(data_dir: &Path) -> Self {
+        Self { path: data_dir.join(ACCOUNTS_FILE) }
+    }
+
+    fn read(&self) -> BTreeMap<String, StoredAccount> {
+        fs::read_to_string(&self.path)
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default()
+    }
+
+    fn write(&self, accounts: &BTreeMap<String, StoredAccount>) -> Result<(), String> {
+        let save_error = |e: std::io::Error| format!("{ACCOUNTS_FILE}: {e}");
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).map_err(save_error)?;
+        }
+        let serialized = serde_json::to_string_pretty(accounts).map_err(|e| e.to_string())?;
+        // A sibling file renamed over the target: a crash mid-write cannot lose a session
+        let tmp_path = self.path.with_extension("json.tmp");
+        fs::write(&tmp_path, serialized)
+            .and_then(|()| fs::rename(&tmp_path, &self.path))
+            .map_err(save_error)
+    }
+
+    /// The account signed in to `platform`, when there is one whose session can still be used
+    /// (it was saved by this Windows user and the store has not refused it).
+    pub fn load(&self, platform: &str) -> Option<StoreAccount> {
+        let stored = self.read().remove(platform)?;
+        if stored.token.is_empty() {
+            return None;
+        }
+        let protected = base64::engine::general_purpose::STANDARD.decode(&stored.token).ok()?;
+        let token = secrets::unprotect(&protected, stored.scheme).ok()?;
+        Some(StoreAccount {
+            account_id: stored.account_id,
+            display_name: stored.display_name,
+            refresh_token: String::from_utf8(token).ok().filter(|token| !token.is_empty())?,
+            connected_at: stored.connected_at,
+        })
+    }
+
+    pub fn save(&self, platform: &str, account: &StoreAccount) -> Result<(), String> {
+        let protected = secrets::protect(account.refresh_token.as_bytes())?;
+        let mut accounts = self.read();
+        accounts.insert(
+            platform.to_string(),
+            StoredAccount {
+                account_id: account.account_id.clone(),
+                display_name: account.display_name.clone(),
+                token: base64::engine::general_purpose::STANDARD.encode(protected),
+                scheme: secrets::SCHEME,
+                connected_at: account.connected_at,
+            },
+        );
+        self.write(&accounts)
+    }
+
+    /// Forgets the session of `platform` but remembers whose it was, so that the interface can
+    /// say the account has to be signed in to again.
+    pub fn mark_session_refused(&self, platform: &str) -> Result<(), String> {
+        let mut accounts = self.read();
+        match accounts.get_mut(platform) {
+            Some(stored) => stored.token.clear(),
+            None => return Ok(()),
+        }
+        self.write(&accounts)
+    }
+
+    /// Signs out: nothing about the account is kept.
+    pub fn remove(&self, platform: &str) -> Result<(), String> {
+        let mut accounts = self.read();
+        if accounts.remove(platform).is_none() {
+            return Ok(());
+        }
+        self.write(&accounts)
+    }
+
+    pub fn summaries(&self) -> Vec<AccountSummary> {
+        self.read()
+            .into_iter()
+            .map(|(platform, stored)| AccountSummary {
+                needs_sign_in: self.load(&platform).is_none(),
+                platform,
+                display_name: stored.display_name,
+                connected_at: stored.connected_at,
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn account(token: &str) -> StoreAccount {
+        StoreAccount {
+            account_id: "0123abcd".into(),
+            display_name: "Player One".into(),
+            refresh_token: token.into(),
+            connected_at: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn an_account_is_saved_read_back_and_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = AccountStore::new(dir.path());
+        assert_eq!(store.load("epic"), None);
+        assert!(store.summaries().is_empty());
+        store.remove("epic").unwrap();
+
+        store.save("epic", &account("eg1~first")).unwrap();
+        assert_eq!(store.load("epic"), Some(account("eg1~first")));
+        assert_eq!(store.load("gog"), None);
+        assert_eq!(
+            store.summaries(),
+            [AccountSummary {
+                platform: "epic".into(),
+                display_name: "Player One".into(),
+                connected_at: 1_700_000_000_000,
+                needs_sign_in: false,
+            }]
+        );
+
+        // A session renewed: the new token replaces the old one
+        store.save("epic", &account("eg1~second")).unwrap();
+        assert_eq!(store.load("epic").unwrap().refresh_token, "eg1~second");
+
+        store.remove("epic").unwrap();
+        assert_eq!(store.load("epic"), None);
+        assert!(store.summaries().is_empty());
+    }
+
+    #[test]
+    fn a_refused_session_is_dropped_but_the_account_is_still_named() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = AccountStore::new(dir.path());
+        store.mark_session_refused("epic").unwrap();
+        store.save("epic", &account("eg1~token")).unwrap();
+        store.mark_session_refused("epic").unwrap();
+
+        assert_eq!(store.load("epic"), None);
+        let summaries = store.summaries();
+        assert_eq!(summaries.len(), 1);
+        assert!(summaries[0].needs_sign_in);
+        assert_eq!(summaries[0].display_name, "Player One");
+        assert!(!fs::read_to_string(dir.path().join(ACCOUNTS_FILE)).unwrap().contains("eg1~token"));
+    }
+
+    #[test]
+    fn a_file_that_is_damaged_or_from_elsewhere_is_no_account() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = AccountStore::new(dir.path());
+        let path = dir.path().join(ACCOUNTS_FILE);
+
+        fs::write(&path, "not json").unwrap();
+        assert_eq!(store.load("epic"), None);
+        assert!(store.summaries().is_empty());
+
+        // A token that is not base64, and one protected with a scheme this build does not use
+        let other = if secrets::SCHEME == Scheme::Dpapi { "plain" } else { "dpapi" };
+        fs::write(
+            &path,
+            format!(
+                r#"{{"epic":{{"accountId":"a","displayName":"A","token":"***","scheme":"{}","connectedAt":1}},
+                    "gog":{{"accountId":"b","displayName":"B","token":"dG9rZW4=","scheme":"{other}","connectedAt":2}}}}"#,
+                if secrets::SCHEME == Scheme::Dpapi { "dpapi" } else { "plain" },
+            ),
+        )
+        .unwrap();
+        assert_eq!(store.load("epic"), None);
+        assert_eq!(store.load("gog"), None);
+        assert!(store.summaries().iter().all(|summary| summary.needs_sign_in));
+
+        // Saving over a damaged file starts afresh
+        fs::write(&path, "[]").unwrap();
+        store.save("epic", &account("eg1~new")).unwrap();
+        assert_eq!(store.load("epic").unwrap().refresh_token, "eg1~new");
+    }
+}

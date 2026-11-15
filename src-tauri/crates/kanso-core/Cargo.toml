@@ -23,8 +23,14 @@ yaml-rust2 = { version = "0.13", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
-# Same version winreg already pulls in; used to enumerate fixed drives for the Xbox scanner
-windows-sys = { version = "0.48", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+# Same version winreg already pulls in; used to enumerate fixed drives for the Xbox scanner and
+# to protect the sign-in tokens of the store accounts with the Windows user's own key (DPAPI)
+windows-sys = { version = "0.48", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
+] }
 
 [dev-dependencies]
 tempfile = "3.14"

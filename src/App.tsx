@@ -26,13 +26,13 @@ import {
 } from "./i18n";
 import {
   completeGameDetails,
+  completeLibraryInBackground,
   getSettings,
   installGame,
   isRunningInTauri,
   launchGame,
   listPlugins,
   listThemes,
-  matchAbsentGames,
   pluginBadges,
   runPluginCommand,
   saveSettings,
@@ -372,9 +372,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     } finally {
       setIsSyncingMetadata(false);
     }
-    // Games of other stores that are not installed get their genres and tags from the Steam
-    // page of the same title: a slow, quiet pass whose results arrive in batches
-    void matchAbsentGames().catch(() => {});
+    // The games of the store accounts, then genres and tags for the games of other stores
+    // that are not installed: a slow, quiet pass whose results arrive in batches
+    void completeLibraryInBackground().catch(() => {});
   }, []);
 
   /**
@@ -960,6 +960,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           onConfigChange(saved);
           await reloadPlugins();
         }}
+        onStoreSignedIn={() => void completeLibraryInBackground().catch(() => {})}
       />
 
       <ThemeEditor

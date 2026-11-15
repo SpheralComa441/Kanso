@@ -130,6 +130,11 @@ pub enum T {
     PluginFailed,
     UrlNotAllowed,
     OperationFailed,
+    StoreNotSupported,
+    SignInCodeMissing,
+    SignInRefused,
+    StoreUnreachable,
+    SignInFailed,
     TrayOpen,
     TrayQuit,
 }
@@ -292,6 +297,21 @@ impl T {
             T::PluginFailed => ["Il plugin non ha risposto correttamente", "The plugin did not answer correctly", "El plugin no respondió correctamente", "Плагин не ответил корректно"],
             T::UrlNotAllowed => ["Indirizzo non consentito", "URL not allowed", "Dirección no permitida", "Адрес не разрешён"],
             T::OperationFailed => ["Operazione non riuscita", "Operation failed", "La operación ha fallado", "Операция не выполнена"],
+            T::StoreNotSupported => ["Accesso non disponibile per questo store", "Sign-in is not available for this store", "El inicio de sesión no está disponible para esta tienda", "Вход для этого магазина недоступен"],
+            T::SignInCodeMissing => [
+                "Non trovo un codice in quello che hai incollato. Accedi sulla pagina dello store e copia il codice che compare alla fine",
+                "There is no code in what you pasted. Sign in on the store's page and copy the code shown at the end",
+                "No encuentro un código en lo que has pegado. Inicia sesión en la página de la tienda y copia el código que aparece al final",
+                "В вставленном тексте нет кода. Войдите на странице магазина и скопируйте код, который появится в конце",
+            ],
+            T::SignInRefused => [
+                "Lo store non ha accettato il codice: è scaduto o è già stato usato. Riapri la pagina di accesso e copiane uno nuovo",
+                "The store did not accept the code: it expired or was already used. Open the sign-in page again and copy a new one",
+                "La tienda no ha aceptado el código: ha caducado o ya se ha usado. Vuelve a abrir la página de inicio de sesión y copia uno nuevo",
+                "Магазин не принял код: он истёк или уже использован. Откройте страницу входа ещё раз и скопируйте новый",
+            ],
+            T::StoreUnreachable => ["Impossibile raggiungere lo store. Controlla la connessione e riprova", "The store could not be reached. Check the connection and try again", "No se puede conectar con la tienda. Comprueba la conexión e inténtalo de nuevo", "Не удалось связаться с магазином. Проверьте соединение и повторите попытку"],
+            T::SignInFailed => ["Accesso non riuscito", "Sign-in failed", "No se ha podido iniciar sesión", "Не удалось войти"],
             T::TrayOpen => ["Apri Kanso", "Open Kanso", "Abrir Kanso", "Открыть Kanso"],
             T::TrayQuit => ["Esci", "Quit", "Salir", "Выход"],
         }

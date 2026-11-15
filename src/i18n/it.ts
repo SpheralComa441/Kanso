@@ -383,6 +383,25 @@ export const it = {
   "overview.count.few": "{count} voci",
   "overview.count.many": "{count} voci",
   "overview.count.other": "{count} voci",
+
+  "accounts.title": "Account degli store",
+  "accounts.help": "Accedi a uno store per vedere in libreria anche i giochi che possiedi lì e non hai installato. L'accesso avviene sulla pagina dello store, nel browser: Kanso non vede mai la password e conserva solo la sessione, protetta da Windows per il tuo utente.",
+  "accounts.notConnected": "Non collegato",
+  "accounts.connectedAs": "Collegato come {name}",
+  "accounts.connected": "Collegato",
+  "accounts.expired": "Sessione scaduta: accedi di nuovo",
+  "accounts.signIn": "Accedi",
+  "accounts.signOut": "Esci",
+  "accounts.cancel": "Annulla",
+  "accounts.step1": "Apri la pagina di accesso di {store} e accedi con il tuo account.",
+  "accounts.openPage": "Apri la pagina di {store}",
+  "accounts.step2": "Alla fine la pagina mostra un testo con un codice (authorizationCode). Copia il codice, o tutto il testo, e incollalo qui.",
+  "accounts.codePlaceholder": "Incolla qui il codice",
+  "accounts.connect": "Collega",
+  "accounts.connecting": "Collegamento...",
+  "accounts.signedIn": "Fatto: i giochi di {store} arrivano in libreria nei prossimi minuti.",
+  "accounts.error": "Operazione non riuscita.",
+  "accounts.previewNote": "Nell'anteprima l'accesso è simulato.",
 } as const;
 
 export type MessageKey = keyof typeof it;

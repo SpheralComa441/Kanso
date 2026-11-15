@@ -87,7 +87,7 @@ pub fn parse_epic_catalog_cache(bytes: &[u8]) -> Option<Vec<OwnedGame>> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut games = Vec::new();
     for item in &items {
-        if let Some(owned) = game_of(item) {
+        if let Some(owned) = game_of(item, None) {
             if seen.insert(owned.game.id.clone()) {
                 games.push(owned);
             }
@@ -97,7 +97,11 @@ pub fn parse_epic_catalog_cache(bytes: &[u8]) -> Option<Vec<OwnedGame>> {
 }
 
 /// The library entry for a catalog item, if the item is a game for Windows.
-fn game_of(item: &Value) -> Option<OwnedGame> {
+///
+/// `app_name` is the name the launcher starts and installs the game by, when the caller
+/// already knows it (the account's library names it for each item it lists for Windows);
+/// otherwise it is read off the item's own Windows release.
+pub fn game_of(item: &Value, app_name: Option<&str>) -> Option<OwnedGame> {
     let text = |key: &str| item.get(key).and_then(Value::as_str).map(str::trim).unwrap_or_default();
     let categories: Vec<&str> = item
         .get("categories")
@@ -134,25 +138,28 @@ fn game_of(item: &Value) -> Option<OwnedGame> {
     }
 
     // The release for Windows carries the name the launcher knows the game by
-    let app_name = item
-        .get("releaseInfo")
-        .and_then(Value::as_array)?
-        .iter()
-        .filter(|release| {
-            release
-                .get("platform")
-                .and_then(Value::as_array)
-                .is_none_or(|platforms| {
-                    platforms.is_empty()
-                        || platforms
-                            .iter()
-                            .filter_map(Value::as_str)
-                            .any(|platform| platform.eq_ignore_ascii_case("Windows"))
-                })
-        })
-        .filter_map(|release| release.get("appId")?.as_str())
-        .map(str::trim)
-        .find(|app| is_plain_id(app))?;
+    let app_name = match app_name.map(str::trim) {
+        Some(known) => Some(known).filter(|app| is_plain_id(app))?,
+        None => item
+            .get("releaseInfo")
+            .and_then(Value::as_array)?
+            .iter()
+            .filter(|release| {
+                release
+                    .get("platform")
+                    .and_then(Value::as_array)
+                    .is_none_or(|platforms| {
+                        platforms.is_empty()
+                            || platforms
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .any(|platform| platform.eq_ignore_ascii_case("Windows"))
+                    })
+            })
+            .filter_map(|release| release.get("appId")?.as_str())
+            .map(str::trim)
+            .find(|app| is_plain_id(app))?,
+    };
 
     let ids_are_plain = is_plain_id(namespace) && is_plain_id(catalog_id);
     let launch_uri = build_epic_launch_uri(

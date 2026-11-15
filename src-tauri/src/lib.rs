@@ -1,3 +1,4 @@
+mod accounts;
 mod playtime;
 mod plugins;
 
@@ -47,8 +48,11 @@ pub(crate) struct AppState {
     /// Games Kanso currently sees running, kept by the play time tracker.
     pub(crate) running_games: Arc<Mutex<Vec<String>>>,
     pub(crate) plugins: Arc<plugins::PluginHost>,
-    /// A pass matching games to their Steam store pages is under way: one at a time.
-    matching_store_pages: Arc<std::sync::atomic::AtomicBool>,
+    /// The background pass that completes the library is under way: one at a time.
+    completing_library: Arc<std::sync::atomic::AtomicBool>,
+    /// It was asked for again while under way (someone just signed in to a store): once done,
+    /// it starts over.
+    complete_library_again: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Language used when none is configured yet (the UI picks one from the OS on first run).
@@ -294,23 +298,33 @@ async fn complete_game_details(
     .map_err(|e| format!("{}: {e}", T::SyncFailed.s()))?
 }
 
-/// Finds the Steam store page of the games of other stores that are not installed, a few at
-/// a time, and gives them the genres, tags and description found there. A library of a few
-/// hundred games takes some minutes, so this runs apart from the sync: the games it completes
-/// reach the interface in batches through [`GAMES_UPDATED_EVENT`]. Stops quietly while Steam
-/// cannot be reached; what is left is picked up by the next call.
+/// The slow part of completing the library, apart from the sync so that it never holds it up:
+/// 1. the games of the store accounts the user signed in to join the library (one question to
+///    the store's catalog per item not seen before);
+/// 2. the games of other stores that are not installed are matched to their Steam store page,
+///    a few at a time, and given the genres, tags and description found there.
+///
+/// A library of a few hundred games takes some minutes the first time. What is completed
+/// reaches the interface in batches through [`GAMES_UPDATED_EVENT`]. Each part stops quietly
+/// while its store cannot be reached; what is left is picked up by the next call.
 #[tauri::command]
-async fn match_absent_games(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     use std::sync::atomic::Ordering;
 
-    let running = Arc::clone(&state.matching_store_pages);
+    let running = Arc::clone(&state.completing_library);
+    let again = Arc::clone(&state.complete_library_again);
     if running.swap(true, Ordering::SeqCst) {
+        again.store(true, Ordering::SeqCst);
         return Ok(());
     }
     let config = load_config(&app);
     let db = Arc::clone(&state.db);
 
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
+    let outcome = tauri::async_runtime::spawn_blocking(move || loop {
+        accounts::sync_epic_account(&app, &db, &|added| {
+            let _ = app.emit(GAMES_UPDATED_EVENT, added);
+        });
+
         let client =
             MetadataClient::new().with_language(config.lang().unwrap_or(FALLBACK_LANGUAGE));
         loop {
@@ -327,6 +341,10 @@ async fn match_absent_games(app: AppHandle, state: State<'_, AppState>) -> Resul
                 break;
             }
             std::thread::sleep(STORE_SEARCH_PAUSE);
+        }
+
+        if !again.swap(false, Ordering::SeqCst) {
+            break;
         }
     })
     .await;
@@ -789,7 +807,8 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         deals_cache: Arc::new(Mutex::new(None)),
         running_games: Arc::clone(&running_games),
         plugins: Arc::clone(&plugin_host),
-        matching_store_pages: Arc::default(),
+        completing_library: Arc::default(),
+        complete_library_again: Arc::default(),
     });
     remove_legacy_sql_mirror(app);
     playtime::spawn_tracker(app.clone(), Arc::clone(&db), running_games);
@@ -828,7 +847,7 @@ pub fn run() {
             scan_games,
             sync_library_metadata,
             complete_game_details,
-            match_absent_games,
+            complete_library,
             search_steamgriddb_games,
             apply_steamgriddb_match,
             update_game_details,
@@ -857,7 +876,11 @@ pub fn run() {
             plugins::plugin_game_data,
             plugins::plugin_badges,
             plugins::run_plugin_command,
-            plugins::open_plugin_link
+            plugins::open_plugin_link,
+            accounts::list_store_accounts,
+            accounts::open_store_sign_in,
+            accounts::store_sign_in,
+            accounts::store_sign_out
         ])
         .run(tauri::generate_context!())
         .expect("Kanso failed to start");
