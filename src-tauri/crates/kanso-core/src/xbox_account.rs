@@ -10,10 +10,9 @@
 //! With a session, Xbox Live is asked two things: who signed in (the gamertag, to show it)
 //! and the account's title history. Everything goes to Microsoft's own services and nowhere
 //! else. The requests are the ones the open-source launcher Playnite makes, in the same
-//! order, and Kanso presents itself with the application id Playnite is registered under
-//! with Microsoft ([`CLIENT_ID`]): it names a program, not the user. Microsoft's consent page
-//! therefore shows the name of that registration. A project that registers its own
-//! application with Microsoft only has to change that one constant.
+//! order. Kanso presents itself with its own application id ([`CLIENT_ID`]), registered with
+//! Microsoft by the project's owner: Microsoft's consent page names Kanso. The id is public
+//! and names the program, not a user; there is no secret to go with it.
 //!
 //! **What this list is and is not.** The title history holds the games the account has
 //! *started* at least once, on any device; the ones started on a PC are kept. A game bought
@@ -30,8 +29,10 @@ use crate::owned::OwnedGame;
 use serde_json::{json, Value};
 use std::time::Duration;
 
-/// The application id the open-source launcher Playnite signs in to Xbox Live with.
-pub const CLIENT_ID: &str = "38cd2fa8-66fd-4760-afb2-405eb65d5b0c";
+/// Kanso's application id, as registered with Microsoft by the project's owner (a public
+/// client for personal Microsoft accounts: no secret exists). A fork that registers its own
+/// application only has to change this constant.
+pub const CLIENT_ID: &str = "8de3a320-775f-4102-a3b2-13331fe9ca82";
 /// Where Microsoft sends the browser after a sign-in, with the code in the address: its own
 /// blank page for desktop programs.
 const REDIRECT_URI: &str = "https://login.live.com/oauth20_desktop.srf";

@@ -184,12 +184,12 @@ applicazione che quei progetti pubblicano nel loro codice (l'id e il segreto del
 Epic e di GOG Galaxy, l'id del sito "Club" di Ubisoft, l'id del sito di EA). **Identificano il
 programma, non te**: nel codice di Kanso non c'è nulla che riguardi un utente.
 
-**Per Xbox c'è una differenza che è giusto dire.** Microsoft chiede che ogni programma sia
-registrato presso di lei. Kanso si presenta con l'id con cui è registrato il launcher libero
-Playnite (pubblicato nel suo codice): la pagina di consenso di Microsoft mostra quindi il nome
-di quella registrazione, non «Kanso». L'id è una sola costante in
-[`xbox_account.rs`](../src-tauri/crates/kanso-core/src/xbox_account.rs): chi mantiene il
-progetto può sostituirla con una registrazione propria.
+**Per Xbox l'identità è quella di Kanso.** Microsoft chiede che ogni programma sia registrato
+presso di lei: Kanso si presenta con il proprio id di applicazione, registrato da chi mantiene
+il progetto, e la pagina di consenso di Microsoft mostra il nome «Kanso». L'id è pubblico, non
+ha un segreto associato e identifica il programma, non te; è una sola costante in
+[`xbox_account.rs`](../src-tauri/crates/kanso-core/src/xbox_account.rs). Le richieste che
+seguono l'accesso sono quelle che fa Playnite, nello stesso ordine.
 
 Questi servizi non sono documentati e possono cambiare: se uno store cambia qualcosa,
 l'accesso a quello store smette di funzionare finché Kanso non viene aggiornato. In quel caso
@@ -389,12 +389,12 @@ clients and sites use, with the application identifiers those projects publish i
 (the id and secret of Epic's launcher and of GOG Galaxy, the id of Ubisoft's "Club" site, the
 id of EA's site). **They name the program, not you**: nothing in Kanso's code concerns a user.
 
-**For Xbox there is a difference that should be said.** Microsoft wants every program
-registered with it. Kanso presents itself with the id the free launcher Playnite is registered
-under (published in its code): Microsoft's consent page therefore shows the name of that
-registration, not "Kanso". The id is a single constant in
-[`xbox_account.rs`](../src-tauri/crates/kanso-core/src/xbox_account.rs): whoever maintains the
-project can replace it with a registration of their own.
+**For Xbox the identity is Kanso's own.** Microsoft wants every program registered with it:
+Kanso presents itself with its own application id, registered by the project's maintainer, and
+Microsoft's consent page shows the name "Kanso". The id is public, has no secret to go with it
+and names the program, not you; it is a single constant in
+[`xbox_account.rs`](../src-tauri/crates/kanso-core/src/xbox_account.rs). The requests that
+follow the sign-in are the ones Playnite makes, in the same order.
 
 These services are undocumented and may change: if a store changes something, signing in to
 that store stops working until Kanso is updated. Kanso then says so (naming the pages it
