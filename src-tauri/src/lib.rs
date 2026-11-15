@@ -321,7 +321,7 @@ async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<
     let db = Arc::clone(&state.db);
 
     let outcome = tauri::async_runtime::spawn_blocking(move || loop {
-        accounts::sync_epic_account(&app, &db, &|added| {
+        accounts::sync_store_accounts(&app, &db, &|added| {
             let _ = app.emit(GAMES_UPDATED_EVENT, added);
         });
 

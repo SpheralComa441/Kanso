@@ -20,7 +20,8 @@
 
 use crate::cleaner::clean_game_title;
 use crate::db::LibraryDb;
-use crate::epic_account::{EpicApi, EpicAsset, EpicError, EpicSession};
+use crate::accounts::StoreError;
+use crate::epic_account::{EpicApi, EpicAsset, EpicSession};
 use crate::i18n::Lang;
 use crate::metadata::{title_key, MetadataClient, SteamAppDetails};
 use crate::models::{DetectedGame, GamePlatform};
@@ -163,7 +164,7 @@ pub fn sync_epic_library_step(
     assets: &[EpicAsset],
     pause: std::time::Duration,
     now_ms: u64,
-) -> Result<AccountStep, EpicError> {
+) -> Result<AccountStep, StoreError> {
     const PLATFORM: &str = "epic";
     let unknown: Vec<&EpicAsset> = {
         let db = lock(db);
@@ -181,7 +182,7 @@ pub fn sync_epic_library_step(
 
     let mut games: Vec<OwnedGame> = Vec::new();
     let mut not_games: Vec<String> = Vec::new();
-    let mut failure: Option<EpicError> = None;
+    let mut failure: Option<StoreError> = None;
     for (index, asset) in unknown.iter().take(EPIC_STEP).enumerate() {
         if index > 0 && !pause.is_zero() {
             std::thread::sleep(pause);
@@ -1181,7 +1182,7 @@ mod tests {
         let _newer = api.exchange_code("goodcode1234").unwrap();
         let assets = [EpicAsset { app_name: "Calluna".into(), namespace: "control".into(), catalog_item_id: "cat-control".into() }];
         let refused = sync_epic_library_step(&db, &api, &session, &assets, std::time::Duration::ZERO, 3);
-        assert!(matches!(refused, Err(EpicError::Refused(_))), "{refused:?}");
+        assert!(matches!(refused, Err(StoreError::Refused(_))), "{refused:?}");
         assert_eq!(lock(&db).game_count().unwrap(), 0);
         assert!(!lock(&db).known_store_non_games("epic").unwrap().contains("Calluna"));
     }

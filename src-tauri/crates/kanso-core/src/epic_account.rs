@@ -16,6 +16,7 @@
 //! titles) and the catalog service describes each item in the same shape the launcher's own
 //! catalog cache uses, so the rules of [`crate::scanner::epic_catalog`] decide what is a game.
 
+use crate::accounts::StoreError;
 use base64::Engine as _;
 use serde_json::Value;
 use std::time::Duration;
@@ -37,28 +38,6 @@ pub fn sign_in_url() -> String {
     format!(
         "https://www.epicgames.com/id/login?redirectUrl=https%3A%2F%2Fwww.epicgames.com%2Fid%2Fapi%2Fredirect%3FclientId%3D{LAUNCHER_CLIENT_ID}%26responseType%3Dcode"
     )
-}
-
-/// Why a call to Epic's services gave nothing.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EpicError {
-    /// Epic refused the code or the session (the text is Epic's error code): the user has to
-    /// sign in again.
-    Refused(String),
-    /// Epic could not be reached.
-    Unreachable,
-    /// Epic answered something this code does not expect: which call, and what came back.
-    Unexpected(String),
-}
-
-impl std::fmt::Display for EpicError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EpicError::Refused(code) => write!(f, "refused by Epic ({code})"),
-            EpicError::Unreachable => write!(f, "Epic could not be reached"),
-            EpicError::Unexpected(detail) => write!(f, "unexpected answer from Epic: {detail}"),
-        }
-    }
 }
 
 /// A signed-in session.
@@ -89,23 +68,6 @@ pub struct EpicAsset {
     pub app_name: String,
     pub namespace: String,
     pub catalog_item_id: String,
-}
-
-/// What the user pasted, reduced to the authorization code: the code itself, the whole text
-/// Epic's page shows (`{"authorizationCode":"..."}`) or an address carrying `code=`.
-pub fn authorization_code_in(pasted: &str) -> Option<String> {
-    let pasted = pasted.trim();
-    let candidate = serde_json::from_str::<Value>(pasted)
-        .ok()
-        .and_then(|json| json.get("authorizationCode")?.as_str().map(str::to_string))
-        .or_else(|| {
-            let (_, after) = pasted.split_once("code=")?;
-            Some(after.split(['&', '#', '"', ' ']).next().unwrap_or_default().to_string())
-        })
-        .unwrap_or_else(|| pasted.trim_matches('"').to_string());
-    let plain = (8..=128).contains(&candidate.len())
-        && candidate.bytes().all(|b| b.is_ascii_alphanumeric());
-    plain.then_some(candidate)
 }
 
 /// Client for the three Epic services Kanso uses.
@@ -143,13 +105,13 @@ impl EpicApi {
     }
 
     /// Turns the authorization code of Epic's sign-in page into a session.
-    pub fn exchange_code(&self, code: &str) -> Result<EpicSession, EpicError> {
+    pub fn exchange_code(&self, code: &str) -> Result<EpicSession, StoreError> {
         self.token(&[("grant_type", "authorization_code"), ("code", code), ("token_type", "eg1")])
     }
 
     /// Renews a session from its refresh token. The session returned carries a new refresh
     /// token: the old one is spent.
-    pub fn refresh(&self, refresh_token: &str) -> Result<EpicSession, EpicError> {
+    pub fn refresh(&self, refresh_token: &str) -> Result<EpicSession, StoreError> {
         self.token(&[
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
@@ -157,7 +119,7 @@ impl EpicApi {
         ])
     }
 
-    fn token(&self, form: &[(&str, &str)]) -> Result<EpicSession, EpicError> {
+    fn token(&self, form: &[(&str, &str)]) -> Result<EpicSession, StoreError> {
         let basic = base64::engine::general_purpose::STANDARD
             .encode(format!("{LAUNCHER_CLIENT_ID}:{LAUNCHER_CLIENT_SECRET}"));
         let response = self
@@ -168,15 +130,15 @@ impl EpicApi {
         let json = match response {
             Ok(response) => response
                 .into_json::<Value>()
-                .map_err(|_| EpicError::Unexpected("sign-in: the answer is not JSON".into()))?,
+                .map_err(|_| StoreError::Unexpected("sign-in: the answer is not JSON".into()))?,
             // The token service answers a bad code or a spent session with 400
             Err(ureq::Error::Status(status @ (400 | 401 | 403), response)) => {
-                return Err(EpicError::Refused(error_code_of(response, status)));
+                return Err(StoreError::Refused(error_code_of(response, status)));
             }
             Err(ureq::Error::Status(status, _)) => {
-                return Err(EpicError::Unexpected(format!("sign-in: HTTP {status}")));
+                return Err(StoreError::Unexpected(format!("sign-in: HTTP {status}")));
             }
-            Err(ureq::Error::Transport(_)) => return Err(EpicError::Unreachable),
+            Err(ureq::Error::Transport(_)) => return Err(StoreError::Unreachable),
         };
 
         let text = |key: &str| json.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
@@ -188,12 +150,12 @@ impl EpicApi {
             refresh_token: text("refresh_token"),
         };
         if session.access_token.is_empty() || session.refresh_token.is_empty() || session.account_id.is_empty() {
-            return Err(EpicError::Unexpected("sign-in: the answer carries no session".into()));
+            return Err(StoreError::Unexpected("sign-in: the answer carries no session".into()));
         }
         Ok(session)
     }
 
-    fn get(&self, session: &EpicSession, url: &str, what: &str) -> Result<Value, EpicError> {
+    fn get(&self, session: &EpicSession, url: &str, what: &str) -> Result<Value, StoreError> {
         let response = self
             .agent
             .get(url)
@@ -202,17 +164,17 @@ impl EpicApi {
         match response {
             Ok(response) => response
                 .into_json::<Value>()
-                .map_err(|_| EpicError::Unexpected(format!("{what}: the answer is not JSON"))),
-            Err(ureq::Error::Status(401, response)) => Err(EpicError::Refused(error_code_of(response, 401))),
-            Err(ureq::Error::Status(status, _)) => Err(EpicError::Unexpected(format!("{what}: HTTP {status}"))),
-            Err(ureq::Error::Transport(_)) => Err(EpicError::Unreachable),
+                .map_err(|_| StoreError::Unexpected(format!("{what}: the answer is not JSON"))),
+            Err(ureq::Error::Status(401, response)) => Err(StoreError::Refused(error_code_of(response, 401))),
+            Err(ureq::Error::Status(status, _)) => Err(StoreError::Unexpected(format!("{what}: HTTP {status}"))),
+            Err(ureq::Error::Transport(_)) => Err(StoreError::Unreachable),
         }
     }
 
     /// Everything the account owns for Windows, as the library service lists it: games,
     /// add-ons and extra content alike. Unreal Engine content and private sandboxes (builds a
     /// developer has access to) are left out, as other launchers do.
-    pub fn library(&self, session: &EpicSession) -> Result<Vec<EpicAsset>, EpicError> {
+    pub fn library(&self, session: &EpicSession) -> Result<Vec<EpicAsset>, StoreError> {
         let mut assets: Vec<EpicAsset> = Vec::new();
         let mut cursor: Option<String> = None;
         for _ in 0..MAX_LIBRARY_PAGES {
@@ -228,7 +190,7 @@ impl EpicApi {
             let records = page
                 .get("records")
                 .and_then(Value::as_array)
-                .ok_or_else(|| EpicError::Unexpected("library: the answer has no records".into()))?;
+                .ok_or_else(|| StoreError::Unexpected("library: the answer has no records".into()))?;
             for record in records {
                 let text = |key: &str| record.get(key).and_then(Value::as_str).unwrap_or_default().trim();
                 let (app_name, namespace) = (text("appName"), text("namespace"));
@@ -260,7 +222,7 @@ impl EpicApi {
 
     /// The catalog's description of an item, in the shape of the launcher's catalog cache.
     /// `Ok(None)`: the catalog has no such item.
-    pub fn catalog_item(&self, session: &EpicSession, asset: &EpicAsset) -> Result<Option<Value>, EpicError> {
+    pub fn catalog_item(&self, session: &EpicSession, asset: &EpicAsset) -> Result<Option<Value>, StoreError> {
         let url = format!(
             "{}/catalog/api/shared/namespace/{}/bulk/items?id={}&country=US&locale=en-US&includeMainGameDetails=true",
             self.catalog_service,
@@ -423,34 +385,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn finds_the_code_in_whatever_the_user_pasted() {
-        let code = "0123456789abcdef0123456789abcdef";
-        assert_eq!(authorization_code_in(code).as_deref(), Some(code));
-        assert_eq!(authorization_code_in(&format!("  \"{code}\"\n")).as_deref(), Some(code));
-        assert_eq!(
-            authorization_code_in(&format!(r#"{{"redirectUrl":"https://localhost/launcher/authorized?code={code}","authorizationCode":"{code}","sid":null}}"#)).as_deref(),
-            Some(code)
-        );
-        assert_eq!(
-            authorization_code_in(&format!("https://localhost/launcher/authorized?code={code}&state=x")).as_deref(),
-            Some(code)
-        );
-        // Signed out in the browser: the page has no code yet
-        assert_eq!(authorization_code_in(r#"{"redirectUrl":null,"authorizationCode":null,"sid":null}"#), None);
-        assert_eq!(authorization_code_in(""), None);
-        assert_eq!(authorization_code_in("short"), None);
-        assert_eq!(authorization_code_in("not a code: has spaces and/slashes"), None);
-        assert_eq!(authorization_code_in(&"a".repeat(200)), None);
-    }
-
-    #[test]
     fn a_code_becomes_a_session_and_a_session_renews_itself_once() {
         let (base_url, seen) = spawn_mock_epic();
         let api = mock_api(&base_url);
 
         assert_eq!(
             api.exchange_code("wrongcode0000"),
-            Err(EpicError::Refused("errors.com.epicgames.account.oauth.authorization_code_not_found".into()))
+            Err(StoreError::Refused("errors.com.epicgames.account.oauth.authorization_code_not_found".into()))
         );
 
         let session = api.exchange_code("goodcode1234").expect("signed in");
@@ -466,7 +407,7 @@ pub(crate) mod tests {
         // The token just used is spent
         assert_eq!(
             api.refresh("refresh-1"),
-            Err(EpicError::Refused("errors.com.epicgames.account.auth_token.invalid_refresh_token".into()))
+            Err(StoreError::Refused("errors.com.epicgames.account.auth_token.invalid_refresh_token".into()))
         );
 
         // Every sign-in call presented the launcher's identity, as a form
@@ -497,14 +438,14 @@ pub(crate) mod tests {
         // A session Epic no longer accepts
         let mut stale = session.clone();
         stale.access_token = "access-0".into();
-        assert!(matches!(api.library(&stale), Err(EpicError::Refused(_))));
-        assert!(matches!(api.catalog_item(&stale, &assets[0]), Err(EpicError::Refused(_))));
+        assert!(matches!(api.library(&stale), Err(StoreError::Refused(_))));
+        assert!(matches!(api.catalog_item(&stale, &assets[0]), Err(StoreError::Refused(_))));
     }
 
     #[test]
     fn an_epic_that_cannot_be_reached_is_told_apart_from_one_that_refuses() {
         let api = mock_api("http://127.0.0.1:9");
-        assert_eq!(api.exchange_code("goodcode1234"), Err(EpicError::Unreachable));
-        assert_eq!(api.refresh("refresh-1"), Err(EpicError::Unreachable));
+        assert_eq!(api.exchange_code("goodcode1234"), Err(StoreError::Unreachable));
+        assert_eq!(api.refresh("refresh-1"), Err(StoreError::Unreachable));
     }
 }

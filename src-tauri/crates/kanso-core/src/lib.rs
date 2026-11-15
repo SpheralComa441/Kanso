@@ -5,6 +5,7 @@ pub mod config;
 pub mod db;
 pub mod deals;
 pub mod epic_account;
+pub mod gog_account;
 pub mod i18n;
 pub mod metadata;
 pub mod models;

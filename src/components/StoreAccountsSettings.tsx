@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, LogIn, LogOut } from "lucide-react";
-import { useI18n } from "../i18n";
+import { useI18n, type MessageKey } from "../i18n";
 import {
   isRunningInTauri,
   listStoreAccounts,
@@ -10,6 +10,12 @@ import {
 } from "../lib/backend";
 import { PLATFORM_META } from "../lib/platforms";
 import type { GamePlatform, StoreAccountInfo } from "../types/game";
+
+/** What the sign-in page of each store ends on, and what to copy from it. */
+const STEP_TWO: Partial<Record<GamePlatform, MessageKey>> = {
+  epic: "accounts.step2.epic",
+  gog: "accounts.step2.gog",
+};
 
 interface StoreAccountsSettingsProps {
   /** Re-read the accounts whenever the dialog opens: a session may have expired meanwhile. */
@@ -173,7 +179,8 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
                 </li>
                 <li className="space-y-1.5">
                   <label htmlFor={`account-code-${account.platform}`} className="block">
-                    <span className="font-semibold text-zinc-200">2.</span> {t("accounts.step2")}
+                    <span className="font-semibold text-zinc-200">2.</span>{" "}
+                    {t(STEP_TWO[account.platform] ?? "accounts.step2.epic")}
                   </label>
                   <div className="flex gap-2">
                     <input

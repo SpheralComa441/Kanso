@@ -221,20 +221,27 @@ export async function completeLibraryInBackground(): Promise<void> {
 
 /* ----------------------------------------------------------- store accounts */
 
-// Preview only: one pretend account, so the sign-in panel can be tried in the browser
-let previewAccount: StoreAccountInfo = {
-  platform: "epic",
+// Preview only: pretend accounts, so the sign-in panel can be tried in the browser
+let previewAccounts: StoreAccountInfo[] = (["epic", "gog"] as const).map((platform) => ({
+  platform,
   connected: false,
   displayName: null,
   needsSignIn: false,
-};
+}));
+
+function setPreviewAccount(info: StoreAccountInfo): StoreAccountInfo {
+  previewAccounts = previewAccounts.map((account) =>
+    account.platform === info.platform ? info : account
+  );
+  return info;
+}
 
 /** The stores Kanso can sign in to, and who is signed in to each. */
 export async function listStoreAccounts(): Promise<StoreAccountInfo[]> {
   if (isTauri()) {
     return invoke<StoreAccountInfo[]>("list_store_accounts");
   }
-  return [previewAccount];
+  return previewAccounts;
 }
 
 /** Opens the store's own sign-in page in the browser (the backend builds the address). */
@@ -258,8 +265,12 @@ export async function storeSignIn(
   if (pasted.trim().length < 8) {
     throw "Non trovo un codice in quello che hai incollato.";
   }
-  previewAccount = { platform, connected: true, displayName: "Giocatore di prova", needsSignIn: false };
-  return previewAccount;
+  return setPreviewAccount({
+    platform,
+    connected: true,
+    displayName: "Giocatore di prova",
+    needsSignIn: false,
+  });
 }
 
 /** Forgets the store's session. Games already in the library stay. */
@@ -268,7 +279,7 @@ export async function storeSignOut(platform: GamePlatform): Promise<void> {
     await invoke("store_sign_out", { platform });
     return;
   }
-  previewAccount = { platform, connected: false, displayName: null, needsSignIn: false };
+  setPreviewAccount({ platform, connected: false, displayName: null, needsSignIn: false });
 }
 
 export async function searchSteamGridDbGames(
