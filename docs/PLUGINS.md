@@ -136,6 +136,7 @@ when the answer arrived), so plain sequential code is all you need.
   genres: ["Azione", "GDR"], // in the interface language
   tags: ["Mondo aperto"],    // Steam community tags
   isFavorite: false,
+  installed: true,           // false for a game in the library that is not on disk
   status: "playing",         // backlog, playing, finished, abandoned, or null
   playtimeMinutes: 754,      // may be null
   lastPlayedAt: 1731000000000, // ms, may be null
@@ -165,7 +166,12 @@ Requests are refused (the call throws) when the address is not `https`, its host
 
 ### What a hook returns
 
-`gameDetails` returns `{ badge?, sections? }`; a command returns `{ title?, sections?, games? }`.
+`gameDetails` returns `{ badge?, sections?, cacheHours? }`; a command returns
+`{ title?, sections?, games? }`.
+
+- **`cacheHours`** (`gameDetails` only): keep *this* answer for less than the manifest's
+  `cacheHours` — for a game whose data is not out yet, or when the service could only be reached
+  in part. It can shorten the time, never extend it.
 
 - **`badge`**: `{ text, tooltip? }` — at most 14 characters, shown on the game card.
 - **`games`** (commands only): up to 12 `{ id, note? }` entries pointing at library games; Kanso

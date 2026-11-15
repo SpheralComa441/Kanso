@@ -3,9 +3,9 @@ use crate::db::{sort_games_by_title, LibraryDb};
 use crate::i18n::T;
 use crate::metadata::{remove_existing_cover_variants, sanitize_filename_id};
 use crate::models::{
-    now_timestamp_ms, DetectedGame, GameManualUpdate, GameStatus, ScanReport,
+    now_timestamp_ms, DetectedGame, GameManualUpdate, GamePlatform, GameStatus, ScanReport,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -14,6 +14,15 @@ use std::path::Path;
 #[derive(Debug, Clone, Default)]
 pub struct LibraryStore {
     pub games: Vec<DetectedGame>,
+}
+
+/// Something the user did with the game, which outlives its installation.
+fn has_user_data(game: &DetectedGame) -> bool {
+    game.is_favorite
+        || game.status.is_some()
+        || game.custom_override
+        || game.play_count > 0
+        || game.playtime_minutes.is_some_and(|minutes| minutes > 0)
 }
 
 impl LibraryStore {
@@ -96,6 +105,24 @@ impl LibraryStore {
                 }
             }
         }
+
+        // Games that were in the library and are no longer on disk stay, marked as not
+        // installed: their status, hours and place in the statistics are the user's, and a
+        // store game can be installed again. A loose executable from a custom folder with
+        // nothing attached to it is simply gone.
+        let on_disk: HashSet<&str> = report.games.iter().map(|g| g.id.as_str()).collect();
+        let gone: Vec<DetectedGame> = self
+            .games
+            .iter()
+            .filter(|game| !on_disk.contains(game.id.as_str()))
+            .filter(|game| game.platform != GamePlatform::Standalone || has_user_data(game))
+            .cloned()
+            .map(|mut game| {
+                game.is_installed = false;
+                game
+            })
+            .collect();
+        report.games.extend(gone);
 
         sort_games_by_title(&mut report.games);
 
@@ -591,14 +618,110 @@ mod tests {
         assert!(reloaded.games[0].title_provisional);
         assert!(reloaded.games[1].is_favorite);
 
-        // A rescan that no longer finds a game removes it from the database too
+        // A store game a rescan no longer finds stays, marked as not installed
         let mut store = reloaded;
-        store.merge_with_scan(ScanReport {
+        let report = store.merge_with_scan(ScanReport {
             games: vec![scanned_steam("2", "Beta", false)],
             ..Default::default()
         });
+        assert_eq!(report.games.len(), 2, "the interface is told about both");
         store.save_all(&mut db).unwrap();
-        assert_eq!(db.game_count().unwrap(), 1);
+        assert_eq!(db.game_count().unwrap(), 2);
         assert!(db.get_game("steam:2").unwrap().unwrap().is_favorite);
+        assert!(db.get_game("steam:2").unwrap().unwrap().is_installed);
+        assert!(!db.get_game("steam:1").unwrap().unwrap().is_installed);
+    }
+
+    #[test]
+    fn uninstalled_games_keep_their_place_and_come_back_when_installed_again() {
+        let standalone = |id: &str, title: &str| {
+            DetectedGame::new_detected(
+                id.to_string(),
+                title.to_string(),
+                title.to_string(),
+                GamePlatform::Standalone,
+                None,
+                format!("/games/{title}"),
+                Some(format!("/games/{title}/game.exe")),
+                None,
+            )
+        };
+        let mut finished = scanned_steam("620", "Portal 2", false);
+        finished.status = Some(GameStatus::Finished);
+        finished.playtime_minutes = Some(540);
+        finished.cover_path = Some("/covers/steam_620.png".to_string());
+        let mut loved = standalone("standalone:loved", "Loved Indie");
+        loved.is_favorite = true;
+        let mut store = LibraryStore {
+            games: vec![finished, loved, standalone("standalone:loose", "Loose Exe")],
+        };
+
+        // Everything is uninstalled (or its folder is no longer scanned)
+        let report = store.merge_with_scan(ScanReport::default());
+        let ids: Vec<&str> = report.games.iter().map(|g| g.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            ["standalone:loved", "steam:620"],
+            "a loose executable with nothing attached to it is simply gone"
+        );
+        assert!(report.games.iter().all(|g| !g.is_installed));
+        let portal = &store.games[1];
+        assert_eq!(portal.status, Some(GameStatus::Finished));
+        assert_eq!(portal.playtime_minutes, Some(540));
+        assert_eq!(portal.install_uri().as_deref(), Some("steam://install/620"));
+        assert_eq!(store.games[0].install_uri(), None, "nothing can install a local game");
+
+        // A later scan that still does not find them changes nothing
+        let again = store.merge_with_scan(ScanReport::default());
+        assert_eq!(again.games.len(), 2);
+
+        // Installed again: same entry, on disk, with everything it had
+        let report = store.merge_with_scan(ScanReport {
+            games: vec![scanned_steam("620", "Portal 2", false)],
+            ..Default::default()
+        });
+        let portal = report.games.iter().find(|g| g.id == "steam:620").unwrap();
+        assert!(portal.is_installed);
+        assert_eq!(portal.status, Some(GameStatus::Finished));
+        assert_eq!(portal.playtime_minutes, Some(540));
+    }
+
+    #[test]
+    fn install_addresses_exist_only_for_stores_that_can_be_asked() {
+        let game = |platform: GamePlatform, app_id: Option<&str>, launch_uri: Option<&str>| {
+            DetectedGame::new_detected(
+                "x:1".to_string(),
+                "X".to_string(),
+                "X".to_string(),
+                platform,
+                app_id.map(ToString::to_string),
+                String::new(),
+                None,
+                launch_uri.map(ToString::to_string),
+            )
+            .install_uri()
+        };
+        assert_eq!(game(GamePlatform::Steam, Some("620"), None).as_deref(), Some("steam://install/620"));
+        assert_eq!(game(GamePlatform::Steam, Some("620 & calc"), None), None, "only a plain appid");
+        assert_eq!(
+            game(
+                GamePlatform::Epic,
+                Some("Fortnite"),
+                Some("com.epicgames.launcher://apps/ns%3Aitem%3AFortnite?action=launch&silent=true")
+            )
+            .as_deref(),
+            Some("com.epicgames.launcher://apps/ns%3Aitem%3AFortnite?action=install")
+        );
+        assert_eq!(game(GamePlatform::Epic, Some("Fortnite"), Some("https://example.org/x?action=launch")), None);
+        assert_eq!(
+            game(GamePlatform::Gog, Some("1207658924"), None).as_deref(),
+            Some("goggalaxy://openGameView/1207658924")
+        );
+        assert_eq!(
+            game(GamePlatform::Ubisoft, Some("4553"), Some("uplay://launch/4553/0")).as_deref(),
+            Some("uplay://launch/4553/0")
+        );
+        assert_eq!(game(GamePlatform::Xbox, Some("Microsoft.Game"), None), None);
+        assert_eq!(game(GamePlatform::Standalone, None, None), None);
     }
 }

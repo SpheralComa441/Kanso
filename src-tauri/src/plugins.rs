@@ -322,7 +322,8 @@ fn fill_once(app: &AppHandle, db: &SharedDb, host: &PluginHost, generation: u64)
     }
 
     let mut games = lock_db(db).load_games().unwrap_or_default();
-    games.retain(|game| !game.is_hidden);
+    // Labels are for the cards of the library on disk; other games are asked on demand
+    games.retain(|game| !game.is_hidden && game.is_installed);
     // What was played last gets its labels first
     games.sort_by_key(|game| Reverse(game.last_played_at));
 

@@ -181,14 +181,23 @@ async fn sync_library_metadata(
         let lang = config.lang().unwrap_or(FALLBACK_LANGUAGE);
         let now = now_timestamp_ms();
 
+        let client = MetadataClient::new().with_language(lang);
+        let api_key = has_api_key.then_some(config.steamgriddb_api_key.as_str());
+
+        // Steam games the account has played but that are not on disk join the library (as
+        // "not installed") before the lookups below, which then find their covers too
+        if let Some(steam_root) = kanso_core::scanner::steam::detect_steam_root() {
+            let play_stats = kanso_core::scanner::steam::read_steam_play_stats(&steam_root);
+            for game in kanso_core::owned::sync_steam_played_games(&db, &client, &play_stats, now) {
+                let _ = app_handle.emit(GAME_UPDATED_EVENT, game);
+            }
+        }
+
         let candidates: Vec<DetectedGame> = lock_db(&db)
             .load_games()?
             .into_iter()
             .filter(|game| is_metadata_sync_due(game, has_api_key, lang, now, retry_now))
             .collect();
-
-        let client = MetadataClient::new().with_language(lang);
-        let api_key = has_api_key.then_some(config.steamgriddb_api_key.as_str());
 
         for mut game in candidates {
             let game_id = game.id.clone();
@@ -390,6 +399,9 @@ fn launch_game(
     let game = lock_db(&state.db)
         .get_game(&game_id)?
         .ok_or_else(|| game_not_found(&game_id))?;
+    if !game.is_installed {
+        return Err(format!("{}: {}", T::GameNotInstalled.s(), game.title));
+    }
 
     launch_game_inner(&app, &game)?;
 
@@ -406,6 +418,22 @@ fn launch_game(
         hide_main_window_to_tray(&app);
     }
     Ok(())
+}
+
+/// Asks the game's own client (Steam, Epic, GOG Galaxy, Ubisoft Connect) to install a game
+/// that is in the library but not on disk. The address is built from what is stored for the
+/// game, never taken from the webview.
+#[tauri::command]
+fn install_game(app: AppHandle, state: State<'_, AppState>, game_id: String) -> Result<(), String> {
+    let game = lock_db(&state.db)
+        .get_game(&game_id)?
+        .ok_or_else(|| game_not_found(&game_id))?;
+    let uri = game
+        .install_uri()
+        .ok_or_else(|| T::NoInstallTarget.s().to_string())?;
+    app.opener()
+        .open_url(&uri, None::<&str>)
+        .map_err(|e| format!("{} \"{}\": {e}", T::LaunchFailed.s(), game.title))
 }
 
 const TRAY_ICON_ID: &str = "kanso-tray";
@@ -702,6 +730,7 @@ pub fn run() {
             set_game_favorite,
             set_game_hidden,
             launch_game,
+            install_game,
             fetch_deals,
             open_store_page,
             list_themes,

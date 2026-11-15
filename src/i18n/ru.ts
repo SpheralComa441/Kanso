@@ -343,4 +343,14 @@ export const ru: Dictionary = {
   "stats.empty": "Пока нет данных о времени игры. Часы Steam появятся после сканирования; для остальных игр Kanso начинает считать с этого момента.",
   "stats.loadError": "Не удалось прочитать историю сеансов.",
   "game.statusBadge": "Статус: {status}",
+
+  "collection.notInstalled": "Не установлены",
+  "common.install": "Установить",
+  "game.installNamed": "Установить {title}",
+  "game.notInstalled": "Не установлена",
+  "detail.installVia": "Откроет {client} для установки",
+  "detail.installManually": "Не установлена: установите через клиент {client}",
+  "detail.installLocal": "Больше нет в своей папке",
+  "app.installError": "Не удалось начать установку «{title}».",
+  "app.installPreview": "Установка доступна в приложении для Windows.",
 };

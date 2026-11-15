@@ -12,6 +12,7 @@ Minimalist, fast Windows game launcher built with **Tauri v2**, **React**, **Typ
   - **Window chrome**: no system title bar — the top bar drags the window and carries its own minimize / maximize / close buttons; no divider lines, auto-hiding scrollbars
   - **Tags, playtime, accessibility**: Steam community tags (Souls-like, Party Game, Co-op...) as filters; Steam playtime and last session read from the client's local files, no sign-in; accessibility settings (text size, high contrast, reduced motion, legible fonts) that apply on top of any theme
   - **Status, statistics, achievements**: each game can be marked backlog / playing / finished / abandoned; a statistics page (hours, weekly activity, most played, platforms, genres); Steam achievements read from the client's local cache, no sign-in
+  - **Not installed games**: uninstalled games stay in the library with their status and hours, Steam games already played but not on disk are added from the client's local records, and an *Install* button hands them to the store's client
   - **Plugins**: community plugins (`plugin.json` + `main.js`) add sections to a game's sheet, labels to the cards and commands to a menu; six official ones ship in [`plugins/`](plugins/) — see [`docs/PLUGINS.md`](docs/PLUGINS.md)
   - Collapsible sidebar with combinable quick filters: favorites, recently played, hidden, platform, and genres generated from metadata
 - **`src-tauri/crates/kanso-core/`** — Pure Rust core library (no GUI dependencies, unit-tested on any OS):

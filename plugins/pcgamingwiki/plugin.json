@@ -2,7 +2,7 @@
   "kansoPlugin": 1,
   "id": "pcgamingwiki",
   "name": "PCGamingWiki",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Kanso",
   "description": {
     "en": "Technical facts from PCGamingWiki (ultrawide, HDR, high frame rates, controller support) and a link to the game's page, where fixes and tweaks are documented.",

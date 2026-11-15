@@ -5,7 +5,7 @@ use crate::i18n::T;
 use crate::models::{now_timestamp_ms, DetectedGame, GamePlatform, GameStatus, PlaySession};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -91,13 +91,24 @@ const MIGRATIONS: &[&str] = &["
         PRIMARY KEY (plugin_id, key)
     );
 ",
+    // v5: games stay in the library when they are uninstalled, and Steam apps already looked
+    // up and found not to be games are remembered so they are not asked about again.
+    "
+    ALTER TABLE games ADD COLUMN is_installed INTEGER NOT NULL DEFAULT 1;
+    CREATE TABLE steam_apps (
+        appid      INTEGER PRIMARY KEY NOT NULL,
+        kind       TEXT NOT NULL,
+        checked_at INTEGER NOT NULL
+    );
+",
 ];
 
 const GAME_COLUMNS: &str = "id, title, clean_title, platform, platform_app_id, install_dir, \
     executable_path, launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, \
     is_favorite, is_hidden, metadata_synced, custom_override, title_provisional, \
     metadata_attempted_at, last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, \
-    playtime_minutes, status, achievements_unlocked, achievements_total, steam_store_appid";
+    playtime_minutes, status, achievements_unlocked, achievements_total, steam_store_appid, \
+    is_installed";
 
 const UPSERT_GAME_SQL: &str = "
     INSERT INTO games (
@@ -105,9 +116,9 @@ const UPSERT_GAME_SQL: &str = "
         launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, is_favorite,
         is_hidden, metadata_synced, custom_override, title_provisional, metadata_attempted_at,
         last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, playtime_minutes,
-        status, achievements_unlocked, achievements_total, steam_store_appid
+        status, achievements_unlocked, achievements_total, steam_store_appid, is_installed
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-              ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)
+              ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
     ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         clean_title = excluded.clean_title,
@@ -137,7 +148,8 @@ const UPSERT_GAME_SQL: &str = "
         status = excluded.status,
         achievements_unlocked = excluded.achievements_unlocked,
         achievements_total = excluded.achievements_total,
-        steam_store_appid = excluded.steam_store_appid";
+        steam_store_appid = excluded.steam_store_appid,
+        is_installed = excluded.is_installed";
 
 /// Shape of the `library.json` file written by Kanso before the SQLite store existed.
 #[derive(Debug, Default, Deserialize)]
@@ -385,6 +397,41 @@ impl LibraryDb {
         self.get_game(game_id)
     }
 
+    /// Steam appids already looked up and found not to be games (DLC, tools, soundtracks,
+    /// apps the store no longer lists).
+    pub fn known_steam_non_games(&self) -> Result<HashSet<u64>, String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let mut stmt = self
+            .conn
+            .prepare("SELECT appid FROM steam_apps")
+            .map_err(db_err)?;
+        let appids = stmt
+            .query_map([], |row| row.get::<_, i64>(0))
+            .map_err(db_err)?
+            .filter_map(|appid| appid.ok().and_then(|id| u64::try_from(id).ok()))
+            .collect();
+        Ok(appids)
+    }
+
+    /// Remembers that these Steam appids are not games (`kind` says what the store answered).
+    pub fn remember_steam_non_games(
+        &mut self,
+        appids: &[(u64, &str)],
+        now_ms: u64,
+    ) -> Result<(), String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let tx = self.conn.transaction().map_err(db_err)?;
+        for (appid, kind) in appids {
+            tx.execute(
+                "INSERT INTO steam_apps (appid, kind, checked_at) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(appid) DO UPDATE SET kind = excluded.kind, checked_at = excluded.checked_at",
+                params![to_db_int(*appid), kind, to_db_int(now_ms)],
+            )
+            .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)
+    }
+
     /// What a plugin returned for a game, as cached.
     pub fn get_plugin_cache(
         &self,
@@ -593,6 +640,7 @@ fn execute_upsert(conn: &Connection, game: &DetectedGame) -> rusqlite::Result<us
             game.achievements_unlocked.map(i64::from),
             game.achievements_total.map(i64::from),
             game.steam_store_appid,
+            game.is_installed,
         ],
     )
 }
@@ -639,6 +687,7 @@ fn game_from_row(row: &Row<'_>) -> rusqlite::Result<DetectedGame> {
         achievements_unlocked: optional_count(row, "achievements_unlocked")?,
         achievements_total: optional_count(row, "achievements_total")?,
         steam_store_appid: row.get("steam_store_appid")?,
+        is_installed: row.get("is_installed")?,
     })
 }
 
@@ -706,6 +755,7 @@ mod tests {
         full.achievements_unlocked = Some(41);
         full.achievements_total = Some(78);
         full.steam_store_appid = Some("292030".to_string());
+        full.is_installed = false;
         full.updated_at = 1_731_700_000_000;
 
         let bare = sample("steam:10", "alpha");
@@ -828,6 +878,8 @@ mod tests {
         assert_eq!(portal.metadata_attempted_at, 5, "Steam games have nothing new to look up");
         let alan = games.iter().find(|g| g.id == "epic:x").unwrap();
         assert_eq!(alan.metadata_attempted_at, 0, "other stores get their Steam page looked up at once");
+        assert!(games.iter().all(|g| g.is_installed), "what was in the library was on disk");
+        assert!(db.known_steam_non_games().unwrap().is_empty());
         assert!(db.load_play_sessions(0).unwrap().is_empty());
     }
 

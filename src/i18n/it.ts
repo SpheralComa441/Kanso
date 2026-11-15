@@ -353,6 +353,16 @@ export const it = {
   "stats.empty": "Non ci sono ancora ore di gioco da mostrare. Le ore di Steam arrivano con la scansione; per gli altri giochi Kanso inizia a contarle da ora.",
   "stats.loadError": "Impossibile leggere lo storico delle sessioni.",
   "game.statusBadge": "Stato: {status}",
+
+  "collection.notInstalled": "Non installati",
+  "common.install": "Installa",
+  "game.installNamed": "Installa {title}",
+  "game.notInstalled": "Non installato",
+  "detail.installVia": "Apre {client} per installarlo",
+  "detail.installManually": "Non installato: installalo dal client di {client}",
+  "detail.installLocal": "Non più presente nella sua cartella",
+  "app.installError": "Impossibile avviare l'installazione di «{title}».",
+  "app.installPreview": "L'installazione è disponibile nell'app Windows.",
 } as const;
 
 export type MessageKey = keyof typeof it;

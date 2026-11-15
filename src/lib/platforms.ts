@@ -1,4 +1,4 @@
-import type { GamePlatform } from "../types/game";
+import type { DetectedGame, GamePlatform } from "../types/game";
 
 /** Display order of the supported game sources across the UI. */
 export const PLATFORM_ORDER: GamePlatform[] = [
@@ -62,4 +62,16 @@ export function platformLabel(
   return platform === "standalone"
     ? t("platform.local")
     : PLATFORM_META[platform].label;
+}
+
+/** Stores whose client can be asked to install a game (the backend builds the address). */
+const INSTALLABLE_PLATFORMS: readonly GamePlatform[] = ["steam", "epic", "gog", "ubisoft"];
+
+/** Whether Kanso can hand a game that is not on disk to its store's client for installing. */
+export function canInstall(game: DetectedGame): boolean {
+  return (
+    !game.isInstalled &&
+    INSTALLABLE_PLATFORMS.includes(game.platform) &&
+    Boolean(game.platformAppId || game.launchUri)
+  );
 }

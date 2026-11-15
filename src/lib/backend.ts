@@ -339,6 +339,15 @@ export async function launchGame(game: DetectedGame): Promise<void> {
   );
 }
 
+/** Asks the game's store client to install a game that is not on disk. */
+export async function installGame(game: DetectedGame): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("install_game", { gameId: game.id });
+    return;
+  }
+  throw new Error(`Installazione disponibile nell'app Windows (${game.title}).`);
+}
+
 export async function pickCustomFolder(): Promise<string | null> {
   if (!isTauri()) return null;
 

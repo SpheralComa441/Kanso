@@ -137,6 +137,20 @@ fn steam_appid_of(game: &DetectedGame) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+/// Apps asked about in one request to the store service.
+const STEAM_SUMMARY_BATCH: usize = 50;
+/// `type` of a game in the store service's answers (4 is DLC, 11 a soundtrack, ...).
+const STEAM_STORE_TYPE_GAME: u64 = 0;
+
+/// What the store says about a Steam app: enough to decide whether to list it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteamAppSummary {
+    pub appid: u64,
+    /// `None` when the store does not list the app (delisted, a tool, region-locked).
+    pub name: Option<String>,
+    pub is_game: bool,
+}
+
 /// Outcome of matching a detected game against SteamGridDB.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SgdbResolution {
@@ -514,6 +528,51 @@ impl MetadataClient {
     /// One app as Steam's public store service describes it, with the parts `data_request`
     /// asks for. `Ok(None)`: the service answered and has no such (visible) app. `Err`: it
     /// could not be asked.
+    /// Name and kind of many Steam apps at once, from the public store service (no key).
+    /// Apps the store does not list come back without a name. `None` means Steam could not
+    /// be reached: nothing is known, ask again later.
+    pub fn fetch_steam_app_summaries(&self, appids: &[u64]) -> Option<Vec<SteamAppSummary>> {
+        let mut summaries = Vec::with_capacity(appids.len());
+        for batch in appids.chunks(STEAM_SUMMARY_BATCH) {
+            let input = serde_json::json!({
+                "ids": batch.iter().map(|appid| serde_json::json!({ "appid": appid })).collect::<Vec<_>>(),
+                "context": { "language": self.lang.steam_language(), "country_code": "US" },
+                "data_request": {},
+            });
+            let url = format!(
+                "{}/IStoreBrowseService/GetItems/v1/?input_json={}",
+                self.steam_api_base_url,
+                percent_encode_path_segment(&input.to_string())
+            );
+            let root: Value = self.agent.get(&url).call().ok()?.into_json().ok()?;
+            let items = root
+                .get("response")
+                .and_then(|response| response.get("store_items"))
+                .and_then(Value::as_array)?;
+
+            for appid in batch {
+                // An unlisted app is answered with a stub: `success` other than 1, `appid: 0`
+                let listed = items.iter().find(|item| {
+                    item.get("appid").and_then(Value::as_u64) == Some(*appid)
+                        && item.get("success").and_then(Value::as_u64) == Some(1)
+                });
+                summaries.push(SteamAppSummary {
+                    appid: *appid,
+                    name: listed
+                        .and_then(|item| item.get("name"))
+                        .and_then(Value::as_str)
+                        .map(|name| decode_basic_html_entities(name).trim().to_string())
+                        .filter(|name| !name.is_empty()),
+                    is_game: listed
+                        .and_then(|item| item.get("type"))
+                        .and_then(Value::as_u64)
+                        == Some(STEAM_STORE_TYPE_GAME),
+                });
+            }
+        }
+        Some(summaries)
+    }
+
     fn fetch_steam_store_item(&self, appid: u64, data_request: Value) -> Result<Option<Value>, ()> {
         let input = serde_json::json!({
             "ids": [{ "appid": appid }],
@@ -1195,7 +1254,7 @@ fn decode_basic_html_entities(s: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
@@ -1203,7 +1262,7 @@ mod tests {
     use std::thread;
     use tempfile::tempdir;
 
-    fn spawn_mock_api_server() -> (String, Arc<Mutex<Vec<String>>>) {
+    pub(crate) fn spawn_mock_api_server() -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
         let addr = listener.local_addr().unwrap();
         let base_url = format!("http://{addr}");
@@ -1292,6 +1351,21 @@ mod tests {
                             "200 OK",
                             "application/json",
                             r#"{"1321440":{"success":true,"data":{"type":"game","name":"Cassette Beasts","short_description":"Colleziona mostri e trasformati in loro.","genres":[{"id":"23","description":"Indie"},{"id":"3","description":"GDR"}]}}}"#.as_bytes().to_vec(),
+                        )
+                    } else if path.starts_with("/IStoreBrowseService/GetItems/v1/")
+                        && path.contains("%22data_request%22%3A%7B%7D")
+                    {
+                        // Several apps at once, as the real service answers: a game, a DLC,
+                        // an app it does not list, another game
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"{"response":{"store_items":[
+                                {"item_type":0,"id":620,"success":1,"visible":true,"name":"Portal 2","appid":620,"type":0},
+                                {"item_type":0,"id":1880832,"success":1,"visible":true,"name":"Hogwarts Legacy: Dark Arts Pack","appid":1880832,"type":4},
+                                {"item_type":0,"id":228980,"success":15,"visible":false,"name":"","appid":0},
+                                {"item_type":0,"id":220,"success":1,"visible":true,"name":"Half-Life\u00ae 2","appid":220,"type":0}
+                            ]}}"#.to_vec(),
                         )
                     } else if path.starts_with("/IStoreBrowseService/GetItems/v1/") && path.contains("3883570") {
                         // Recent app: artwork under hashed paths, as the real service answers

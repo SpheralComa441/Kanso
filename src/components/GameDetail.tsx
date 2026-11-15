@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
-import { Eye, EyeOff, Pencil, Play, Star, X } from "lucide-react";
+import { CloudDownload, Download, Eye, EyeOff, Pencil, Play, Star, X } from "lucide-react";
 import { useI18n, type I18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
 import { GAME_STATUSES, genreKey } from "../lib/library";
-import { PLATFORM_META, platformLabel } from "../lib/platforms";
+import { PLATFORM_META, canInstall, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame, GameStatus, PluginInfo } from "../types/game";
 import { Cover } from "./Cover";
@@ -79,7 +79,12 @@ export function GameDetail({
   const coverUrl = usableCover(
     resolveCoverUrl(game.coverPath, game.updatedAt)
   );
-  const canLaunch = Boolean(game.launchUri || game.executablePath);
+  const installable = canInstall(game);
+  // The main button starts the game, or asks its store's client to install it
+  const canLaunch = game.isInstalled
+    ? Boolean(game.launchUri || game.executablePath)
+    : installable;
+  const client = platformLabel(game.platform, t);
   const hideLabel = game.isHidden ? t("detail.unhide") : t("detail.hide");
 
   return (
@@ -148,6 +153,15 @@ export function GameDetail({
                 >
                   {platformLabel(game.platform, t)}
                 </span>
+                {!game.isInstalled && (
+                  <span
+                    id="detail-not-installed-badge"
+                    className="inline-flex items-center gap-1.5 rounded-md border border-oled-border bg-oled-bg/60 px-2 py-0.5 text-3xs font-medium text-zinc-300"
+                  >
+                    <CloudDownload className="h-3 w-3" />
+                    {t("game.notInstalled")}
+                  </span>
+                )}
                 {isRunning && (
                   <span
                     id="detail-running-badge"
@@ -243,24 +257,39 @@ export function GameDetail({
             <GamePluginSections game={game} plugins={plugins} />
 
             <dl className="mt-auto space-y-2 border-t border-oled-border/70 pt-4 text-2xs">
-              <div className="flex gap-3">
-                <dt className="w-24 shrink-0 text-zinc-500">{t("detail.folder")}</dt>
-                <dd
-                  className="min-w-0 select-text truncate font-mono text-zinc-400"
-                  title={game.installDir}
-                >
-                  {game.installDir}
-                </dd>
-              </div>
-              <div className="flex gap-3">
-                <dt className="w-24 shrink-0 text-zinc-500">{t("detail.launch")}</dt>
-                <dd
-                  className="min-w-0 select-text truncate font-mono text-zinc-400"
-                  title={launchTarget(game, t)}
-                >
-                  {launchTarget(game, t)}
-                </dd>
-              </div>
+              {game.isInstalled ? (
+                <>
+                  <div className="flex gap-3">
+                    <dt className="w-24 shrink-0 text-zinc-500">{t("detail.folder")}</dt>
+                    <dd
+                      className="min-w-0 select-text truncate font-mono text-zinc-400"
+                      title={game.installDir}
+                    >
+                      {game.installDir}
+                    </dd>
+                  </div>
+                  <div className="flex gap-3">
+                    <dt className="w-24 shrink-0 text-zinc-500">{t("detail.launch")}</dt>
+                    <dd
+                      className="min-w-0 select-text truncate font-mono text-zinc-400"
+                      title={launchTarget(game, t)}
+                    >
+                      {launchTarget(game, t)}
+                    </dd>
+                  </div>
+                </>
+              ) : (
+                <div className="flex gap-3">
+                  <dt className="w-24 shrink-0 text-zinc-500">{t("detail.launch")}</dt>
+                  <dd id="detail-install-note" className="min-w-0 text-zinc-400">
+                    {installable
+                      ? t("detail.installVia", { client })
+                      : game.platform === "standalone"
+                        ? t("detail.installLocal")
+                        : t("detail.installManually", { client })}
+                  </dd>
+                </div>
+              )}
               {game.playtimeMinutes !== null && (
                 <div className="flex gap-3">
                   <dt className="w-24 shrink-0 text-zinc-500">{t("detail.playtime")}</dt>
@@ -300,8 +329,18 @@ export function GameDetail({
               disabled={isLaunching || !canLaunch}
               className="inline-flex min-w-[9rem] items-center justify-center gap-2 rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-zinc-950 transition-colors hover:bg-accent-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-60"
             >
-              <Play className="h-4 w-4 fill-current" />
-              <span>{isLaunching ? t("common.launching") : t("common.play")}</span>
+              {game.isInstalled ? (
+                <Play className="h-4 w-4 fill-current" />
+              ) : (
+                <Download className="h-4 w-4" />
+              )}
+              <span>
+                {!game.isInstalled
+                  ? t("common.install")
+                  : isLaunching
+                    ? t("common.launching")
+                    : t("common.play")}
+              </span>
             </button>
 
             <button
