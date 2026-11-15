@@ -32,7 +32,7 @@ use std::time::Duration;
 /// Kanso's application id, as registered with Microsoft by the project's owner (a public
 /// client for personal Microsoft accounts: no secret exists). A fork that registers its own
 /// application only has to change this constant.
-pub const CLIENT_ID: &str = "8de3a320-775f-4102-a3b2-13331fe9ca82";
+pub const CLIENT_ID: &str = "2b0d074d-ab89-4874-9ea9-43e9d2f51994";
 /// Where Microsoft sends the browser after a sign-in, with the code in the address: its own
 /// blank page for desktop programs.
 const REDIRECT_URI: &str = "https://login.live.com/oauth20_desktop.srf";
