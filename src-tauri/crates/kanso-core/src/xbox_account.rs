@@ -48,9 +48,12 @@ const TITLE_SERVICE: &str = "https://titlehub.xboxlive.com";
 pub const STORE_PAGE_PREFIX: &str = "ms-windows-store://pdp/?PFN=";
 
 /// Where the user signs in: Microsoft's own page, which ends on an address carrying the code.
+/// The page is asked to let the user choose the account each time: a browser already signed
+/// in to one Microsoft account would otherwise go on with it without asking, and the account
+/// with the games is often another one.
 pub fn sign_in_url() -> String {
     format!(
-        "{SIGN_IN_SERVICE}/oauth20_authorize.srf?client_id={CLIENT_ID}&response_type=code&approval_prompt=auto&scope={}&redirect_uri={}",
+        "{SIGN_IN_SERVICE}/oauth20_authorize.srf?client_id={CLIENT_ID}&response_type=code&approval_prompt=auto&prompt=select_account&scope={}&redirect_uri={}",
         percent_encode(SCOPE),
         percent_encode(REDIRECT_URI)
     )
@@ -399,6 +402,7 @@ pub(crate) mod tests {
         let url = sign_in_url();
         assert!(url.starts_with("https://login.live.com/oauth20_authorize.srf?"));
         assert!(url.contains("response_type=code"));
+        assert!(url.contains("prompt=select_account"), "the user chooses which account, each time");
         assert!(url.contains("scope=Xboxlive.signin%20Xboxlive.offline_access"));
         assert!(url.contains("redirect_uri=https%3A%2F%2Flogin.live.com%2Foauth20_desktop.srf"));
         // What the user pastes back: the address Microsoft's blank page ends on
