@@ -9,6 +9,13 @@
 //! install id and its configuration as YAML text. The YAML names the game (often through a
 //! key of its `localizations` table), its artwork and how it starts. Layout and filtering
 //! rules follow what the Playnite launcher's Ubisoft library does with the same file.
+//!
+//! **Only clients that still write the file in the clear.** A current client (seen on a real
+//! installation in November 2026) keeps `configurations.vdat` instead: an envelope with a key
+//! id, a 12-byte nonce and a 16-byte tag around an encrypted payload. Kanso does not read
+//! that file and does not try to: the key is the client's. On such a PC this reader finds
+//! nothing, unless an older `configurations` was left behind, and the games of the account
+//! that are not installed have to come from somewhere else (signing in).
 
 use crate::cleaner::clean_game_title;
 use crate::models::GamePlatform;
@@ -443,6 +450,31 @@ localizations:
     }
 
     #[test]
+    fn the_encrypted_cache_of_a_current_client_gives_nothing() {
+        // The envelope a current client writes: a header naming a key, a nonce and a tag,
+        // then the encrypted payload
+        fn field(number: u8, payload: &[u8]) -> Vec<u8> {
+            let mut out = vec![(number << 3) | 2];
+            out.extend(varint(payload.len() as u64));
+            out.extend(payload);
+            out
+        }
+        let mut key = vec![0x08, 0x01];
+        key.extend(field(2, b"0123456789abcdef0123456789abcdef"));
+        key.extend(field(3, &[0xc6; 12]));
+        key.extend(field(4, &[0x6b; 16]));
+        let mut header = vec![0x08, 0x01];
+        header.extend(field(2, &key));
+        header.extend(field(3, b""));
+        let payload: Vec<u8> = (0..4096u32).map(|n| (n.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+        let mut envelope = field(1, &header);
+        envelope.extend(field(2, &payload));
+        let file = field(1, &envelope);
+
+        assert!(parse_ubisoft_cache(&file).is_none());
+    }
+
+    #[test]
     fn reads_the_cache_file_from_disk_and_shrugs_at_a_missing_one() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("configurations");
@@ -459,7 +491,10 @@ localizations:
             return;
         };
         let bytes = std::fs::read(path).unwrap();
-        let entries = read_entries(&bytes).expect("a real file parses");
+        let Some(entries) = read_entries(&bytes) else {
+            println!("not a cache written in the clear (a current client encrypts it): no games");
+            return;
+        };
         let games = parse_ubisoft_cache(&bytes).unwrap();
         println!("{} entries -> {} games", entries.len(), games.len());
         for owned in &games {
