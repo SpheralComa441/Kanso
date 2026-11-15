@@ -375,7 +375,7 @@ export const en: Dictionary = {
   "overview.count.other": "{count} entries",
 
   "accounts.title": "Store accounts",
-  "accounts.help": "Sign in to a store to see in the library the games you own there and have not installed. Signing in happens on the store's page, in the browser: Kanso never sees the password and keeps only the session, protected by Windows for your user.",
+  "accounts.help": "Sign in to a store to see in the library the games you own there and have not installed. Signing in always happens on the store's own page: Kanso does not see the password, does not save it and does not send it to anyone. Only the session issued by the store stays on the PC, and Kanso uses it with that store alone, to read the list of your games; \"Sign out\" deletes it.",
   "accounts.notConnected": "Not connected",
   "accounts.connectedAs": "Connected as {name}",
   "accounts.connected": "Connected",
@@ -393,4 +393,10 @@ export const en: Dictionary = {
   "accounts.signedIn": "Done: your {store} games will reach the library over the next few minutes.",
   "accounts.error": "The operation failed.",
   "accounts.previewNote": "In the preview, signing in is simulated.",
+  "accounts.window.explain": "A window opens on the {store} sign-in page: it is the store's page, not Kanso's. You type the password there and it reaches {store} only: Kanso does not read it, save it or send it to anyone.",
+  "accounts.window.kept.ubisoft": "After the sign-in Kanso keeps only the session issued by Ubisoft, encrypted by Windows for your user. Leave \"Remember me\" ticked on the page: without it the session lasts a few hours.",
+  "accounts.window.kept.cookies": "After the sign-in the session stays in the cookies of the {store} site, in a separate browser profile that only this window uses. On the page, tick the option to stay signed in: without it you will have to sign in again at the next start.",
+  "accounts.window.open": "Open the sign-in window",
+  "accounts.window.waiting": "Waiting for you to sign in in the {store} window...",
+  "accounts.window.closed": "Window closed without signing in.",
 };

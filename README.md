@@ -14,7 +14,7 @@ Minimalist, fast Windows game launcher built with **Tauri v2**, **React**, **Typ
   - **Status, statistics, achievements**: each game can be marked backlog / playing / finished / abandoned; a statistics page (hours, weekly activity, most played, platforms, genres); Steam achievements read from the client's local cache, no sign-in
   - **Not installed games**: uninstalled games stay in the library with their status and hours, the whole Steam library is added from the client's local records (owned packages and play history, no sign-in) with genres, tags and descriptions fetched fifty games per request, and an *Install* button hands a game to its store's client. An *Installed only* switch leaves them out of every list at once
   - **Other stores' libraries, no sign-in**: the games of the Epic and GOG accounts are read from their clients' local records (Epic's catalog cache, GOG Galaxy's database) and filed under the genres and tags of the Steam page of the same title. Ubisoft Connect's product cache is read too where it is still written in the clear; current clients encrypt it, and Kanso leaves it alone
-  - **Store accounts**: sign in to Epic Games or GOG from Settings to list the games of the account that are not installed. Signing in happens on the store's own page in the browser (Kanso only receives the code that page ends on); the session token is kept encrypted for the Windows user (DPAPI)
+  - **Store accounts**: sign in to Epic Games, GOG, Ubisoft Connect, EA app or Battle.net from Settings to list the games of the account that are not installed. Signing in always happens on the store's own page: in the browser for Epic and GOG (Kanso only receives the code that page ends on), in a separate, isolated window showing the store's page for the others. **Kanso never sees, saves or sends your password**; only the session the store issues stays on the PC (a token encrypted for the Windows user with DPAPI, or the cookies of the store's site in that window's own browser profile), it is used with that store alone, and *Sign out* deletes it. Kanso has no server and no telemetry. What exactly is kept, where, and how to check it in the code: [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md)
   - **Genres and tags as tiles**: the *Genres* and *Tags* titles of the sidebar open a wall of tiles, each a strip of the category's covers drifting slowly by, lit by the cover passing through its middle, and unfold their list
   - **Plugins**: community plugins (`plugin.json` + `main.js`) add sections to a game's sheet, labels to the cards and commands to a menu; six official ones ship in [`plugins/`](plugins/) — see [`docs/PLUGINS.md`](docs/PLUGINS.md)
   - Collapsible sidebar with combinable quick filters: favorites, recently played, hidden, platform, and genres generated from metadata
@@ -24,7 +24,7 @@ Minimalist, fast Windows game launcher built with **Tauri v2**, **React**, **Typ
   - SteamGridDB v2 (`GET /games/steam/{appid}` exact match + `/search/autocomplete` fallback & manual search) & Steam Store API metadata client, in the interface language. Steam games fall back to Steam's own artwork (`IStoreBrowseService/GetItems`), so they get covers even without a SteamGridDB key.
   - Deals client for the public Steam, Epic and GOG endpoints, and the theme file validator. Incomplete games are retried at most once a day unless the user asks; Steam soundtracks/DLC are hidden automatically.
   - Other stores without sign-in: `scanner/epic_catalog.rs` (base64 JSON catalog cache), `scanner/gog_galaxy.rs` (read-only SQLite) and `scanner/ubisoft_cache.rs` (protocol buffers + YAML), merged by `owned::merge_owned_games`
-  - Store accounts: `epic_account.rs` and `gog_account.rs` (each store's OAuth and library services), `accounts.rs` (who is signed in) and `secrets.rs` (DPAPI)
+  - Store accounts: `epic_account.rs` and `gog_account.rs` (each store's OAuth and library services), `signin.rs` (the contract of the sign-in window: the steps a store's flow may ask for and the only two scripts that may run), `ubisoft_account.rs`, `ea_account.rs` and `battlenet_account.rs` (each store's flow and library), `accounts.rs` (who is signed in) and `secrets.rs` (DPAPI). The window itself is `src-tauri/src/signin_window.rs`
   - Steam library without sign-in: binary `appcache/packageinfo.vdf` reader (`scanner/steam_packages.rs`) and batched store lookups that tell games from DLC and tools and give each game its genres and tags (`owned.rs`)
   - Play time measured for non-Steam games by matching running processes to install folders (`playtime.rs`), play sessions for every store, Steam achievements parser (`achievements.rs`)
   - Plugin engine (`plugins/`): manifest validation, an embedded QuickJS sandbox with memory/time/request limits, an `https`-only request gate restricted to the hosts a plugin declares, validated declarative output, per-game caching. Every official plugin is run in the real sandbox by the tests
@@ -35,6 +35,17 @@ Minimalist, fast Windows game launcher built with **Tauri v2**, **React**, **Typ
   - `tauri-plugin-single-instance`: starting Kanso again while it sits in the tray just brings the running window back
   - Restrictive CSP; the asset protocol can read the `covers/` folder only; games are launched by id from the database
 - **`.github/workflows/build-windows.yml`** — CI: a fast Linux job (core tests, clippy, frontend build) followed by the `windows-latest` job building the `.exe` and `.msi` artifacts.
+
+## Store sign-ins and your credentials
+
+Signing in to a store is optional, and built so that there is nothing to trust blindly:
+
+- **Your password never passes through Kanso.** It is typed on the store's own page (your browser, or an isolated window showing the store's page) and reaches the store only. Kanso does not read it, save it or send it anywhere. Same for two-factor codes.
+- **Kanso has no server.** No telemetry, no relay, no cloud copy: there is nowhere a credential could be sent.
+- **Only the session the store issues stays on your PC**, encrypted for your Windows user (or as the store's cookies in a browser profile used by that sign-in window alone). It goes to the store that issued it and to nothing else, to list your games. *Sign out* deletes it.
+- **The sign-in window can run two one-line scripts and no other**, after the store has signed you in, to read what the store handed over. They are written out in [`signin.rs`](src-tauri/crates/kanso-core/src/signin.rs), and a test checks they touch no form, field, cookie or network call.
+
+The full account, store by store, with the files to read to verify each statement: [`docs/ACCOUNTS.md`](docs/ACCOUNTS.md) (Italian and English).
 
 ## Development & Testing
 

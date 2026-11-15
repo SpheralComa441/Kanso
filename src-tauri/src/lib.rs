@@ -1,6 +1,7 @@
 mod accounts;
 mod playtime;
 mod plugins;
+mod signin_window;
 
 use kanso_core::deals::is_allowed_store_url;
 use kanso_core::theme::{
@@ -23,7 +24,7 @@ use tauri_plugin_opener::OpenerExt;
 
 pub(crate) const GAME_UPDATED_EVENT: &str = "library:game-updated";
 /// Several games changed at once (payload: the games as stored).
-const GAMES_UPDATED_EVENT: &str = "library:games-updated";
+pub(crate) const GAMES_UPDATED_EVENT: &str = "library:games-updated";
 /// Pause between two searches of the Steam store while matching a library to its pages.
 const STORE_SEARCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -811,6 +812,9 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         complete_library_again: Arc::default(),
     });
     remove_legacy_sql_mirror(app);
+    accounts::remove_unused_window_profiles(app);
+    #[cfg(debug_assertions)]
+    accounts::run_self_test_if_asked(app, &db);
     playtime::spawn_tracker(app.clone(), Arc::clone(&db), running_games);
     plugins::spawn_background_fill(app.clone(), db, plugin_host);
 
@@ -839,6 +843,13 @@ pub fn run() {
             show_main_window(app);
         }))
         .setup(|app| setup_app(app.handle()).map_err(Into::into))
+        // A sign-in window left open (or one renewing a session unseen) must not keep Kanso
+        // running once its own window is gone
+        .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                signin_window::close_all(window.app_handle());
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -880,6 +891,7 @@ pub fn run() {
             accounts::list_store_accounts,
             accounts::open_store_sign_in,
             accounts::store_sign_in,
+            accounts::store_sign_in_window,
             accounts::store_sign_out
         ])
         .run(tauri::generate_context!())

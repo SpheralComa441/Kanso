@@ -1,10 +1,22 @@
-//! The store accounts the user signed in to: who they are, and the token that keeps each
-//! session going.
+//! The store accounts the user signed in to: who they are, and what keeps each session going.
 //!
-//! One small file, `accounts.json`, next to the settings. A token is never written as it is:
-//! it goes through [`crate::secrets`], so the file is useless to another Windows user or on
-//! another PC. Passwords are never here at all: signing in happens on the store's own page,
-//! in the browser, and Kanso only ever receives the code that page hands out.
+//! One small file, `accounts.json`, next to the settings, on this PC only.
+//!
+//! **Passwords are never here, nor anywhere else in Kanso.** Signing in always happens on the
+//! store's own page: in the browser for Epic and GOG (Kanso receives the code that page ends
+//! on), in a window showing the store's page for Ubisoft, EA and Battle.net (see
+//! [`crate::signin`]). What the user types there goes to the store and to nobody else.
+//!
+//! What the file holds for each account is its name and, for the stores that issue one, the
+//! token that renews the session (Epic, GOG) or the session tickets (Ubisoft). A token is
+//! never written as it is: it goes through [`crate::secrets`], so the file is useless to
+//! another Windows user or on another PC. EA and Battle.net issue nothing to keep: their
+//! session is the cookies of the store's site, which stay in the browser profile of that
+//! store's sign-in window, and the file only records that someone signed in
+//! ([`SESSION_IN_WINDOW_PROFILE`]).
+//!
+//! A token is sent to the store that issued it and to nothing else. Signing out removes the
+//! account from the file (and deletes the window's browser profile).
 
 use crate::secrets::{self, Scheme};
 use base64::Engine as _;
@@ -14,6 +26,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub const ACCOUNTS_FILE: &str = "accounts.json";
+
+/// What is kept in place of a token for the stores whose session is the cookies of their
+/// site, held by the browser profile of the store's sign-in window: a note that someone is
+/// signed in, of no use to anyone.
+pub const SESSION_IN_WINDOW_PROFILE: &str = "session-kept-by-the-sign-in-window";
 
 /// Why a call to a store's services gave nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -135,6 +135,10 @@ pub enum T {
     SignInRefused,
     StoreUnreachable,
     SignInFailed,
+    SignInOn,
+    SignInWindowBusy,
+    SignInTimedOut,
+    LibraryNotListed,
     TrayOpen,
     TrayQuit,
 }
@@ -312,6 +316,25 @@ impl T {
             ],
             T::StoreUnreachable => ["Impossibile raggiungere lo store. Controlla la connessione e riprova", "The store could not be reached. Check the connection and try again", "No se puede conectar con la tienda. Comprueba la conexión e inténtalo de nuevo", "Не удалось связаться с магазином. Проверьте соединение и повторите попытку"],
             T::SignInFailed => ["Accesso non riuscito", "Sign-in failed", "No se ha podido iniciar sesión", "Не удалось войти"],
+            T::SignInOn => ["Accesso a {store}", "Sign in to {store}", "Iniciar sesión en {store}", "Вход в {store}"],
+            T::SignInWindowBusy => [
+                "La finestra di accesso di questo store è già aperta, oppure Kanso sta leggendo la sua libreria. Riprova tra un momento",
+                "The sign-in window of this store is already open, or Kanso is reading its library. Try again in a moment",
+                "La ventana de inicio de sesión de esta tienda ya está abierta, o Kanso está leyendo su biblioteca. Inténtalo de nuevo en un momento",
+                "Окно входа этого магазина уже открыто, или Kanso читает его библиотеку. Повторите попытку чуть позже",
+            ],
+            T::SignInTimedOut => [
+                "La finestra di accesso è rimasta aperta troppo a lungo senza che lo store confermasse l'accesso",
+                "The sign-in window stayed open too long without the store confirming the sign-in",
+                "La ventana de inicio de sesión ha estado abierta demasiado tiempo sin que la tienda confirmara el inicio de sesión",
+                "Окно входа было открыто слишком долго, а магазин так и не подтвердил вход",
+            ],
+            T::LibraryNotListed => [
+                "Accesso riuscito, ma lo store non ha dato l'elenco dei giochi",
+                "Signed in, but the store did not list the games",
+                "Sesión iniciada, pero la tienda no ha dado la lista de juegos",
+                "Вход выполнен, но магазин не выдал список игр",
+            ],
             T::TrayOpen => ["Apri Kanso", "Open Kanso", "Abrir Kanso", "Открыть Kanso"],
             T::TrayQuit => ["Esci", "Quit", "Salir", "Выход"],
         }

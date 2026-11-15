@@ -349,9 +349,24 @@ export interface Theme {
 /** A store's account, as far as the interface may know it: never a token. */
 export interface StoreAccountInfo {
   platform: GamePlatform;
+  /**
+   * How the user signs in: in the browser, ending on a code to paste ("code"), or on the
+   * store's own page shown in a window of Kanso ("window"). Either way the password is typed
+   * on the store's page and never reaches Kanso.
+   */
+  method: "code" | "window";
   /** Someone signed in (even if the session has since been refused). */
   connected: boolean;
   displayName: string | null;
   /** The store no longer accepts the saved session: sign in again. */
   needsSignIn: boolean;
+}
+
+/** How a sign-in on the store's page, in a window of Kanso, ended. */
+export interface WindowSignIn {
+  /** `false`: the user closed the window before signing in. */
+  signedIn: boolean;
+  account: StoreAccountInfo;
+  /** Signed in, but the first reading of the library did not go through: why. */
+  note: string | null;
 }

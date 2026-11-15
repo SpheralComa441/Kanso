@@ -385,7 +385,7 @@ export const it = {
   "overview.count.other": "{count} voci",
 
   "accounts.title": "Account degli store",
-  "accounts.help": "Accedi a uno store per vedere in libreria anche i giochi che possiedi lì e non hai installato. L'accesso avviene sulla pagina dello store, nel browser: Kanso non vede mai la password e conserva solo la sessione, protetta da Windows per il tuo utente.",
+  "accounts.help": "Accedi a uno store per vedere in libreria anche i giochi che possiedi lì e non hai installato. L'accesso avviene sempre sulla pagina dello store: Kanso non vede la password, non la salva e non la invia a nessuno. Sul PC resta solo la sessione rilasciata dallo store, che Kanso usa soltanto con quello store per leggere l'elenco dei tuoi giochi; «Esci» la cancella.",
   "accounts.notConnected": "Non collegato",
   "accounts.connectedAs": "Collegato come {name}",
   "accounts.connected": "Collegato",
@@ -403,6 +403,12 @@ export const it = {
   "accounts.signedIn": "Fatto: i giochi di {store} arrivano in libreria nei prossimi minuti.",
   "accounts.error": "Operazione non riuscita.",
   "accounts.previewNote": "Nell'anteprima l'accesso è simulato.",
+  "accounts.window.explain": "Si apre una finestra con la pagina di accesso di {store}: è la pagina dello store, non di Kanso. La password la scrivi lì e arriva solo a {store}: Kanso non la legge, non la salva e non la invia a nessuno.",
+  "accounts.window.kept.ubisoft": "Dopo l'accesso Kanso conserva solo la sessione rilasciata da Ubisoft, cifrata da Windows per il tuo utente. Lascia spuntato «Remember me» sulla pagina: senza, la sessione dura poche ore.",
+  "accounts.window.kept.cookies": "Dopo l'accesso la sessione resta nei cookie del sito di {store}, in un profilo del browser separato che usa solo questa finestra. Sulla pagina spunta l'opzione per restare collegato: senza, dovrai accedere di nuovo al prossimo avvio.",
+  "accounts.window.open": "Apri la finestra di accesso",
+  "accounts.window.waiting": "In attesa che tu acceda nella finestra di {store}...",
+  "accounts.window.closed": "Finestra chiusa senza accedere.",
 } as const;
 
 export type MessageKey = keyof typeof it;
