@@ -136,6 +136,11 @@ export interface AppConfig {
   trackPlaytime: boolean;
   /** Per-plugin choices, by plugin id; a plugin without an entry uses its own default. */
   plugins: Record<string, PluginState>;
+  /**
+   * The user says they have Xbox Game Pass for PC linked to Battle.net: the games it makes
+   * installable there are listed. Kanso cannot find this out by itself.
+   */
+  hasGamePass: boolean;
 }
 
 export interface PluginState {

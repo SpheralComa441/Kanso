@@ -108,6 +108,10 @@ pub struct AppConfig {
     pub track_playtime: bool,
     /// Per-plugin choices, by plugin id. A plugin without an entry uses its own default.
     pub plugins: BTreeMap<String, PluginState>,
+    /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
+    /// the games it makes installable there are listed (see
+    /// [`crate::battlenet_account::game_pass_games`]). Kanso cannot find this out by itself.
+    pub has_game_pass: bool,
 }
 
 impl Default for AppConfig {
@@ -121,6 +125,7 @@ impl Default for AppConfig {
             accessibility: AccessibilityConfig::default(),
             track_playtime: true,
             plugins: BTreeMap::new(),
+            has_game_pass: false,
         }
     }
 }
@@ -167,6 +172,7 @@ impl AppConfig {
                 .filter(|id| !id.is_empty()),
             accessibility: self.accessibility.sanitized(),
             track_playtime: self.track_playtime,
+            has_game_pass: self.has_game_pass,
             plugins: self
                 .plugins
                 .into_iter()
@@ -260,6 +266,7 @@ mod tests {
                 ..AccessibilityConfig::default()
             },
             track_playtime: false,
+            has_game_pass: true,
             plugins: BTreeMap::from([
                 (
                     "price-history".to_string(),

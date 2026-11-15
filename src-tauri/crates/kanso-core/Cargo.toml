@@ -20,6 +20,9 @@ sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
 # Reads the game configurations (YAML) inside Ubisoft Connect's local product cache
 yaml-rust2 = { version = "0.13", default-features = false }
+# Already in the dependency tree through ureq's TLS; opens the envelope (AES-256-GCM) a current
+# Ubisoft Connect client keeps its local product cache in
+ring = "0.17"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"

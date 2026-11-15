@@ -139,6 +139,7 @@ pub enum T {
     SignInWindowBusy,
     SignInTimedOut,
     LibraryNotListed,
+    ClientGames,
     AccountGames,
     AccountSubscriptionGames,
     AccountGamesLeftOut,
@@ -337,6 +338,12 @@ impl T {
                 "Signed in, but the store did not list the games",
                 "Sesión iniciada, pero la tienda no ha dado la lista de juegos",
                 "Вход выполнен, но магазин не выдал список игр",
+            ],
+            T::ClientGames => [
+                "Giochi letti da Ubisoft Connect su questo PC: {n}",
+                "Games read from Ubisoft Connect on this PC: {n}",
+                "Juegos leídos de Ubisoft Connect en este PC: {n}",
+                "Игр прочитано из Ubisoft Connect на этом ПК: {n}",
             ],
             T::AccountGames => ["Giochi letti dall'account: {n}", "Games read from the account: {n}", "Juegos leídos de la cuenta: {n}", "Игр прочитано из аккаунта: {n}"],
             T::AccountSubscriptionGames => [

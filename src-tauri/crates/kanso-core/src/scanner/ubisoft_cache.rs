@@ -10,16 +10,28 @@
 //! key of its `localizations` table), its artwork and how it starts. Layout and filtering
 //! rules follow what the Playnite launcher's Ubisoft library does with the same file.
 //!
-//! **Only clients that still write the file in the clear.** A current client (seen on a real
-//! installation in November 2026) keeps `configurations.vdat` instead: an envelope with a key
-//! id, a 12-byte nonce and a 16-byte tag around an encrypted payload. Kanso does not read
-//! that file and does not try to: the key is the client's. On such a PC this reader finds
-//! nothing, unless an older `configurations` was left behind, and the games of the account
-//! that are not installed have to come from somewhere else (signing in).
+//! **The cache of a current client.** Since late 2026 the client keeps `configurations.vdat`
+//! instead: the same list inside an envelope, encrypted (AES-256-GCM) with a key the client
+//! stores next to it, in `%LOCALAPPDATA%\Ubisoft Game Launcher\store\<key id>.bin`. That key
+//! file is itself protected by Windows for the Windows user who is signed in (the Data
+//! Protection API, the very protection Kanso gives its own sign-in tokens): Windows hands the
+//! key to any program that user runs, and to nobody else. Kanso asks Windows for it, opens the
+//! envelope in memory and reads the list of games. Said plainly, because it is the user's
+//! right to know:
+//!
+//! - nothing is written, changed or copied: not the cache, not the key, not what is read;
+//! - nothing leaves the PC: no request is made, the key and the cache are never sent anywhere;
+//! - the key is used once, in memory, and dropped; Kanso does not keep it;
+//! - what is read is a list of products (names, artwork file names, how a game starts): no
+//!   password, no session, no payment data is in that file.
+//!
+//! The layout of the envelope follows the open-source "Ubisoft Connect cache importer" for
+//! Playnite. If the client changes its format again, this reader simply finds no games.
 
 use crate::cleaner::clean_game_title;
 use crate::models::GamePlatform;
 use crate::owned::OwnedGame;
+use ring::aead;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use yaml_rust2::{Yaml, YamlLoader};
@@ -35,52 +47,182 @@ const ASSET_URL_BASE: &str = "https://ubistatic3-a.akamaihd.net/orbit/uplay_laun
 const MAX_CACHE_BYTES: u64 = 96 * 1024 * 1024;
 const MAX_CONFIGURATION_BYTES: usize = 2 * 1024 * 1024;
 
-/// The cache file of the Ubisoft Connect client on this PC, if there is one.
-pub fn detect_ubisoft_cache() -> Option<PathBuf> {
+/// Folder of the client's data, under which the cache and the key of its envelope are.
+#[cfg(target_os = "windows")]
+const CLIENT_FOLDER: &str = "Ubisoft Game Launcher";
+
+/// Nothing sensible is bigger: a refusal to read a file that is not a key.
+const MAX_KEY_FILE_BYTES: u64 = 16 * 1024;
+
+/// The cache files of the Ubisoft Connect client on this PC, the one a current client writes
+/// first. More than one can be there: a client that moved to the new format may have left the
+/// old file behind.
+pub fn detect_ubisoft_caches() -> Vec<PathBuf> {
     if let Some(overridden) = std::env::var_os(UBISOFT_CACHE_OVERRIDE_ENV) {
         let candidate = PathBuf::from(overridden);
         if candidate.is_file() {
-            return Some(candidate);
+            return vec![candidate];
         }
     }
 
     #[cfg(target_os = "windows")]
     {
-        let relative = Path::new("cache").join("configuration").join("configurations");
-        let per_user = std::env::var_os("LOCALAPPDATA")
-            .map(|dir| PathBuf::from(dir).join("Ubisoft Game Launcher").join(&relative));
-        let with_the_client = std::env::var_os("ProgramFiles(x86)").map(|dir| {
-            PathBuf::from(dir)
-                .join("Ubisoft")
-                .join("Ubisoft Game Launcher")
-                .join(&relative)
-        });
+        let folder = Path::new("cache").join("configuration");
+        let per_user = std::env::var_os("LOCALAPPDATA").map(|dir| PathBuf::from(dir).join(CLIENT_FOLDER));
+        let with_the_client = std::env::var_os("ProgramFiles(x86)")
+            .map(|dir| PathBuf::from(dir).join("Ubisoft").join(CLIENT_FOLDER));
         [per_user, with_the_client]
             .into_iter()
             .flatten()
-            .find(|path| path.is_file())
+            .flat_map(|root| {
+                [
+                    root.join(&folder).join("configurations.vdat"),
+                    root.join(&folder).join("configurations"),
+                ]
+            })
+            .filter(|path| path.is_file())
+            .collect()
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        None
+        Vec::new()
     }
 }
 
-/// The games listed in the cache file at `path`. A missing, oversized or unreadable file
-/// simply gives no games.
+/// The games of the account as the client's cache on this PC lists them: the first cache
+/// file that can be read and lists any.
+pub fn read_owned_ubisoft_games_of_this_pc() -> Vec<OwnedGame> {
+    detect_ubisoft_caches()
+        .iter()
+        .map(|path| read_owned_ubisoft_games(path))
+        .find(|games| !games.is_empty())
+        .unwrap_or_default()
+}
+
+/// The games listed in the cache file at `path`, in the clear or in the envelope of a current
+/// client. A missing, oversized or unreadable file simply gives no games; so does an envelope
+/// whose key is not there or is not this Windows user's.
 pub fn read_owned_ubisoft_games(path: &Path) -> Vec<OwnedGame> {
-    let small_enough = std::fs::metadata(path).is_ok_and(|meta| meta.len() <= MAX_CACHE_BYTES);
-    if !small_enough {
-        return Vec::new();
-    }
-    std::fs::read(path)
-        .ok()
+    read_cache(path)
         .and_then(|bytes| parse_ubisoft_cache(&bytes))
         .unwrap_or_default()
 }
 
-/// One entry of the cache, before its configuration is looked at.
+/// The list inside the cache file at `path`, taken out of its envelope when it is in one.
+fn read_cache(path: &Path) -> Option<Vec<u8>> {
+    let small_enough = std::fs::metadata(path).is_ok_and(|meta| meta.len() <= MAX_CACHE_BYTES);
+    if !small_enough {
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let Some(envelope) = read_envelope(&bytes) else {
+        return Some(bytes);
+    };
+    // The key is used here and dropped: it is never stored, shown or sent
+    key_folders(path)
+        .iter()
+        .filter_map(|folder| envelope_key(folder, envelope.key_id))
+        .find_map(|key| open_envelope(&envelope, &key))
+}
+
+/// Where the key of the envelope around the cache at `cache` may be: the `store` folder of
+/// the client data the cache belongs to (`<data>\cache\configuration\<file>`), and the one
+/// of the Windows user.
+fn key_folders(cache: &Path) -> Vec<PathBuf> {
+    let mut folders = Vec::new();
+    if let Some(data) = cache.parent().and_then(Path::parent).and_then(Path::parent) {
+        folders.push(data.join("store"));
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let per_user = PathBuf::from(local).join(CLIENT_FOLDER).join("store");
+        if !folders.contains(&per_user) {
+            folders.push(per_user);
+        }
+    }
+    folders
+}
+
+/// The envelope a current client wraps its cache in: which key closes it, and how.
+struct Envelope<'a> {
+    /// Name of the key's file in the client's `store` folder: thirty-two letters and digits.
+    key_id: &'a str,
+    nonce: [u8; aead::NONCE_LEN],
+    tag: &'a [u8],
+    sealed: &'a [u8],
+}
+
+/// Reads `bytes` as an envelope. `None`: they are something else (the cache in the clear, or
+/// a format this code does not know).
+///
+/// The file is one protocol-buffers field (1) holding the envelope: a header (1) and the
+/// encrypted list (2). The header has a version (1), which must be 1, and the description of
+/// the encryption (2): the algorithm (1), which must be 1 (AES-256-GCM), the key's id (2), a
+/// 12-byte nonce (3) and a 16-byte tag (4).
+fn read_envelope(bytes: &[u8]) -> Option<Envelope<'_>> {
+    fn field(message: &[u8], wanted: u64) -> Option<ProtoValue<'_>> {
+        let mut reader = ProtoReader::new(message);
+        while let Some(field) = reader.next_field() {
+            let (number, value) = field?;
+            if number == wanted {
+                return Some(value);
+            }
+        }
+        None
+    }
+    fn bytes_of(message: &[u8], wanted: u64) -> Option<&[u8]> {
+        match field(message, wanted)? {
+            ProtoValue::Bytes(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+    fn is_one(message: &[u8], wanted: u64) -> bool {
+        matches!(field(message, wanted), Some(ProtoValue::Number(1)))
+    }
+
+    let envelope = bytes_of(bytes, 1)?;
+    let header = bytes_of(envelope, 1)?;
+    let sealed = bytes_of(envelope, 2)?;
+    let encryption = bytes_of(header, 2)?;
+    if !is_one(header, 1) || !is_one(encryption, 1) {
+        return None;
+    }
+    let key_id = std::str::from_utf8(bytes_of(encryption, 2)?).ok()?;
+    // The id becomes a file name: letters and digits only, nothing that could lead elsewhere
+    let plain_id = key_id.len() == 32 && key_id.bytes().all(|b| b.is_ascii_alphanumeric());
+    let nonce: [u8; aead::NONCE_LEN] = bytes_of(encryption, 3)?.try_into().ok()?;
+    let tag = bytes_of(encryption, 4)?;
+    (plain_id && tag.len() == aead::AES_256_GCM.tag_len()).then_some(Envelope { key_id, nonce, tag, sealed })
+}
+
+/// The key named `key_id` in the client's `store` folder, as Windows gives it back to the
+/// Windows user the client saved it for. `None` when it is not there, or is somebody else's.
+fn envelope_key(store_folder: &Path, key_id: &str) -> Option<Vec<u8>> {
+    let path = store_folder.join(format!("{key_id}.bin"));
+    let small_enough = std::fs::metadata(&path).is_ok_and(|meta| meta.len() <= MAX_KEY_FILE_BYTES);
+    if !small_enough {
+        return None;
+    }
+    let protected = std::fs::read(path).ok()?;
+    let key = crate::secrets::unprotect_for_this_user(&protected).ok()?;
+    (key.len() == aead::AES_256_GCM.key_len()).then_some(key)
+}
+
+/// What the envelope holds, when `key` is the one that closed it.
+fn open_envelope(envelope: &Envelope<'_>, key: &[u8]) -> Option<Vec<u8>> {
+    let key = aead::LessSafeKey::new(aead::UnboundKey::new(&aead::AES_256_GCM, key).ok()?);
+    let mut data = Vec::with_capacity(envelope.sealed.len() + envelope.tag.len());
+    data.extend_from_slice(envelope.sealed);
+    data.extend_from_slice(envelope.tag);
+    let length = key
+        .open_in_place(aead::Nonce::assume_unique_for_key(envelope.nonce), aead::Aad::empty(), &mut data)
+        .ok()?
+        .len();
+    data.truncate(length);
+    Some(data)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CacheEntry {
     product_id: u64,
@@ -449,29 +591,117 @@ localizations:
         assert!(parse_ubisoft_cache(&[0x0a, 0xff, 0xff, 0x03, 0x08, 0x01]).is_none());
     }
 
-    #[test]
-    fn the_encrypted_cache_of_a_current_client_gives_nothing() {
-        // The envelope a current client writes: a header naming a key, a nonce and a tag,
-        // then the encrypted payload
-        fn field(number: u8, payload: &[u8]) -> Vec<u8> {
-            let mut out = vec![(number << 3) | 2];
-            out.extend(varint(payload.len() as u64));
-            out.extend(payload);
-            out
-        }
-        let mut key = vec![0x08, 0x01];
-        key.extend(field(2, b"0123456789abcdef0123456789abcdef"));
-        key.extend(field(3, &[0xc6; 12]));
-        key.extend(field(4, &[0x6b; 16]));
-        let mut header = vec![0x08, 0x01];
-        header.extend(field(2, &key));
-        header.extend(field(3, b""));
-        let payload: Vec<u8> = (0..4096u32).map(|n| (n.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
-        let mut envelope = field(1, &header);
-        envelope.extend(field(2, &payload));
-        let file = field(1, &envelope);
+    fn field(number: u8, payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![(number << 3) | 2];
+        out.extend(varint(payload.len() as u64));
+        out.extend(payload);
+        out
+    }
 
+    const KEY_ID: &str = "0123456789abcdef0123456789abcdef";
+    const KEY: [u8; 32] = [0x5a; 32];
+
+    /// The file a current client writes: `list` inside its envelope, closed with `key`.
+    pub(crate) fn sealed_cache(list: &[u8], key: &[u8; 32]) -> Vec<u8> {
+        let nonce = [0xc6; 12];
+        let sealing = aead::LessSafeKey::new(aead::UnboundKey::new(&aead::AES_256_GCM, key).unwrap());
+        let mut sealed = list.to_vec();
+        let tag = sealing
+            .seal_in_place_separate_tag(aead::Nonce::assume_unique_for_key(nonce), aead::Aad::empty(), &mut sealed)
+            .unwrap();
+
+        let mut encryption = vec![0x08, 0x01];
+        encryption.extend(field(2, KEY_ID.as_bytes()));
+        encryption.extend(field(3, &nonce));
+        encryption.extend(field(4, tag.as_ref()));
+        let mut header = vec![0x08, 0x01];
+        header.extend(field(2, &encryption));
+        header.extend(field(3, b""));
+        let mut envelope = field(1, &header);
+        envelope.extend(field(2, &sealed));
+        field(1, &envelope)
+    }
+
+    /// A client's data folder with the cache of a current client; the path of the cache and
+    /// of the folder its key goes in.
+    fn client_data(dir: &Path) -> (PathBuf, PathBuf) {
+        let cache_folder = dir.join("cache").join("configuration");
+        let store = dir.join("store");
+        std::fs::create_dir_all(&cache_folder).unwrap();
+        std::fs::create_dir_all(&store).unwrap();
+        let cache = cache_folder.join("configurations.vdat");
+        std::fs::write(&cache, sealed_cache(&sample_cache(), &KEY)).unwrap();
+        (cache, store)
+    }
+
+    #[test]
+    fn an_envelope_is_told_from_a_list_in_the_clear() {
+        let file = sealed_cache(&sample_cache(), &KEY);
+        let envelope = read_envelope(&file).expect("an envelope");
+        assert_eq!(envelope.key_id, KEY_ID);
+        assert_eq!(open_envelope(&envelope, &KEY), Some(sample_cache()));
+        // Another key, or a byte changed on the way: nothing, rather than something wrong
+        assert_eq!(open_envelope(&envelope, &[0x11; 32]), None);
+        let mut tampered = file.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        assert_eq!(open_envelope(&read_envelope(&tampered).unwrap(), &KEY), None);
+
+        // The envelope itself is not a list of games, and a list is not an envelope
         assert!(parse_ubisoft_cache(&file).is_none());
+        assert!(read_envelope(&sample_cache()).is_none());
+        assert!(read_envelope(b"").is_none());
+        assert!(read_envelope(b"just some text, not a protocol buffer").is_none());
+
+        // A key id that is not a plain name is never made into a path
+        let odd = String::from_utf8(file.clone()).unwrap_err().into_bytes();
+        let position = odd.windows(KEY_ID.len()).position(|window| window == KEY_ID.as_bytes()).unwrap();
+        let mut odd = odd;
+        odd[position..position + 3].copy_from_slice(b"../");
+        assert!(read_envelope(&odd).is_none());
+    }
+
+    // Outside Windows, where Kanso is only built and tested, a key file holds the key as it
+    // is; on Windows it has to be one Windows protected for this user, which a test cannot
+    // write for the client. The reading of the envelope is the same code everywhere.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn the_cache_of_a_current_client_is_read_with_the_key_next_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cache, store) = client_data(dir.path());
+
+        // Without its key the cache gives nothing
+        assert!(read_owned_ubisoft_games(&cache).is_empty());
+
+        // A key that is not the one, or not a key at all
+        std::fs::write(store.join(format!("{KEY_ID}.bin")), [0x11; 32]).unwrap();
+        assert!(read_owned_ubisoft_games(&cache).is_empty());
+        std::fs::write(store.join(format!("{KEY_ID}.bin")), b"short").unwrap();
+        assert!(read_owned_ubisoft_games(&cache).is_empty());
+
+        std::fs::write(store.join(format!("{KEY_ID}.bin")), KEY).unwrap();
+        let games = read_owned_ubisoft_games(&cache);
+        let titles: Vec<&str> = games.iter().map(|owned| owned.game.title.as_str()).collect();
+        assert_eq!(titles, ["Assassin's Creed® Odyssey", "Anno 1800", "Trials Rising"]);
+
+        // Nothing was written or changed by reading
+        assert_eq!(std::fs::read(&cache).unwrap(), sealed_cache(&sample_cache(), &KEY));
+        assert_eq!(std::fs::read(store.join(format!("{KEY_ID}.bin"))).unwrap(), KEY);
+        assert_eq!(std::fs::read_dir(&store).unwrap().count(), 1);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_key_windows_did_not_protect_for_this_user_opens_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (cache, store) = client_data(dir.path());
+        std::fs::write(store.join(format!("{KEY_ID}.bin")), KEY).unwrap();
+        assert!(read_owned_ubisoft_games(&cache).is_empty());
+
+        // The same key, protected by Windows for this user as the client does
+        let protected = crate::secrets::protect(&KEY).unwrap();
+        std::fs::write(store.join(format!("{KEY_ID}.bin")), protected).unwrap();
+        assert_eq!(read_owned_ubisoft_games(&cache).len(), 3);
     }
 
     #[test]
@@ -490,9 +720,12 @@ localizations:
         let Some(path) = std::env::var_os(UBISOFT_CACHE_OVERRIDE_ENV) else {
             return;
         };
-        let bytes = std::fs::read(path).unwrap();
+        let Some(bytes) = read_cache(Path::new(&path)) else {
+            println!("the cache is in an envelope and its key is not next to it (store/<key id>.bin): no games");
+            return;
+        };
         let Some(entries) = read_entries(&bytes) else {
-            println!("not a cache written in the clear (a current client encrypts it): no games");
+            println!("not a cache this code knows: no games");
             return;
         };
         let games = parse_ubisoft_cache(&bytes).unwrap();

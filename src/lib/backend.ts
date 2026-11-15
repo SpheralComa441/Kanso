@@ -51,6 +51,7 @@ const DEFAULT_CONFIG: AppConfig = {
   accessibility: DEFAULT_ACCESSIBILITY,
   trackPlaytime: true,
   plugins: {},
+  hasGamePass: false,
 };
 
 /** Keeps only well-formed per-plugin choices (the preview reads them from localStorage). */
@@ -132,6 +133,7 @@ export async function getSettings(): Promise<AppConfig> {
       accessibility: withAccessibilityDefaults(parsed.accessibility),
       trackPlaytime: parsed.trackPlaytime !== false,
       plugins: withPluginDefaults(parsed.plugins),
+      hasGamePass: parsed.hasGamePass === true,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -150,6 +152,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     accessibility: withAccessibilityDefaults(config.accessibility),
     trackPlaytime: config.trackPlaytime,
     plugins: withPluginDefaults(config.plugins),
+    hasGamePass: config.hasGamePass === true,
   };
 
   if (isTauri()) {
@@ -204,6 +207,18 @@ export async function subscribeToGameBatchUpdates(
   }
   return listen<DetectedGame[]>("library:games-updated", (ev) => {
     onUpdate(ev.payload);
+  });
+}
+
+/** Games left the library (entries a store's list had been wrongly read into): their ids. */
+export async function subscribeToGameRemovals(
+  onRemoved: (ids: string[]) => void
+): Promise<() => void> {
+  if (!isTauri()) {
+    return () => {};
+  }
+  return listen<string[]>("library:games-removed", (ev) => {
+    onRemoved(ev.payload);
   });
 }
 

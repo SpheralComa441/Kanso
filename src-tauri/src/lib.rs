@@ -25,6 +25,8 @@ use tauri_plugin_opener::OpenerExt;
 pub(crate) const GAME_UPDATED_EVENT: &str = "library:game-updated";
 /// Several games changed at once (payload: the games as stored).
 pub(crate) const GAMES_UPDATED_EVENT: &str = "library:games-updated";
+/// Games left the library (entries a store's list was wrongly read into): their ids.
+pub(crate) const GAMES_REMOVED_EVENT: &str = "library:games-removed";
 /// Pause between two searches of the Steam store while matching a library to its pages.
 const STORE_SEARCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
 
@@ -115,8 +117,12 @@ fn save_settings(
     config: AppConfig,
 ) -> Result<AppConfig, String> {
     let config_path = resolve_config_path(&app)?;
+    let had_game_pass = load_config(&app).has_game_pass;
     let saved = config.save_to_file(&config_path)?;
     apply_language(&app, saved.lang().unwrap_or(FALLBACK_LANGUAGE));
+    if saved.has_game_pass != had_game_pass {
+        accounts::apply_game_pass(&app, &state.db, saved.has_game_pass);
+    }
     // A plugin may have been switched on, or its settings changed
     state.plugins.wake_background_fill();
     Ok(saved)
@@ -239,6 +245,11 @@ async fn sync_library_metadata(
             kanso_core::scanner::read_owned_games_from_clients(),
             now,
         );
+        // With Game Pass, as the user says in the settings: the games it makes installable
+        // on Battle.net, from the list Kanso ships with
+        if config.has_game_pass {
+            kanso_core::owned::merge_owned_games(&db, kanso_core::battlenet_account::game_pass_games(), now);
+        }
         // What is not on disk is left out of the loop above: its genres, tags and description
         // come fifty games per request, so that it can be browsed like the rest
         kanso_core::owned::sync_absent_game_details(&db, &client, now);

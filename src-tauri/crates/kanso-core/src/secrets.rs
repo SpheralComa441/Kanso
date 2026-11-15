@@ -39,6 +39,14 @@ pub fn unprotect(protected: &[u8], scheme: Scheme) -> Result<Vec<u8>, String> {
     platform::unprotect(protected)
 }
 
+/// Gives back bytes another program protected for the current Windows user with the same
+/// Data Protection API (and no extra secret of its own): Windows returns them to any program
+/// that user runs. On other systems, where Kanso is only built and tested, the bytes come
+/// back as they are.
+pub fn unprotect_for_this_user(protected: &[u8]) -> Result<Vec<u8>, String> {
+    platform::unprotect(protected)
+}
+
 #[cfg(target_os = "windows")]
 mod platform {
     use std::ptr;
