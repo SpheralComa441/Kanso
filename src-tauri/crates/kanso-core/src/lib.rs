@@ -31,7 +31,7 @@ pub use db::LibraryDb;
 pub use deals::{Deal, DealStore, DealsClient, DealsReport};
 pub use i18n::{current_language, set_language, Lang, T};
 pub use metadata::{
-    is_metadata_sync_due, needs_metadata, EnrichOutcome, MetadataClient, SgdbResolution,
+    is_absent_cover_due, is_metadata_sync_due, needs_metadata, EnrichOutcome, MetadataClient, SgdbResolution,
     SteamAppSummary, SteamStoreLookup, SteamStoreMetadata, METADATA_RETRY_INTERVAL_MS,
 };
 pub use models::{

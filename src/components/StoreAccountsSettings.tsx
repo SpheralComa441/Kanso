@@ -126,7 +126,13 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
     setNotice(null);
     try {
       await storeSignOut(account.platform);
-      replace({ ...account, connected: false, displayName: null, needsSignIn: false });
+      replace({
+        ...account,
+        connected: false,
+        displayName: null,
+        needsSignIn: false,
+        library: null,
+      });
       setJustSignedIn(null);
     } catch (err) {
       failure(err);
@@ -166,6 +172,11 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
                 >
                   {status}
                 </p>
+                {signedIn && account.library && (
+                  <p data-account-library className="mt-0.5 text-2xs leading-relaxed text-zinc-500">
+                    {account.library}
+                  </p>
+                )}
               </div>
               {signedIn ? (
                 <button

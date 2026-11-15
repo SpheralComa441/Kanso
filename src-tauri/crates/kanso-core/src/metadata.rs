@@ -105,6 +105,23 @@ pub fn is_metadata_sync_due(
             || now_ms.saturating_sub(game.metadata_attempted_at) >= METADATA_RETRY_INTERVAL_MS)
 }
 
+/// `true` for a game that is not on disk and came without any cover: its store gave none
+/// (Battle.net never does) and nothing has found one since. Such games are few, so a cover
+/// is looked for without waiting for their sheet to be opened (see
+/// [`MetadataClient::find_missing_cover`]).
+pub fn needs_cover_while_absent(game: &DetectedGame) -> bool {
+    !game.is_installed && !game.is_hidden && game.cover_path.is_none()
+}
+
+/// Whether a cover should be looked for now, for a game [`needs_cover_while_absent`] names:
+/// at most once per [`METADATA_RETRY_INTERVAL_MS`] unless `retry_now`.
+pub fn is_absent_cover_due(game: &DetectedGame, now_ms: u64, retry_now: bool) -> bool {
+    needs_cover_while_absent(game)
+        && (retry_now
+            || game.metadata_attempted_at == 0
+            || now_ms.saturating_sub(game.metadata_attempted_at) >= METADATA_RETRY_INTERVAL_MS)
+}
+
 fn cover_is_missing(game: &DetectedGame) -> bool {
     game.cover_path
         .as_deref()
@@ -990,6 +1007,78 @@ impl MetadataClient {
         Ok(items.into_iter().next().and_then(|item| item.appid_string()))
     }
 
+    /// The Steam app whose artwork can stand in as the game's cover: the game itself on Steam;
+    /// for a game of another store that has no cover at all, the store page that carries
+    /// exactly its title (never a near miss: that would be another game's cover).
+    fn steam_art_app_of(&self, game: &DetectedGame) -> Option<String> {
+        if let Some(appid) = steam_appid_of(game) {
+            return Some(appid.to_string());
+        }
+        if game.platform == GamePlatform::Steam || game.cover_path.is_some() {
+            return None;
+        }
+        self.find_steam_app_by_title(&game.clean_title).ok().flatten()
+    }
+
+    /// Downloads Steam's artwork of `appid` as the cover of `local_game_id`: the vertical
+    /// library capsule, else the landscape header. A problem worth telling is left in
+    /// `warning` (the first one stays).
+    fn download_steam_artwork(
+        &self,
+        appid: &str,
+        local_game_id: &str,
+        covers_dir: &Path,
+        warning: &mut Option<String>,
+    ) -> Option<PathBuf> {
+        let artwork = self.fetch_steam_artwork(appid)?;
+        for url in [artwork.library_capsule_url, artwork.header_url].into_iter().flatten() {
+            match self.download_cover_image(&url, local_game_id, covers_dir) {
+                Ok(Some(saved_path)) => return Some(saved_path),
+                Ok(None) => {}
+                Err(e) => {
+                    warning.get_or_insert(e);
+                }
+            }
+        }
+        None
+    }
+
+    /// Looks for a cover for a game that has none, and nothing else: SteamGridDB when
+    /// `api_key` is set, then Steam's artwork (the game's own, or that of the store page
+    /// carrying exactly its title). Meant for the games that are not on disk and came from a
+    /// store that gives no cover; their texts are left to the passes that handle them.
+    ///
+    /// Always stamps `metadata_attempted_at`, so that a game nobody has art for is asked
+    /// about once a day at most. Returns whether a cover was found.
+    pub fn find_missing_cover(&self, game: &mut DetectedGame, api_key: Option<&str>, covers_dir: &Path) -> bool {
+        let now = now_timestamp_ms();
+        game.metadata_attempted_at = now;
+        if game.cover_path.is_some() {
+            return false;
+        }
+        if let Some(key) = api_key.map(str::trim).filter(|key| !key.is_empty()) {
+            if let Ok(Some(resolution)) = self.resolve_sgdb_match(key, game) {
+                game.steamgriddb_id = Some(resolution.game.id);
+                if let Ok(Some(saved_path)) =
+                    self.download_cover_for_sgdb_id(key, resolution.game.id, &game.id, covers_dir)
+                {
+                    game.cover_path = Some(saved_path.to_string_lossy().to_string());
+                }
+            }
+        }
+        if game.cover_path.is_none() {
+            if let Some(appid) = self.steam_art_app_of(game) {
+                if let Some(saved_path) = self.download_steam_artwork(&appid, &game.id, covers_dir, &mut None) {
+                    game.cover_path = Some(saved_path.to_string_lossy().to_string());
+                }
+            }
+        }
+        if game.cover_path.is_some() {
+            game.updated_at = now;
+        }
+        game.cover_path.is_some()
+    }
+
     /// Automatically enriches a game with its official Steam name (when the scanner could only
     /// produce a provisional title), Steam store type, description & genres in the client's
     /// language, and cover art: SteamGridDB when `api_key` is set, then Steam's own artwork.
@@ -1116,24 +1205,11 @@ impl MetadataClient {
             // niche games) and the only source when no API key is configured. The vertical
             // library capsule is preferred; the landscape header is better than no cover.
             if cover_is_missing(game) {
-                if let Some(artwork) = steam_appid
-                    .as_deref()
-                    .and_then(|appid| self.fetch_steam_artwork(appid))
-                {
-                    for url in [artwork.library_capsule_url, artwork.header_url]
-                        .into_iter()
-                        .flatten()
+                if let Some(appid) = steam_appid.as_deref() {
+                    if let Some(saved_path) =
+                        self.download_steam_artwork(appid, &game.id, covers_dir, &mut outcome.warning)
                     {
-                        match self.download_cover_image(&url, &game.id, covers_dir) {
-                            Ok(Some(saved_path)) => {
-                                game.cover_path = Some(saved_path.to_string_lossy().to_string());
-                                break;
-                            }
-                            Ok(None) => {}
-                            Err(e) => {
-                                outcome.warning.get_or_insert(e);
-                            }
-                        }
+                        game.cover_path = Some(saved_path.to_string_lossy().to_string());
                     }
                 }
             }
@@ -1541,6 +1617,12 @@ pub(crate) mod tests {
                             "200 OK",
                             "application/json",
                             br#"[{"appid":"916440","name":"Anno 1800 - Season 4 Pass"},{"appid":"1028630","name":"Anno 1404 - History Edition"}]"#.to_vec(),
+                        )
+                    } else if path.starts_with("/actions/SearchApps/Invokyr") {
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"[{"appid":"3883570","name":"Invokyr"}]"#.to_vec(),
                         )
                     } else if path.starts_with("/actions/SearchApps/Unknown") {
                         ("200 OK", "application/json", b"[]".to_vec())
@@ -2118,6 +2200,78 @@ pub(crate) mod tests {
         );
         assert!(paths.iter().any(|p| p
             == "/store_item_assets/steam/apps/3883570/1723ba58/library_capsule.jpg?t=1792307731"));
+    }
+
+    /// A game of another store that is not on disk and came without a cover.
+    fn coverless_absent_game(title: &str) -> DetectedGame {
+        let mut game = DetectedGame::new_detected(
+            format!("battlenet:{}", title.to_ascii_lowercase().replace(' ', "-")),
+            title.to_string(),
+            title.to_string(),
+            GamePlatform::BattleNet,
+            None,
+            String::new(),
+            None,
+            None,
+        );
+        game.is_installed = false;
+        game
+    }
+
+    #[test]
+    fn a_game_that_is_not_installed_and_has_no_cover_gets_one_without_being_opened() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let covers_dir = tempdir().unwrap();
+        let now = now_timestamp_ms();
+
+        // Battle.net names its games and gives no art. With a SteamGridDB key, the cover is
+        // the one found there by title
+        let mut diablo = coverless_absent_game("Diablo IV");
+        assert!(needs_cover_while_absent(&diablo) && is_absent_cover_due(&diablo, now, false));
+        assert!(!needs_metadata(&diablo, true, Lang::It), "still left out of the game-by-game sync");
+        let texts = (diablo.short_description.clone(), diablo.genres.clone(), diablo.tags.clone());
+        assert!(client.find_missing_cover(&mut diablo, Some("test_sgdb_key"), covers_dir.path()));
+        let cover = diablo.cover_path.clone().expect("cover downloaded");
+        assert_eq!(fs::read(&cover).unwrap(), b"\x89PNG\r\n\x1a\nmockcover");
+        assert_eq!(diablo.steamgriddb_id, Some(777001));
+        assert_eq!((diablo.short_description.clone(), diablo.genres.clone(), diablo.tags.clone()), texts, "a cover and nothing else");
+        assert!(!needs_cover_while_absent(&diablo));
+        assert!(
+            !recorded.lock().unwrap().iter().any(|p| p.starts_with("/actions/SearchApps/")),
+            "no need to ask Steam when SteamGridDB delivered"
+        );
+
+        // Without a key: the art of the Steam page that carries exactly the game's title
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let mut invokyr = coverless_absent_game("Invokyr");
+        assert!(client.find_missing_cover(&mut invokyr, None, covers_dir.path()));
+        assert_eq!(fs::read(invokyr.cover_path.as_deref().unwrap()).unwrap(), b"\xff\xd8\xffvertical-capsule");
+        assert!(!recorded.lock().unwrap().iter().any(|p| p.starts_with("/search/")), "SteamGridDB is not asked without a key");
+
+        // Near misses only on Steam, and no key: no cover, and no asking again before a day
+        let mut anno = coverless_absent_game("Anno 1800");
+        assert!(!client.find_missing_cover(&mut anno, None, covers_dir.path()));
+        assert_eq!(anno.cover_path, None, "never another game's cover");
+        assert!(needs_cover_while_absent(&anno));
+        let now = now_timestamp_ms();
+        assert!(!is_absent_cover_due(&anno, now, false));
+        assert!(is_absent_cover_due(&anno, now, true), "unless the user asks");
+        assert!(is_absent_cover_due(&anno, now + METADATA_RETRY_INTERVAL_MS, false));
+
+        // What has a cover, is on disk or is hidden is none of this pass's business
+        let mut with_remote_cover = coverless_absent_game("Diablo IV");
+        with_remote_cover.cover_path = Some("https://cdn.example/diablo.jpg".into());
+        assert!(!needs_cover_while_absent(&with_remote_cover));
+        assert!(!client.find_missing_cover(&mut with_remote_cover, Some("test_sgdb_key"), covers_dir.path()));
+        assert_eq!(with_remote_cover.cover_path.as_deref(), Some("https://cdn.example/diablo.jpg"));
+        let mut installed = coverless_absent_game("Diablo IV");
+        installed.is_installed = true;
+        assert!(!needs_cover_while_absent(&installed));
+        let mut hidden = coverless_absent_game("Diablo IV");
+        hidden.is_hidden = true;
+        assert!(!needs_cover_while_absent(&hidden));
     }
 
     #[test]

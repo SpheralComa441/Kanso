@@ -237,6 +237,7 @@ let previewAccounts: StoreAccountInfo[] = (
   connected: false,
   displayName: null,
   needsSignIn: false,
+  library: null,
 }));
 
 function previewAccount(platform: GamePlatform): StoreAccountInfo {
@@ -247,6 +248,7 @@ function previewAccount(platform: GamePlatform): StoreAccountInfo {
       connected: false,
       displayName: null,
       needsSignIn: false,
+      library: null,
     }
   );
 }
@@ -292,6 +294,7 @@ export async function storeSignIn(
     connected: true,
     displayName: "Giocatore di prova",
     needsSignIn: false,
+    library: null,
   });
 }
 
@@ -311,6 +314,10 @@ export async function storeSignInWindow(platform: GamePlatform): Promise<WindowS
     connected: true,
     displayName: platform === "Battle.net" ? null : "Giocatore di prova",
     needsSignIn: false,
+    library:
+      platform === "ubisoft"
+        ? "Giochi letti dall'account: 42 · di cui 7 dall'abbonamento (118 nel suo catalogo) · 3 lasciati fuori perché non per PC (PLAYSTATION 2, SWITCH 1)"
+        : "Giochi letti dall'account: 5",
   });
   return { signedIn: true, account, note: null };
 }
@@ -329,6 +336,7 @@ export async function storeSignOut(platform: GamePlatform): Promise<void> {
     connected: false,
     displayName: null,
     needsSignIn: false,
+    library: null,
   });
 }
 

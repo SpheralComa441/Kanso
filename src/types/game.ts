@@ -360,6 +360,11 @@ export interface StoreAccountInfo {
   displayName: string | null;
   /** The store no longer accepts the saved session: sign in again. */
   needsSignIn: boolean;
+  /**
+   * What the last reading of the account's library found, in words: how many games, how many
+   * through a subscription, how many left out and why. `null` until it has been read.
+   */
+  library: string | null;
 }
 
 /** How a sign-in on the store's page, in a window of Kanso, ended. */

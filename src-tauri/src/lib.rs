@@ -8,7 +8,7 @@ use kanso_core::theme::{
     delete_user_theme, export_theme_file, import_theme_file, list_user_themes, save_user_theme,
 };
 use kanso_core::{
-    current_language, is_metadata_sync_due, now_timestamp_ms, scan_all_installed_games,
+    current_language, is_absent_cover_due, is_metadata_sync_due, now_timestamp_ms, scan_all_installed_games,
     set_language, AppConfig, DealsClient, DealsReport, DetectedGame, GameManualUpdate, GameStatus,
     Lang, LibraryDb, LibraryStore, MetadataClient, ScanReport, SgdbGameMatch, Theme, T,
 };
@@ -299,6 +299,51 @@ async fn complete_game_details(
     .map_err(|e| format!("{}: {e}", T::SyncFailed.s()))?
 }
 
+/// Covers looked for in one pass for games that are not on disk and came without one.
+const ABSENT_COVERS_PER_PASS: usize = 60;
+
+/// Looks for a cover for the games that are not installed and have none at all: their store
+/// listed them without art. SteamGridDB is asked when a key is set, then Steam, for the page
+/// carrying exactly the game's title. A game nobody has art for is asked about again after a
+/// day. Each cover found reaches the interface as it is stored.
+fn find_covers_for_absent_games(
+    app: &AppHandle,
+    db: &SharedDb,
+    client: &MetadataClient,
+    config: &AppConfig,
+    covers_dir: &Path,
+) {
+    let now = now_timestamp_ms();
+    let api_key = config.has_api_key().then_some(config.steamgriddb_api_key.as_str());
+    let due: Vec<DetectedGame> = lock_db(db)
+        .load_games()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|game| is_absent_cover_due(game, now, false))
+        .take(ABSENT_COVERS_PER_PASS)
+        .collect();
+
+    for mut game in due {
+        let found = client.find_missing_cover(&mut game, api_key, covers_dir);
+        // Written against the game as it is now: only the cover and the note that it was
+        // looked for; whatever else changed meanwhile stays
+        let db = lock_db(db);
+        let Ok(Some(mut current)) = db.get_game(&game.id) else {
+            continue;
+        };
+        current.metadata_attempted_at = game.metadata_attempted_at;
+        let stored = found && current.cover_path.is_none();
+        if stored {
+            current.cover_path = game.cover_path;
+            current.steamgriddb_id = current.steamgriddb_id.or(game.steamgriddb_id);
+            current.updated_at = game.updated_at;
+        }
+        if db.upsert_game(&current).is_ok() && stored {
+            let _ = app.emit(GAME_UPDATED_EVENT, current);
+        }
+    }
+}
+
 /// The slow part of completing the library, apart from the sync so that it never holds it up:
 /// 1. the games of the store accounts the user signed in to join the library (one question to
 ///    the store's catalog per item not seen before);
@@ -319,6 +364,7 @@ async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<
         return Ok(());
     }
     let config = load_config(&app);
+    let covers_dir = resolve_covers_dir(&app)?;
     let db = Arc::clone(&state.db);
 
     let outcome = tauri::async_runtime::spawn_blocking(move || loop {
@@ -328,6 +374,9 @@ async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<
 
         let client =
             MetadataClient::new().with_language(config.lang().unwrap_or(FALLBACK_LANGUAGE));
+        // Before the long matching below: the games a store listed without any cover
+        // (Battle.net gives none) are few, and are what the eye falls on first
+        find_covers_for_absent_games(&app, &db, &client, &config, &covers_dir);
         loop {
             let step = kanso_core::owned::match_absent_games_step(
                 &db,
