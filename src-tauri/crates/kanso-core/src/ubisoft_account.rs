@@ -20,6 +20,7 @@
 
 use crate::accounts::StoreError;
 use crate::cleaner::clean_game_title;
+use crate::metadata::title_key;
 use crate::models::GamePlatform;
 use crate::owned::OwnedGame;
 use crate::signin::{on_site, SignInFlow, Step, READ_UBISOFT_SESSION_SCRIPT};
@@ -35,6 +36,8 @@ const CLUB_GENOME_ID: &str = "42d07c95-9914-4450-8b38-267c4e462b21";
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
 const UBISERVICES: &str = "https://public-ubiservices.ubi.com";
+/// The service of the Ubisoft+ subscription: the games it gives access to.
+const SUBSCRIPTION_SERVICE: &str = "https://api-uplayplusvault.ubi.com";
 
 /// Ubisoft's sign-in site.
 const CONNECT_SITE: &str = "https://connect.ubisoft.com";
@@ -319,7 +322,21 @@ pub fn session_from_page(result: &str) -> Option<UbisoftSession> {
 #[derive(Debug, Clone)]
 pub struct UbisoftApi {
     services: String,
+    subscription: String,
     agent: ureq::Agent,
+}
+
+/// The games of an account, and what was made of the account's list.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UbisoftLibrary {
+    /// Ready to join the library as not installed.
+    pub games: Vec<OwnedGame>,
+    /// Games left out because the account has them on other machines only (a console, a
+    /// cloud service): how many, by platform, most first.
+    pub left_out: Vec<(String, usize)>,
+    /// With an active Ubisoft+ subscription: how many of `games` it brought, and how many
+    /// games it offers in all. `None` without a subscription.
+    pub subscription: Option<(usize, usize)>,
 }
 
 impl Default for UbisoftApi {
@@ -330,13 +347,14 @@ impl Default for UbisoftApi {
 
 impl UbisoftApi {
     pub fn new() -> Self {
-        Self::with_services(UBISERVICES)
+        Self::with_services(UBISERVICES, SUBSCRIPTION_SERVICE)
     }
 
-    /// Client against another endpoint (tests).
-    pub fn with_services(services: &str) -> Self {
+    /// Client against other endpoints (tests).
+    pub fn with_services(services: &str, subscription: &str) -> Self {
         Self {
             services: services.trim_end_matches('/').to_string(),
+            subscription: subscription.trim_end_matches('/').to_string(),
             agent: ureq::AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(8))
                 .timeout_read(Duration::from_secs(20))
@@ -374,8 +392,9 @@ impl UbisoftApi {
         Ok(session)
     }
 
-    /// The games of the account, ready to join the library as not installed.
-    pub fn owned_games(&self, session: &UbisoftSession) -> Result<Vec<OwnedGame>, StoreError> {
+    /// The games of the account: the ones it owns for PC and, with an active Ubisoft+
+    /// subscription, the ones of the subscription that are in its library.
+    pub fn library(&self, session: &UbisoftSession) -> Result<UbisoftLibrary, StoreError> {
         let response = self
             .agent
             .post(&format!("{}/v1/profiles/me/uplay/graphql", self.services))
@@ -393,22 +412,113 @@ impl UbisoftApi {
             .and_then(Value::as_array)
             .ok_or_else(|| StoreError::Unexpected("library: the answer lists no games".into()))?;
 
-        let mut games: Vec<OwnedGame> = Vec::new();
+        let mut library = UbisoftLibrary::default();
+
+        // The subscription first: its list knows the number the launcher calls a game by,
+        // which is what the scanner goes by once the game is installed, and what lets the
+        // launcher be asked to install it
+        if let Some(offered) = self.subscription_games(session) {
+            let in_library: Vec<OwnedGame> = offered.iter().filter(|(_, mine)| *mine).map(|(game, _)| game.clone()).collect();
+            library.subscription = Some((in_library.len(), offered.len()));
+            library.games = in_library;
+        }
+
+        let mut left_out: Vec<(String, usize)> = Vec::new();
+        let mut seen: Vec<String> = Vec::new();
         for node in nodes {
-            if let Some(game) = game_of(node) {
-                if !games.iter().any(|known| known.game.id == game.game.id) {
-                    games.push(game);
+            let Some(game) = game_of(node) else {
+                continue;
+            };
+            if seen.contains(&game.game.id) {
+                continue;
+            }
+            seen.push(game.game.id.clone());
+            let platforms = platforms_of(node);
+            if !playable_on_a_pc(&platforms) {
+                // Counted under the first platform named: enough to say why it is not listed
+                let platform = platforms.into_iter().next().unwrap_or_default();
+                match left_out.iter_mut().find(|(known, _)| *known == platform) {
+                    Some((_, count)) => *count += 1,
+                    None => left_out.push((platform, 1)),
                 }
+                continue;
+            }
+            // Listed once: the subscription lists what the account also owns. Its entry
+            // stays (it knows the launcher's number) and takes the cover the account's list
+            // gives; the account's id is noted, so that an entry the library already has
+            // under it is recognised
+            let title = title_key(&game.game.clean_title);
+            match library.games.iter_mut().find(|known| title_key(&known.game.clean_title) == title) {
+                Some(known) => {
+                    if known.game.cover_path.is_none() {
+                        known.game.cover_path = game.game.cover_path;
+                    }
+                    known.other_ids.push(game.game.id);
+                }
+                None => library.games.push(game),
             }
         }
-        Ok(games)
+        left_out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        library.left_out = left_out;
+        Ok(library)
+    }
+
+    /// The games the Ubisoft+ subscription of the account gives access to, each with whether
+    /// it is in the account's library. `None` without an active subscription (the service
+    /// refuses the question), or when the service cannot be asked: the subscription is an
+    /// extra, and never the reason a library is not read.
+    fn subscription_games(&self, session: &UbisoftSession) -> Option<Vec<(OwnedGame, bool)>> {
+        let answer: Value = self
+            .agent
+            .get(&format!("{}/v1/games", self.subscription))
+            .set("Authorization", &format!("Ubi_v1 t={}", session.ticket))
+            .set("Ubi-SessionId", &session.session_id)
+            .set("Ubi-AppId", CLUB_APP_ID)
+            .call()
+            .ok()?
+            .into_json()
+            .ok()?;
+        let offered = answer.get("games")?.as_array()?;
+
+        let mut games: Vec<(OwnedGame, bool)> = Vec::new();
+        for entry in offered {
+            let Some(name) = entry.get("name").and_then(Value::as_str).map(str::trim).filter(|name| !name.is_empty())
+            else {
+                continue;
+            };
+            // The launcher's own number for the game
+            let id = match entry.get("uplayGameId") {
+                Some(Value::Number(number)) => number.as_u64().map(|id| id.to_string()),
+                Some(Value::String(text)) => Some(text.trim().to_string()),
+                _ => None,
+            };
+            let Some(id) = id.filter(|id| !id.is_empty() && id.len() <= 12 && id.bytes().all(|b| b.is_ascii_digit()))
+            else {
+                continue;
+            };
+            if games.iter().any(|(known, _)| known.game.platform_app_id.as_deref() == Some(id.as_str())) {
+                continue;
+            }
+            let mine = entry.get("ownership").and_then(Value::as_bool).unwrap_or(false);
+            let game = OwnedGame::new(
+                GamePlatform::Ubisoft,
+                format!("ubisoft:{id}"),
+                name,
+                clean_game_title(name),
+                id.clone(),
+                Some(format!("uplay://launch/{id}/0")),
+                None,
+            );
+            games.push((game, mine));
+        }
+        Some(games)
     }
 }
 
 /// The question Ubisoft's own web client asks for the games of the account.
 const OWNED_GAMES_QUERY: &str = "query AllGames {viewer {    id    ...ownedGamesList  }}fragment gameProps on Game {  id  spaceId  name  coverUrl  backgroundUrl  bannerUrl}fragment ownedGameProps on Game {  ...gameProps  viewer {    meta {      id      ownedPlatformGroups {        id        name        type      }    }  }}fragment ownedGamesList on User {  ownedGames: games(filterBy: {isOwned: true}) {    totalCount    nodes {      ...ownedGameProps    }  }}";
 
-/// The library entry for a game of the account's list, if it is owned for PC.
+/// The library entry for a game of the account's list.
 fn game_of(node: &Value) -> Option<OwnedGame> {
     let text = |key: &str| node.get(key).and_then(Value::as_str).map(str::trim).unwrap_or_default();
     let id = Some(text("spaceId")).filter(|id| !id.is_empty()).unwrap_or(text("id"));
@@ -418,17 +528,6 @@ fn game_of(node: &Value) -> Option<OwnedGame> {
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
     if !plain_id || name.is_empty() {
         return None;
-    }
-    // Owned on consoles only: not a game for this PC
-    let groups = node.pointer("/viewer/meta/ownedPlatformGroups").and_then(Value::as_array);
-    if let Some(groups) = groups.filter(|groups| !groups.is_empty()) {
-        let for_pc = groups
-            .iter()
-            .filter_map(|group| group.get("type")?.as_str())
-            .any(|kind| kind.eq_ignore_ascii_case("PC"));
-        if !for_pc {
-            return None;
-        }
     }
     let cover = Some(text("coverUrl")).filter(|url| url.starts_with("https://")).map(str::to_string);
     Some(OwnedGame::new(
@@ -440,6 +539,49 @@ fn game_of(node: &Value) -> Option<OwnedGame> {
         None,
         cover,
     ))
+}
+
+/// The platforms the account has a game on, as the list names them (`type`, else `name`), in
+/// capitals. The list groups them, and has been seen described both as a list of platforms
+/// and as a list of groups of platforms: both are read.
+fn platforms_of(node: &Value) -> Vec<String> {
+    fn collect(value: &Value, platforms: &mut Vec<String>) {
+        match value {
+            Value::Array(entries) => entries.iter().for_each(|entry| collect(entry, platforms)),
+            Value::Object(platform) => {
+                let named = ["type", "name"]
+                    .iter()
+                    .filter_map(|key| platform.get(*key)?.as_str())
+                    .map(|text| text.trim().to_ascii_uppercase())
+                    .find(|text| !text.is_empty() && text.len() <= 24);
+                if let Some(name) = named {
+                    if !platforms.contains(&name) {
+                        platforms.push(name);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut platforms = Vec::new();
+    if let Some(groups) = node.pointer("/viewer/meta/ownedPlatformGroups") {
+        collect(groups, &mut platforms);
+    }
+    platforms
+}
+
+/// Machines a PC launcher has no use for: a game the account has only on these is not listed.
+const OTHER_MACHINES: &[&str] = &["PS", "PLAYSTATION", "SWITCH", "NINTENDO", "WII", "STADIA", "LUNA", "AMAZON", "IOS", "ANDROID", "MOBILE"];
+
+/// Whether a game the account has on `platforms` belongs in a PC library. It does unless
+/// every platform named is a machine of another kind. An Xbox platform is kept: that is how
+/// the games played on PC through Xbox Game Pass reach a Ubisoft account. So is a platform
+/// this code has never heard of, and a game with no platform named.
+fn playable_on_a_pc(platforms: &[String]) -> bool {
+    platforms.is_empty()
+        || platforms
+            .iter()
+            .any(|platform| !OTHER_MACHINES.iter().any(|other| platform.starts_with(other)))
 }
 
 /// The JSON of an answer, or why there is none. Ubisoft names what went wrong in `errorCode`.
@@ -643,14 +785,16 @@ pub(crate) mod tests {
         assert_eq!(session_from_page("not json"), None);
     }
 
-    /// Ubisoft's services on a local port, answering as the real ones do.
-    pub(crate) fn spawn_mock_ubisoft() -> String {
-        spawn(|request: &Request| {
+    /// Ubisoft's services on a local port, answering as the real ones do. `subscribed`:
+    /// the account has an active Ubisoft+ subscription.
+    pub(crate) fn spawn_mock_ubisoft(subscribed: bool) -> String {
+        spawn(move |request: &Request| {
             let app = request.header("ubi-appid") == CLUB_APP_ID;
             let authorization = request.header("authorization");
             if !app {
                 return (400, r#"{"errorCode":1,"message":"missing app id"}"#.to_string());
             }
+            let signed_in = authorization == "Ubi_v1 t=ticket-2" && request.header("ubi-sessionid") == "session-2";
             match (request.method.as_str(), request.path.as_str()) {
                 ("POST", "/v3/profiles/sessions") if authorization == "rm_v1 t=remember-1" && request.body == r#"{"rememberMe":true}"# => (
                     200,
@@ -658,22 +802,35 @@ pub(crate) mod tests {
                 ),
                 ("POST", "/v3/profiles/sessions") => (401, r#"{"errorCode":3,"message":"Ticket is invalid","httpCode":401}"#.to_string()),
                 ("POST", "/v1/profiles/me/uplay/graphql")
-                    if authorization == "Ubi_v1 t=ticket-2"
-                        && request.header("ubi-sessionid") == "session-2"
-                        && request.body.contains("AllGames")
-                        && request.body.contains("isOwned: true") =>
+                    if signed_in && request.body.contains("AllGames") && request.body.contains("isOwned: true") =>
                 {
-                    (200, r#"{"data":{"viewer":{"id":"user-guid","ownedGames":{"totalCount":6,"nodes":[
+                    // Platforms as a plain list, and as a list of groups; a game the account
+                    // has through Xbox; games it has on other machines only
+                    (200, r#"{"data":{"viewer":{"id":"user-guid","ownedGames":{"totalCount":9,"nodes":[
                         {"id":"g1","spaceId":"f40e304d-8e8a-4a2b-b4a4-000000000001","name":"Assassin's Creed® Odyssey","coverUrl":"https://ubiservices.cdn.ubi.com/covers/odyssey.jpg","viewer":{"meta":{"id":"m1","ownedPlatformGroups":[{"id":"p1","name":"PC","type":"PC"},{"id":"p2","name":"PS4","type":"PLAYSTATION"}]}}},
                         {"id":"g2","spaceId":"f40e304d-8e8a-4a2b-b4a4-000000000002","name":"Anno 1800","coverUrl":"http://insecure.example/anno.jpg","viewer":{"meta":{"id":"m2","ownedPlatformGroups":[]}}},
-                        {"id":"g3","spaceId":"f40e304d-8e8a-4a2b-b4a4-000000000003","name":"Console Only","coverUrl":"https://ubiservices.cdn.ubi.com/covers/console.jpg","viewer":{"meta":{"id":"m3","ownedPlatformGroups":[{"id":"p3","name":"Xbox","type":"XBOX"}]}}},
+                        {"id":"g3","spaceId":"f40e304d-8e8a-4a2b-b4a4-000000000003","name":"Far Cry® 6","coverUrl":"https://ubiservices.cdn.ubi.com/covers/farcry6.jpg","viewer":{"meta":{"id":"m3","ownedPlatformGroups":[[{"id":"p3","name":"XONE","type":"XBOX"},{"id":"p4","name":"XSX","type":"XBOX"}]]}}},
                         {"id":"only-id","name":"Rayman Legends"},
                         {"id":"g5","spaceId":"f40e304d-8e8a-4a2b-b4a4-000000000001","name":"Odyssey again"},
                         {"id":"bad id!","name":"Bad id"},
-                        {"id":"g7","spaceId":"s7","name":"  "}
+                        {"id":"g7","spaceId":"s7","name":"  "},
+                        {"id":"g8","spaceId":"f40e304d-8e8a-4a2b-b4a4-000000000008","name":"Just Dance® 2023","viewer":{"meta":{"id":"m8","ownedPlatformGroups":[[{"id":"p8","name":"Switch","type":"SWITCH"}],[{"id":"p9","name":"PS5","type":"PLAYSTATION"}]]}}},
+                        {"id":"g9","spaceId":"f40e304d-8e8a-4a2b-b4a4-000000000009","name":"Riders Republic","viewer":{"meta":{"id":"m9","ownedPlatformGroups":[{"id":"p9","name":"PS5","type":"PLAYSTATION"}]}}},
+                        {"id":"g10","spaceId":"f40e304d-8e8a-4a2b-b4a4-000000000010","name":"The Crew Motorfest","viewer":{"meta":{"id":"m10","ownedPlatformGroups":[[{"id":"p10","name":"PC","type":"PC"}]]}}}
                     ]}}}}"#.to_string())
                 }
                 ("POST", "/v1/profiles/me/uplay/graphql") => (401, r#"{"errorCode":3,"message":"Ticket is invalid","httpCode":401}"#.to_string()),
+                // The subscription: what it offers, and what of it is in the account's library
+                ("GET", "/v1/games") if signed_in && subscribed => (200, r#"{"games":[
+                    {"id":"act-1","uplayGameId":5059,"name":"Assassin's Creed Odyssey","ownership":true},
+                    {"id":"act-2","uplayGameId":"13504","name":"Assassin's Creed® Mirage","ownership":true},
+                    {"id":"act-3","uplayGameId":4553,"name":"Skull and Bones","ownership":false},
+                    {"id":"act-4","uplayGameId":13504,"name":"Mirage again","ownership":true},
+                    {"id":"act-5","uplayGameId":"not a number","name":"Bad id","ownership":true},
+                    {"id":"act-6","uplayGameId":77,"name":"  ","ownership":true},
+                    {"id":"act-7","uplayGameId":9001,"name":"Prince of Persia: The Lost Crown"}
+                ]}"#.to_string()),
+                ("GET", "/v1/games") => (403, r#"{"errorCode":2000,"message":"Forbidden","httpCode":403}"#.to_string()),
                 _ => (404, "{}".to_string()),
             }
         })
@@ -681,8 +838,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_session_is_renewed_and_lists_the_games_owned_for_pc() {
-        let base_url = spawn_mock_ubisoft();
-        let api = UbisoftApi::with_services(&base_url);
+        let base_url = spawn_mock_ubisoft(false);
+        let api = UbisoftApi::with_services(&base_url, &base_url);
         let from_page = session_from_page(&page_result()).unwrap();
 
         let session = api.renew(&from_page).expect("renewed");
@@ -690,27 +847,98 @@ pub(crate) mod tests {
         assert_eq!(session.remember_me_ticket.as_deref(), Some("remember-2"), "the ticket used is replaced");
         assert_eq!(session.name, "PlayerOne");
 
-        let games = api.owned_games(&session).expect("library");
-        let titles: Vec<&str> = games.iter().map(|owned| owned.game.title.as_str()).collect();
-        assert_eq!(titles, ["Assassin's Creed\u{ae} Odyssey", "Anno 1800", "Rayman Legends"]);
-        let odyssey = &games[0].game;
+        let library = api.library(&session).expect("library");
+        let titles: Vec<&str> = library.games.iter().map(|owned| owned.game.title.as_str()).collect();
+        assert_eq!(
+            titles,
+            ["Assassin's Creed\u{ae} Odyssey", "Anno 1800", "Far Cry\u{ae} 6", "Rayman Legends", "The Crew Motorfest"],
+            "for PC, with no platform named, or through Xbox (Game Pass)"
+        );
+        assert_eq!(library.left_out, [("PLAYSTATION".to_string(), 1), ("SWITCH".to_string(), 1)], "on other machines only");
+        assert_eq!(library.subscription, None, "the subscription service refused: no subscription");
+
+        let odyssey = &library.games[0].game;
         assert_eq!(odyssey.id, "ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000001");
         assert_eq!(odyssey.clean_title, "Assassin's Creed Odyssey");
         assert_eq!(odyssey.platform, GamePlatform::Ubisoft);
         assert!(!odyssey.is_installed);
         assert_eq!(odyssey.cover_path.as_deref(), Some("https://ubiservices.cdn.ubi.com/covers/odyssey.jpg"));
         assert_eq!(odyssey.install_uri(), None, "the account does not know the launcher's own number");
-        assert_eq!(games[1].game.cover_path, None, "only secure addresses become covers");
-        assert_eq!(games[2].game.id, "ubisoft:only-id");
+        assert_eq!(library.games[1].game.cover_path, None, "only secure addresses become covers");
+        assert_eq!(library.games[3].game.id, "ubisoft:only-id");
 
         // The session of the page itself is no longer good, and so is a spent ticket
-        assert!(matches!(api.owned_games(&from_page), Err(StoreError::Refused(_))));
+        assert!(matches!(api.library(&from_page), Err(StoreError::Refused(_))));
         assert!(matches!(api.renew(&session), Err(StoreError::Refused(_))));
         let mut without = from_page.clone();
         without.remember_me_ticket = None;
         assert!(matches!(api.renew(&without), Err(StoreError::Refused(_))));
 
-        let dead = UbisoftApi::with_services("http://127.0.0.1:9");
+        let dead = UbisoftApi::with_services("http://127.0.0.1:9", "http://127.0.0.1:9");
         assert_eq!(dead.renew(&from_page), Err(StoreError::Unreachable));
+
+        // The subscription service out of reach: the library is read all the same
+        let api = UbisoftApi::with_services(&base_url, "http://127.0.0.1:9");
+        assert_eq!(api.library(&session).expect("library").games.len(), 5);
+    }
+
+    #[test]
+    fn a_subscription_adds_its_games_that_are_in_the_accounts_library() {
+        let base_url = spawn_mock_ubisoft(true);
+        let api = UbisoftApi::with_services(&base_url, &base_url);
+        let session = api.renew(&session_from_page(&page_result()).unwrap()).expect("renewed");
+
+        let library = api.library(&session).expect("library");
+        let listed: Vec<(&str, &str)> =
+            library.games.iter().map(|owned| (owned.game.id.as_str(), owned.game.title.as_str())).collect();
+        assert_eq!(
+            listed,
+            [
+                // From the subscription, by the launcher's own number; the one the account
+                // also owns is listed once
+                ("ubisoft:5059", "Assassin's Creed Odyssey"),
+                ("ubisoft:13504", "Assassin's Creed\u{ae} Mirage"),
+                ("ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000002", "Anno 1800"),
+                ("ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000003", "Far Cry\u{ae} 6"),
+                ("ubisoft:only-id", "Rayman Legends"),
+                ("ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000010", "The Crew Motorfest"),
+            ]
+        );
+        assert_eq!(library.subscription, Some((2, 4)), "two of the four games offered are in the library");
+        // What the subscription offers and the account never took is not listed
+        assert!(!library.games.iter().any(|owned| owned.game.title.contains("Skull") || owned.game.title.contains("Prince")));
+
+        // Owned and in the subscription: one entry, with the launcher's number of the one
+        // and the cover of the other
+        let odyssey = &library.games[0];
+        assert_eq!(odyssey.game.cover_path.as_deref(), Some("https://ubiservices.cdn.ubi.com/covers/odyssey.jpg"));
+        assert_eq!(odyssey.game.install_uri().as_deref(), Some("uplay://launch/5059/0"));
+        assert_eq!(odyssey.other_ids, ["ubisoft:f40e304d-8e8a-4a2b-b4a4-000000000001"]);
+
+        let mirage = &library.games[1].game;
+        assert_eq!(mirage.platform_app_id.as_deref(), Some("13504"));
+        assert_eq!(mirage.clean_title, "Assassin's Creed Mirage");
+        assert!(!mirage.is_installed);
+        assert_eq!(mirage.install_uri().as_deref(), Some("uplay://launch/13504/0"), "the launcher can be asked to install it");
+        assert_eq!(mirage.cover_path, None, "the subscription names no art: a cover is looked for like any other missing one");
+    }
+
+    #[test]
+    fn only_games_on_other_machines_are_left_out() {
+        let platforms = |names: &[&str]| names.iter().map(|name| name.to_string()).collect::<Vec<_>>();
+        for kept in [&[][..], &["PC"], &["XBOX"], &["XONE", "PS4"], &["UPLAY"], &["SOMETHING NEW"], &["PLAYSTATION", "PC"]] {
+            assert!(playable_on_a_pc(&platforms(kept)), "{kept:?}");
+        }
+        for left_out in [&["PLAYSTATION"][..], &["PS4", "PS5"], &["SWITCH"], &["STADIA", "LUNA"], &["PSN", "NINTENDO"]] {
+            assert!(!playable_on_a_pc(&platforms(left_out)), "{left_out:?}");
+        }
+
+        // Named by type, else by name; grouped or not; each once
+        let node: Value = serde_json::from_str(
+            r#"{"viewer":{"meta":{"ownedPlatformGroups":[[{"name":"XONE","type":"xbox"},{"name":"XSX","type":"XBOX"}],{"name":"pc"},{"type":""},"junk",null]}}}"#,
+        )
+        .unwrap();
+        assert_eq!(platforms_of(&node), ["XBOX", "PC"]);
+        assert!(platforms_of(&serde_json::json!({ "name": "No platforms" })).is_empty());
     }
 }

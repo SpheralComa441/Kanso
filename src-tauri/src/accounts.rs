@@ -29,7 +29,7 @@ use kanso_core::gog_account::{self, GogApi};
 use kanso_core::models::{now_timestamp_ms, DetectedGame};
 use kanso_core::owned::{merge_owned_games, OwnedGame};
 use kanso_core::signin::SignInFlow;
-use kanso_core::ubisoft_account::{UbisoftApi, UbisoftFlow, UbisoftSession};
+use kanso_core::ubisoft_account::{UbisoftApi, UbisoftFlow, UbisoftLibrary, UbisoftSession};
 use kanso_core::T;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -90,6 +90,10 @@ pub(crate) struct StoreAccountInfo {
     display_name: Option<String>,
     /// The store no longer accepts the saved session.
     needs_sign_in: bool,
+    /// What the last reading of the account's library found, in words for the user: how
+    /// many games, how many of them through a subscription, how many left out and why.
+    /// `None` until the library has been read in this run of Kanso.
+    library: Option<String>,
 }
 
 /// How a sign-in in a window ended.
@@ -114,8 +118,49 @@ fn info_of(accounts: &AccountStore, store: &Store) -> StoreAccountInfo {
         method: store.method,
         connected: summary.is_some(),
         needs_sign_in: summary.as_ref().is_some_and(|summary| summary.needs_sign_in),
+        library: summary.as_ref().and_then(|_| library_notes().as_ref()?.get(store.platform).cloned()),
         display_name: summary.map(|summary| summary.display_name).filter(|name| !name.is_empty()),
     }
+}
+
+/// What the last reading of each account's library found (see [`StoreAccountInfo::library`]).
+/// Kept for this run only: it is a report, not a setting.
+static LIBRARY_NOTES: Mutex<Option<HashMap<&'static str, String>>> = Mutex::new(None);
+
+fn library_notes() -> std::sync::MutexGuard<'static, Option<HashMap<&'static str, String>>> {
+    LIBRARY_NOTES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Notes how many games the account of `store` lists.
+fn note_library(store: &Store, games: usize) {
+    let note = T::AccountGames.s().replace("{n}", &games.to_string());
+    library_notes().get_or_insert_with(HashMap::new).insert(store.platform, note);
+}
+
+/// Notes what was made of the Ubisoft account's list: the games, the ones a subscription
+/// brought, the ones left out as not playable on a PC.
+fn note_ubisoft_library(store: &Store, library: &UbisoftLibrary) {
+    let mut parts = vec![T::AccountGames.s().replace("{n}", &library.games.len().to_string())];
+    if let Some((mine, offered)) = library.subscription {
+        parts.push(
+            T::AccountSubscriptionGames
+                .s()
+                .replace("{n}", &mine.to_string())
+                .replace("{total}", &offered.to_string()),
+        );
+    }
+    if !library.left_out.is_empty() {
+        let total: usize = library.left_out.iter().map(|(_, count)| count).sum();
+        let platforms: Vec<String> =
+            library.left_out.iter().take(6).map(|(platform, count)| format!("{platform} {count}")).collect();
+        parts.push(
+            T::AccountGamesLeftOut
+                .s()
+                .replace("{n}", &total.to_string())
+                .replace("{platforms}", &platforms.join(", ")),
+        );
+    }
+    library_notes().get_or_insert_with(HashMap::new).insert(store.platform, parts.join(" · "));
 }
 
 fn supported(platform: &str, method: Method) -> Result<&'static Store, String> {
@@ -157,7 +202,7 @@ fn test_site(name: &str) -> Option<String> {
 }
 
 fn ubisoft_api() -> UbisoftApi {
-    test_site("ubisoft_api").map_or_else(UbisoftApi::new, |site| UbisoftApi::with_services(&site))
+    test_site("ubisoft_api").map_or_else(UbisoftApi::new, |site| UbisoftApi::with_services(&site, &site))
 }
 
 fn ea_api() -> EaApi {
@@ -301,7 +346,10 @@ fn sign_in_with_window(app: &AppHandle, db: &SharedDb, store: &'static Store) ->
             // The session is in `accounts.json` from here on: the window's profile, with
             // the cookies of Ubisoft's page, is not needed again
             signin_window::remove_profile(&data_dir, store.slug);
-            let games = ubisoft_api().owned_games(&session);
+            let games = ubisoft_api().library(&session).map(|library| {
+                note_ubisoft_library(store, &library);
+                library.games
+            });
             (session.user_id.clone(), session.name.clone(), session.to_kept(), games)
         }
         EA => {
@@ -331,6 +379,9 @@ fn sign_in_with_window(app: &AppHandle, db: &SharedDb, store: &'static Store) ->
 
     let note = match games {
         Ok(games) => {
+            if store.platform != UBISOFT {
+                note_library(store, games.len());
+            }
             add_to_library(db, games, &|added| {
                 let _ = app.emit(GAMES_UPDATED_EVENT, added);
             });
@@ -357,6 +408,7 @@ pub(crate) fn store_sign_out(app: AppHandle, platform: String) -> Result<(), Str
         signin_window::remove_profile(&data_dir, store.slug);
         window_syncs().get_or_insert_with(HashMap::new).remove(store.slug);
     }
+    library_notes().get_or_insert_with(HashMap::new).remove(store.platform);
     let _ = app.emit(ACCOUNTS_CHANGED_EVENT, ());
     Ok(())
 }
@@ -476,7 +528,11 @@ fn sync_gog_account(
         return Ok(());
     }
 
-    add_to_library(db, api.library(&session)?, on_added);
+    let games = api.library(&session)?;
+    if let Some(store) = STORES.iter().find(|store| store.platform == GOG) {
+        note_library(store, games.len());
+    }
+    add_to_library(db, games, on_added);
     Ok(())
 }
 
@@ -506,7 +562,11 @@ fn sync_ubisoft_account(
         kept
     };
 
-    add_to_library(db, api.owned_games(&session)?, on_added);
+    let library = api.library(&session)?;
+    if let Some(store) = STORES.iter().find(|store| store.platform == UBISOFT) {
+        note_ubisoft_library(store, &library);
+    }
+    add_to_library(db, library.games, on_added);
     Ok(())
 }
 
@@ -539,6 +599,7 @@ fn sync_window_account(
         _ => battlenet_account::games_in(&handed_over)
             .ok_or_else(|| StoreError::Unexpected("library: the answer lists no games".into()))?,
     };
+    note_library(store, games.len());
     add_to_library(db, games, on_added);
     mark_read_now(store);
     Ok(())

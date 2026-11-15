@@ -33,7 +33,7 @@ Tutti i file stanno nella cartella dati di Kanso, `%LOCALAPPDATA%\com.kanso.laun
 |---|---|---|---|---|
 | **Epic Games** | Nel tuo browser, sulla pagina di Epic; alla fine incolli in Kanso il codice mostrato | Il token di rinnovo della sessione | `accounts.json`, cifrato | Solo ai servizi di Epic (`*.ol.epicgames.com`, `*.on.epicgames.com`) |
 | **GOG** | Nel tuo browser, sulla pagina di GOG; alla fine incolli l'indirizzo della pagina | Il token di rinnovo della sessione | `accounts.json`, cifrato | Solo a GOG (`auth.gog.com`, `embed.gog.com`) |
-| **Ubisoft Connect** | In una finestra di Kanso che mostra la pagina di Ubisoft | I ticket di sessione rilasciati da Ubisoft | `accounts.json`, cifrato | Solo a Ubisoft (`public-ubiservices.ubi.com`) |
+| **Ubisoft Connect** | In una finestra di Kanso che mostra la pagina di Ubisoft | I ticket di sessione rilasciati da Ubisoft | `accounts.json`, cifrato | Solo a Ubisoft (`public-ubiservices.ubi.com` per la sessione e l'elenco dei giochi; `api-uplayplusvault.ubi.com` per i giochi dell'abbonamento Ubisoft+) |
 | **EA app** | In una finestra di Kanso che mostra la pagina di EA | I cookie del sito di EA | `signin\ea\` (profilo del browser di quella finestra) | Solo a EA: i cookie li usa la finestra con `accounts.ea.com`; il token temporaneo che EA rilascia va a `service-aggregation-layer.juno.ea.com` e non viene salvato |
 | **Battle.net** | In una finestra di Kanso che mostra la pagina di Battle.net | I cookie del sito di Battle.net | `signin\battlenet\` (profilo del browser di quella finestra) | Solo a Blizzard: l'elenco dei giochi viene letto nella finestra stessa, da `account.battle.net` |
 
@@ -46,6 +46,13 @@ Tutti i file stanno nella cartella dati di Kanso, `%LOCALAPPDATA%\com.kanso.laun
   ([`accounts.rs`](../src-tauri/crates/kanso-core/src/accounts.rs)).
 - Steam e Xbox non hanno accesso in Kanso: la libreria di Steam viene letta dai file locali del
   client, senza credenziali.
+
+**Che cosa viene letto dall'account.** Solo l'elenco dei giochi: titolo, identificativo, e la
+copertina dove lo store la dà. Per Ubisoft anche le piattaforme su cui possiedi ogni gioco, per
+lasciare fuori quelli che hai solo su console, e i giochi dell'abbonamento Ubisoft+ che hai in
+libreria. Sotto ogni account collegato le Impostazioni dicono quanti giochi sono stati letti,
+quanti vengono da un abbonamento e quanti sono stati lasciati fuori. Nient'altro viene chiesto:
+né amici, né acquisti, né dati di pagamento.
 
 ## La finestra di accesso (Ubisoft, EA, Battle.net)
 
@@ -173,7 +180,7 @@ All files are in Kanso's data folder, `%LOCALAPPDATA%\com.kanso.launcher`.
 |---|---|---|---|---|
 | **Epic Games** | In your browser, on Epic's page; you paste the code shown at the end | The token that renews the session | `accounts.json`, encrypted | Epic's services only (`*.ol.epicgames.com`, `*.on.epicgames.com`) |
 | **GOG** | In your browser, on GOG's page; you paste the address of the last page | The token that renews the session | `accounts.json`, encrypted | GOG only (`auth.gog.com`, `embed.gog.com`) |
-| **Ubisoft Connect** | In a window of Kanso showing Ubisoft's page | The session tickets Ubisoft issued | `accounts.json`, encrypted | Ubisoft only (`public-ubiservices.ubi.com`) |
+| **Ubisoft Connect** | In a window of Kanso showing Ubisoft's page | The session tickets Ubisoft issued | `accounts.json`, encrypted | Ubisoft only (`public-ubiservices.ubi.com` for the session and the list of games; `api-uplayplusvault.ubi.com` for the games of the Ubisoft+ subscription) |
 | **EA app** | In a window of Kanso showing EA's page | The cookies of EA's site | `signin\ea\` (that window's browser profile) | EA only: the window uses the cookies with `accounts.ea.com`; the short-lived token EA issues goes to `service-aggregation-layer.juno.ea.com` and is never saved |
 | **Battle.net** | In a window of Kanso showing Battle.net's page | The cookies of Battle.net's site | `signin\battlenet\` (that window's browser profile) | Blizzard only: the list of games is read in the window itself, from `account.battle.net` |
 
@@ -184,6 +191,13 @@ All files are in Kanso's data folder, `%LOCALAPPDATA%\com.kanso.launcher`.
   to keep.
 - Steam and Xbox have no sign-in in Kanso: the Steam library is read from the client's local
   files, with no credentials.
+
+**What is read from the account.** Only the list of games: title, identifier, and the cover
+where the store gives one. For Ubisoft also the platforms you have each game on, to leave out
+the ones you have on a console only, and the games of the Ubisoft+ subscription that are in
+your library. Under each signed-in account, Settings say how many games were read, how many
+come from a subscription and how many were left out. Nothing else is asked for: no friends, no
+purchases, no payment data.
 
 ## The sign-in window (Ubisoft, EA, Battle.net)
 
