@@ -221,6 +221,9 @@ async fn sync_library_metadata(
             let owned_apps = kanso_core::scanner::steam_packages::read_owned_steam_apps(&steam_root);
             kanso_core::owned::sync_steam_library(&db, &client, &play_stats, &owned_apps, now);
         }
+        // What is not on disk is left out of the loop above: its genres, tags and description
+        // come fifty games per request, so that it can be browsed like the rest
+        kanso_core::owned::sync_absent_game_details(&db, &client, now);
 
         let final_store = LibraryStore::load(&lock_db(&db))?;
         // The library is settled: plugins that label the game cards can catch up quietly

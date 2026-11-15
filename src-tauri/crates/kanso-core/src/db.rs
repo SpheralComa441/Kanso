@@ -305,6 +305,16 @@ impl LibraryDb {
             .map_err(|e| format!("{} ({}): {e}", T::LibraryDbError.s(), game.id))
     }
 
+    /// Inserts or updates several games at once, atomically (one write instead of hundreds).
+    pub fn upsert_games(&mut self, games: &[DetectedGame]) -> Result<(), String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let tx = self.conn.transaction().map_err(db_err)?;
+        for game in games {
+            execute_upsert(&tx, game).map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)
+    }
+
     /// Makes the table contain exactly `games`, atomically: either every change is stored or,
     /// on any failure, the previous library is left untouched.
     pub fn replace_all_games(&mut self, games: &[DetectedGame]) -> Result<(), String> {
