@@ -10,6 +10,7 @@ import type {
   GameAchievements,
   GameDataAnswer,
   GameManualUpdate,
+  GamePlatform,
   GameStatus,
   PlaySession,
   PluginInfo,
@@ -18,6 +19,7 @@ import type {
   PluginView,
   ScanReport,
   SgdbGameMatch,
+  StoreAccountInfo,
   Theme,
 } from "../types/game";
 import { PREVIEW_MOCK_DEALS, PREVIEW_MOCK_GAMES } from "./previewData";
@@ -66,8 +68,18 @@ function withPluginDefaults(raw: unknown): Record<string, PluginState> {
   return states;
 }
 
+/**
+ * The browser preview's library: the built-in samples, or the games a page put in
+ * `__KANSO_PREVIEW_GAMES__` before the app loaded (screenshots and interface tests against a
+ * library of realistic size). The desktop app never reads either.
+ */
+function previewLibrary(): DetectedGame[] {
+  const supplied = (globalThis as { __KANSO_PREVIEW_GAMES__?: unknown }).__KANSO_PREVIEW_GAMES__;
+  return Array.isArray(supplied) ? (supplied as DetectedGame[]) : PREVIEW_MOCK_GAMES;
+}
+
 // Same ordering the desktop backend applies to a real scan
-let previewGamesState: DetectedGame[] = [...PREVIEW_MOCK_GAMES].sort((a, b) =>
+let previewGamesState: DetectedGame[] = [...previewLibrary()].sort((a, b) =>
   a.title.toLowerCase().localeCompare(b.title.toLowerCase())
 );
 
@@ -180,6 +192,83 @@ export async function subscribeToGameUpdates(
     onUpdate(ev.payload);
   });
   return unlisten;
+}
+
+/** Several games changed at once (a pass that completes the library in the background). */
+export async function subscribeToGameBatchUpdates(
+  onUpdate: (games: DetectedGame[]) => void
+): Promise<() => void> {
+  if (!isTauri()) {
+    return () => {};
+  }
+  return listen<DetectedGame[]>("library:games-updated", (ev) => {
+    onUpdate(ev.payload);
+  });
+}
+
+/**
+ * The slow part of completing the library: the games of the store accounts the user signed
+ * in to, then the Steam store page of the games of other stores that are not installed (to
+ * file them under its genres and tags). It can take minutes on a large library: what it
+ * completes arrives through {@link subscribeToGameBatchUpdates}, and the promise settles
+ * when it is done or the stores cannot be reached.
+ */
+export async function completeLibraryInBackground(): Promise<void> {
+  if (isTauri()) {
+    await invoke("complete_library");
+  }
+}
+
+/* ----------------------------------------------------------- store accounts */
+
+// Preview only: one pretend account, so the sign-in panel can be tried in the browser
+let previewAccount: StoreAccountInfo = {
+  platform: "epic",
+  connected: false,
+  displayName: null,
+  needsSignIn: false,
+};
+
+/** The stores Kanso can sign in to, and who is signed in to each. */
+export async function listStoreAccounts(): Promise<StoreAccountInfo[]> {
+  if (isTauri()) {
+    return invoke<StoreAccountInfo[]>("list_store_accounts");
+  }
+  return [previewAccount];
+}
+
+/** Opens the store's own sign-in page in the browser (the backend builds the address). */
+export async function openStoreSignIn(platform: GamePlatform): Promise<void> {
+  if (isTauri()) {
+    await invoke("open_store_sign_in", { platform });
+  }
+}
+
+/**
+ * Signs in with what the store's page showed at the end: the code alone or the whole text.
+ * Rejects with a message for the user when the code is missing, spent or refused.
+ */
+export async function storeSignIn(
+  platform: GamePlatform,
+  pasted: string
+): Promise<StoreAccountInfo> {
+  if (isTauri()) {
+    return invoke<StoreAccountInfo>("store_sign_in", { platform, pasted });
+  }
+  if (pasted.trim().length < 8) {
+    throw "Non trovo un codice in quello che hai incollato.";
+  }
+  previewAccount = { platform, connected: true, displayName: "Giocatore di prova", needsSignIn: false };
+  return previewAccount;
+}
+
+/** Forgets the store's session. Games already in the library stay. */
+export async function storeSignOut(platform: GamePlatform): Promise<void> {
+  if (isTauri()) {
+    await invoke("store_sign_out", { platform });
+    return;
+  }
+  previewAccount = { platform, connected: false, displayName: null, needsSignIn: false };
 }
 
 export async function searchSteamGridDbGames(

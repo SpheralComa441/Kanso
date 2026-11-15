@@ -1,8 +1,10 @@
+pub mod accounts;
 pub mod achievements;
 pub mod cleaner;
 pub mod config;
 pub mod db;
 pub mod deals;
+pub mod epic_account;
 pub mod i18n;
 pub mod metadata;
 pub mod models;
@@ -10,6 +12,7 @@ pub mod owned;
 pub mod playtime;
 pub mod plugins;
 pub mod scanner;
+pub mod secrets;
 pub mod store;
 pub mod theme;
 pub mod vdf;

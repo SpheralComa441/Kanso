@@ -1,3 +1,4 @@
+mod accounts;
 mod playtime;
 mod plugins;
 
@@ -21,6 +22,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 pub(crate) const GAME_UPDATED_EVENT: &str = "library:game-updated";
+/// Several games changed at once (payload: the games as stored).
+const GAMES_UPDATED_EVENT: &str = "library:games-updated";
+/// Pause between two searches of the Steam store while matching a library to its pages.
+const STORE_SEARCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Shared handle to the library database; commands lock it only around reads and writes,
 /// never across network requests.
@@ -43,6 +48,11 @@ pub(crate) struct AppState {
     /// Games Kanso currently sees running, kept by the play time tracker.
     pub(crate) running_games: Arc<Mutex<Vec<String>>>,
     pub(crate) plugins: Arc<plugins::PluginHost>,
+    /// The background pass that completes the library is under way: one at a time.
+    completing_library: Arc<std::sync::atomic::AtomicBool>,
+    /// It was asked for again while under way (someone just signed in to a store): once done,
+    /// it starts over.
+    complete_library_again: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Language used when none is configured yet (the UI picks one from the OS on first run).
@@ -221,6 +231,16 @@ async fn sync_library_metadata(
             let owned_apps = kanso_core::scanner::steam_packages::read_owned_steam_apps(&steam_root);
             kanso_core::owned::sync_steam_library(&db, &client, &play_stats, &owned_apps, now);
         }
+        // The clients of Epic, GOG Galaxy and Ubisoft Connect name the account's games in
+        // their own local records: those join too, with no sign-in and no request
+        kanso_core::owned::merge_owned_games(
+            &db,
+            kanso_core::scanner::read_owned_games_from_clients(),
+            now,
+        );
+        // What is not on disk is left out of the loop above: its genres, tags and description
+        // come fifty games per request, so that it can be browsed like the rest
+        kanso_core::owned::sync_absent_game_details(&db, &client, now);
 
         let final_store = LibraryStore::load(&lock_db(&db))?;
         // The library is settled: plugins that label the game cards can catch up quietly
@@ -276,6 +296,60 @@ async fn complete_game_details(
     })
     .await
     .map_err(|e| format!("{}: {e}", T::SyncFailed.s()))?
+}
+
+/// The slow part of completing the library, apart from the sync so that it never holds it up:
+/// 1. the games of the store accounts the user signed in to join the library (one question to
+///    the store's catalog per item not seen before);
+/// 2. the games of other stores that are not installed are matched to their Steam store page,
+///    a few at a time, and given the genres, tags and description found there.
+///
+/// A library of a few hundred games takes some minutes the first time. What is completed
+/// reaches the interface in batches through [`GAMES_UPDATED_EVENT`]. Each part stops quietly
+/// while its store cannot be reached; what is left is picked up by the next call.
+#[tauri::command]
+async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    let running = Arc::clone(&state.completing_library);
+    let again = Arc::clone(&state.complete_library_again);
+    if running.swap(true, Ordering::SeqCst) {
+        again.store(true, Ordering::SeqCst);
+        return Ok(());
+    }
+    let config = load_config(&app);
+    let db = Arc::clone(&state.db);
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || loop {
+        accounts::sync_epic_account(&app, &db, &|added| {
+            let _ = app.emit(GAMES_UPDATED_EVENT, added);
+        });
+
+        let client =
+            MetadataClient::new().with_language(config.lang().unwrap_or(FALLBACK_LANGUAGE));
+        loop {
+            let step = kanso_core::owned::match_absent_games_step(
+                &db,
+                &client,
+                STORE_SEARCH_PAUSE,
+                now_timestamp_ms(),
+            );
+            if !step.changed.is_empty() {
+                let _ = app.emit(GAMES_UPDATED_EVENT, &step.changed);
+            }
+            if step.unreachable || step.remaining == 0 {
+                break;
+            }
+            std::thread::sleep(STORE_SEARCH_PAUSE);
+        }
+
+        if !again.swap(false, Ordering::SeqCst) {
+            break;
+        }
+    })
+    .await;
+    running.store(false, Ordering::SeqCst);
+    outcome.map_err(|e| format!("{}: {e}", T::SyncFailed.s()))
 }
 
 #[tauri::command]
@@ -733,6 +807,8 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         deals_cache: Arc::new(Mutex::new(None)),
         running_games: Arc::clone(&running_games),
         plugins: Arc::clone(&plugin_host),
+        completing_library: Arc::default(),
+        complete_library_again: Arc::default(),
     });
     remove_legacy_sql_mirror(app);
     playtime::spawn_tracker(app.clone(), Arc::clone(&db), running_games);
@@ -771,6 +847,7 @@ pub fn run() {
             scan_games,
             sync_library_metadata,
             complete_game_details,
+            complete_library,
             search_steamgriddb_games,
             apply_steamgriddb_match,
             update_game_details,
@@ -799,7 +876,11 @@ pub fn run() {
             plugins::plugin_game_data,
             plugins::plugin_badges,
             plugins::run_plugin_command,
-            plugins::open_plugin_link
+            plugins::open_plugin_link,
+            accounts::list_store_accounts,
+            accounts::open_store_sign_in,
+            accounts::store_sign_in,
+            accounts::store_sign_out
         ])
         .run(tauri::generate_context!())
         .expect("Kanso failed to start");

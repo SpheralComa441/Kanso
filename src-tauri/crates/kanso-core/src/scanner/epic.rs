@@ -120,7 +120,7 @@ fn join_install_and_executable(install_location: &str, launch_executable: &str) 
     }
 }
 
-fn build_epic_launch_uri(namespace: &str, item_id: &str, app_name: &str) -> Option<String> {
+pub(crate) fn build_epic_launch_uri(namespace: &str, item_id: &str, app_name: &str) -> Option<String> {
     if app_name.is_empty() {
         return None;
     }

@@ -3,10 +3,30 @@ import { PLATFORM_ORDER } from "./platforms";
 
 /**
  * Which slice of the library is shown. Hidden games appear in `hidden` only; every other
- * collection, count and filter ignores them. Games that are not on disk appear in
- * `notInstalled`, in search results and wherever a status is asked for.
+ * collection, count and filter ignores them. Games that are not on disk are part of the
+ * library like the others, unless the user asked to see installed games only; `notInstalled`
+ * lists them either way.
  */
 export type LibraryCollection = "all" | "favorites" | "recent" | "notInstalled" | "hidden";
+
+/**
+ * The games lists and counts are drawn from, hidden ones always left out: everything, what
+ * is on disk ("installed only" is switched on), or what is not (the `notInstalled` collection).
+ */
+export type LibraryScope = "all" | "installed" | "absent";
+
+export function libraryScope(
+  collection: LibraryCollection,
+  installedOnly: boolean
+): LibraryScope {
+  if (collection === "notInstalled") return "absent";
+  return installedOnly ? "installed" : "all";
+}
+
+export function isInScope(game: DetectedGame, scope: LibraryScope): boolean {
+  if (game.isHidden) return false;
+  return scope === "all" || (scope === "installed") === game.isInstalled;
+}
 
 /** Quick filters combined with AND; `"all"` / `null` means "no constraint". */
 export interface LibraryFilters {
@@ -53,13 +73,14 @@ export interface GenreSummary {
 }
 
 export interface LibraryCounts {
-  /** Games shown in the library: on disk and not hidden. */
+  /** Games shown in the library: not hidden and, with "installed only", on disk. */
   visible: number;
   favorites: number;
   recent: number;
-  /** In the library but not on disk (hidden ones excluded). */
+  /** In the library but not on disk (hidden ones excluded), whatever "installed only" says. */
   notInstalled: number;
   hidden: number;
+  /** Platforms and statuses of the games in the scope being browsed. */
   byPlatform: Record<GamePlatform, number>;
   byStatus: Record<GameStatus, number>;
 }
@@ -90,13 +111,13 @@ export function genreKey(genre: string): string {
 }
 
 /**
- * Genres found in the visible library's metadata, most common first. A genre typed with
- * different casing on different games is counted once, under its first spelling.
+ * Genres found in the metadata of the games in `scope`, most common first. A genre typed
+ * with different casing on different games is counted once, under its first spelling.
  */
-export function summarizeGenres(games: DetectedGame[]): GenreSummary[] {
+export function summarizeGenres(games: DetectedGame[], scope: LibraryScope): GenreSummary[] {
   const byKey = new Map<string, GenreSummary>();
   for (const game of games) {
-    if (game.isHidden || !game.isInstalled) continue;
+    if (!isInScope(game, scope)) continue;
     const seenInGame = new Set<string>();
     for (const raw of game.genres) {
       const key = genreKey(raw);
@@ -116,17 +137,18 @@ export function summarizeGenres(games: DetectedGame[]): GenreSummary[] {
 }
 
 /**
- * Steam community tags found in the visible library, most common first. Tags that merely
+ * Steam community tags found on the games in `scope`, most common first. Tags that merely
  * repeat a genre already listed ("GDR", "Indie") are left to the genre list.
  */
 export function summarizeTags(
   games: DetectedGame[],
-  genres: GenreSummary[]
+  genres: GenreSummary[],
+  scope: LibraryScope
 ): GenreSummary[] {
   const genreKeys = new Set(genres.map((genre) => genre.key));
   const byKey = new Map<string, GenreSummary>();
   for (const game of games) {
-    if (game.isHidden || !game.isInstalled) continue;
+    if (!isInScope(game, scope)) continue;
     const seenInGame = new Set<string>();
     for (const raw of game.tags) {
       const key = genreKey(raw);
@@ -145,7 +167,15 @@ export function summarizeTags(
   );
 }
 
-export function countLibrary(games: DetectedGame[]): LibraryCounts {
+/**
+ * `installedOnly` decides what the collections hold; `scope` what platforms and statuses are
+ * counted on (it differs from the former while the `notInstalled` collection is open).
+ */
+export function countLibrary(
+  games: DetectedGame[],
+  installedOnly: boolean,
+  scope: LibraryScope
+): LibraryCounts {
   const byPlatform = Object.fromEntries(
     PLATFORM_ORDER.map((p) => [p, 0])
   ) as Record<GamePlatform, number>;
@@ -163,35 +193,37 @@ export function countLibrary(games: DetectedGame[]): LibraryCounts {
       counts.hidden += 1;
       continue;
     }
-    // A status is about the player: it counts whether or not the game is on disk
-    if (game.status) counts.byStatus[game.status] += 1;
-    if (!game.isInstalled) {
-      counts.notInstalled += 1;
-      continue;
+    if (!game.isInstalled) counts.notInstalled += 1;
+    if (isInScope(game, scope)) {
+      if (game.status) counts.byStatus[game.status] += 1;
+      byPlatform[game.platform] = (byPlatform[game.platform] ?? 0) + 1;
     }
+    if (installedOnly && !game.isInstalled) continue;
     counts.visible += 1;
     if (game.isFavorite) counts.favorites += 1;
     if (isRecentlyPlayed(game)) counts.recent += 1;
-    byPlatform[game.platform] = (byPlatform[game.platform] ?? 0) + 1;
   }
   return counts;
 }
 
+/**
+ * The games the current view shows. `installedOnly` is the user's global switch: it leaves
+ * out what is not on disk everywhere except in the collection made of exactly those games
+ * (and among the hidden ones, a pool of its own).
+ */
 export function applyLibraryFilters(
   games: DetectedGame[],
   filters: LibraryFilters,
-  searchQuery: string
+  searchQuery: string,
+  installedOnly: boolean
 ): DetectedGame[] {
   const q = searchQuery.trim().toLowerCase();
   const wantHidden = filters.collection === "hidden";
-  const wantAbsent = filters.collection === "notInstalled";
+  const scope = libraryScope(filters.collection, installedOnly);
 
   const matching = games.filter((g) => {
     if (g.isHidden !== wantHidden) return false;
-    if (wantAbsent && g.isInstalled) return false;
-    // Elsewhere only what is on disk, unless a status or a search asks for more: "finished"
-    // is about the player, and whoever types a title wants to find it wherever it is
-    if (!wantHidden && !wantAbsent && !g.isInstalled && !filters.status && !q) return false;
+    if (!wantHidden && !isInScope(g, scope)) return false;
     if (filters.collection === "favorites" && !g.isFavorite) return false;
     if (filters.collection === "recent" && !isRecentlyPlayed(g)) return false;
     if (filters.platform && g.platform !== filters.platform) return false;

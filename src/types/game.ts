@@ -345,3 +345,13 @@ export interface Theme {
   effects: ThemeEffects;
   fontFiles: ThemeFontFile[];
 }
+
+/** A store's account, as far as the interface may know it: never a token. */
+export interface StoreAccountInfo {
+  platform: GamePlatform;
+  /** Someone signed in (even if the session has since been refused). */
+  connected: boolean;
+  displayName: string | null;
+  /** The store no longer accepts the saved session: sign in again. */
+  needsSignIn: boolean;
+}

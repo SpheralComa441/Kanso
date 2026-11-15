@@ -104,6 +104,17 @@ const MIGRATIONS: &[&str] = &["
         checked_at INTEGER NOT NULL
     );
 ",
+    // v6: items of a signed-in store account that were looked up and found not to be games
+    // (add-ons, extra content), so that they are not asked about at every sync.
+    "
+    CREATE TABLE store_items (
+        platform   TEXT NOT NULL,
+        item_id    TEXT NOT NULL,
+        kind       TEXT NOT NULL,
+        checked_at INTEGER NOT NULL,
+        PRIMARY KEY (platform, item_id)
+    );
+",
 ];
 
 const GAME_COLUMNS: &str = "id, title, clean_title, platform, platform_app_id, install_dir, \
@@ -305,6 +316,16 @@ impl LibraryDb {
             .map_err(|e| format!("{} ({}): {e}", T::LibraryDbError.s(), game.id))
     }
 
+    /// Inserts or updates several games at once, atomically (one write instead of hundreds).
+    pub fn upsert_games(&mut self, games: &[DetectedGame]) -> Result<(), String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let tx = self.conn.transaction().map_err(db_err)?;
+        for game in games {
+            execute_upsert(&tx, game).map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)
+    }
+
     /// Makes the table contain exactly `games`, atomically: either every change is stored or,
     /// on any failure, the previous library is left untouched.
     pub fn replace_all_games(&mut self, games: &[DetectedGame]) -> Result<(), String> {
@@ -419,6 +440,41 @@ impl LibraryDb {
     }
 
     /// Remembers that these Steam appids are not games (`kind` says what the store answered).
+    /// Items of `platform`'s account already looked up and found not to be games.
+    pub fn known_store_non_games(&self, platform: &str) -> Result<HashSet<String>, String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let mut stmt = self
+            .conn
+            .prepare("SELECT item_id FROM store_items WHERE platform = ?1")
+            .map_err(db_err)?;
+        let items = stmt
+            .query_map([platform], |row| row.get::<_, String>(0))
+            .map_err(db_err)?
+            .filter_map(Result::ok)
+            .collect();
+        Ok(items)
+    }
+
+    /// Notes that these items of `platform`'s account are not games.
+    pub fn remember_store_non_games(
+        &mut self,
+        platform: &str,
+        item_ids: &[String],
+        now_ms: u64,
+    ) -> Result<(), String> {
+        let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
+        let tx = self.conn.transaction().map_err(db_err)?;
+        for item_id in item_ids {
+            tx.execute(
+                "INSERT INTO store_items (platform, item_id, kind, checked_at) VALUES (?1, ?2, 'other', ?3)
+                 ON CONFLICT(platform, item_id) DO UPDATE SET checked_at = excluded.checked_at",
+                params![platform, item_id, to_db_int(now_ms)],
+            )
+            .map_err(db_err)?;
+        }
+        tx.commit().map_err(db_err)
+    }
+
     pub fn remember_steam_non_games(
         &mut self,
         appids: &[(u64, &str)],

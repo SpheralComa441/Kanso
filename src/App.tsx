@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CloudDownload, EyeOff, History, Star, X } from "lucide-react";
+import { CloudDownload, EyeOff, History, LayoutGrid, Star, X } from "lucide-react";
 import { ApiKeyBanner } from "./components/ApiKeyBanner";
+import { CategoryGrid, type CategoryKind } from "./components/CategoryGrid";
 import { DealsView } from "./components/DealsView";
 import { EditGameModal } from "./components/EditGameModal";
 import { GameDetail } from "./components/GameDetail";
@@ -25,6 +26,7 @@ import {
 } from "./i18n";
 import {
   completeGameDetails,
+  completeLibraryInBackground,
   getSettings,
   installGame,
   isRunningInTauri,
@@ -39,6 +41,7 @@ import {
   setGameFavorite,
   setGameHidden,
   setGameStatus,
+  subscribeToGameBatchUpdates,
   subscribeToGameUpdates,
   syncLibraryMetadata,
   watchPluginBadges,
@@ -50,6 +53,8 @@ import {
   applyLibraryFilters,
   countLibrary,
   hasActiveFilters,
+  isInScope,
+  libraryScope,
   readUiPreference,
   sortGamesByTitle,
   summarizeGenres,
@@ -85,6 +90,7 @@ const INITIAL_CONFIG: AppConfig = {
 const SIDEBAR_PREF_KEY = "kanso.ui.sidebar";
 const VIEW_MODE_PREF_KEY = "kanso.ui.viewMode";
 const MAIN_VIEW_PREF_KEY = "kanso.ui.mainView";
+const INSTALLED_ONLY_PREF_KEY = "kanso.ui.installedOnly";
 
 const COLLECTION_KEYS: Record<LibraryCollection, MessageKey> = {
   all: "collection.all",
@@ -169,7 +175,7 @@ interface ShellProps {
 }
 
 function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
-  const { t, lang } = useI18n();
+  const { t, lang, plural } = useI18n();
   const [report, setReport] = useState<ScanReport>({ games: [], warnings: [] });
   const [isScanning, setIsScanning] = useState(true);
   const [isSyncingMetadata, setIsSyncingMetadata] = useState(false);
@@ -180,7 +186,15 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY_FILTERS);
   const [mainView, setMainView] = useState<MainView>(() =>
-    readUiPreference(MAIN_VIEW_PREF_KEY, ["home", "library", "stats"], "library")
+    readUiPreference(
+      MAIN_VIEW_PREF_KEY,
+      ["home", "library", "stats", "genres", "tags"],
+      "library"
+    )
+  );
+  /** The global switch: games that are not on disk are left out of every list. */
+  const [installedOnly, setInstalledOnly] = useState(
+    () => readUiPreference(INSTALLED_ONLY_PREF_KEY, ["on", "off"], "off") === "on"
   );
   const [isSidebarOpen, setIsSidebarOpen] = useState(
     () => readUiPreference(SIDEBAR_PREF_KEY, ["open", "closed"], "open") === "open"
@@ -333,6 +347,20 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     });
   }, []);
 
+  /** Games completed in the background, several at a time: one update of the library. */
+  const upsertGamesInState = useCallback((updated: DetectedGame[]) => {
+    if (updated.length === 0) return;
+    setReport((prev) => {
+      const byId = new Map(updated.map((game) => [game.id, game]));
+      const kept = prev.games.map((game) => {
+        const next = byId.get(game.id);
+        byId.delete(game.id);
+        return next ?? game;
+      });
+      return { ...prev, games: sortGamesByTitle([...kept, ...byId.values()]) };
+    });
+  }, []);
+
   const runMetadataSync = useCallback(async (retryNow: boolean) => {
     if (!isRunningInTauri()) return;
     setIsSyncingMetadata(true);
@@ -344,6 +372,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     } finally {
       setIsSyncingMetadata(false);
     }
+    // The games of the store accounts, then genres and tags for the games of other stores
+    // that are not installed: a slow, quiet pass whose results arrive in batches
+    void completeLibraryInBackground().catch(() => {});
   }, []);
 
   /**
@@ -374,10 +405,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     if (!settingsLoaded) return;
     let mounted = true;
     let unlistenFn: (() => void) | null = null;
+    let unlistenBatchFn: (() => void) | null = null;
 
     (async () => {
       unlistenFn = await subscribeToGameUpdates((updated) => {
         if (mounted) upsertSingleGameInState(updated);
+      });
+      unlistenBatchFn = await subscribeToGameBatchUpdates((updated) => {
+        if (mounted) upsertGamesInState(updated);
       });
       if (mounted) await performScan(false);
     })();
@@ -385,8 +420,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     return () => {
       mounted = false;
       if (unlistenFn) unlistenFn();
+      if (unlistenBatchFn) unlistenBatchFn();
     };
-  }, [settingsLoaded, performScan, upsertSingleGameInState]);
+  }, [settingsLoaded, performScan, upsertSingleGameInState, upsertGamesInState]);
 
   const handleSaveSettings = async (updated: AppConfig) => {
     const foldersChanged =
@@ -493,6 +529,23 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     });
   };
 
+  const changeInstalledOnly = (next: boolean) => {
+    setInstalledOnly(next);
+    writeUiPreference(INSTALLED_ONLY_PREF_KEY, next ? "on" : "off");
+  };
+
+  /** A tile of the genres or tags wall: the library on that category alone. */
+  const openCategory = (kind: CategoryKind, key: string) => {
+    setFilters((current) => ({
+      ...EMPTY_FILTERS,
+      // The tiles were counted on the games being browsed: stay among those
+      collection: current.collection === "notInstalled" ? "notInstalled" : "all",
+      [kind === "genres" ? "genre" : "tag"]: key,
+    }));
+    setSearchQuery("");
+    showView("library");
+  };
+
   const changeViewMode = (mode: ViewMode) => {
     setViewMode(mode);
     writeUiPreference(VIEW_MODE_PREF_KEY, mode);
@@ -509,12 +562,22 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   /* --------------------------------------------------------------- derived */
 
   const games = report.games;
-  const genres = useMemo(() => summarizeGenres(games), [games]);
-  const tags = useMemo(() => summarizeTags(games, genres), [games, genres]);
-  const counts = useMemo(() => countLibrary(games), [games]);
+  // What genres, tags, platforms and statuses are counted on: everything, what is on disk
+  // ("installed only") or, inside the "not installed" collection, what is not
+  const scope = libraryScope(filters.collection, installedOnly);
+  const genres = useMemo(() => summarizeGenres(games, scope), [games, scope]);
+  const tags = useMemo(() => summarizeTags(games, genres, scope), [games, genres, scope]);
+  const counts = useMemo(
+    () => countLibrary(games, installedOnly, scope),
+    [games, installedOnly, scope]
+  );
   const filteredGames = useMemo(
-    () => applyLibraryFilters(games, filters, searchQuery),
-    [games, filters, searchQuery]
+    () => applyLibraryFilters(games, filters, searchQuery, installedOnly),
+    [games, filters, searchQuery, installedOnly]
+  );
+  const scopedGames = useMemo(
+    () => games.filter((game) => isInScope(game, scope)),
+    [games, scope]
   );
   const ownedSteamAppIds = useMemo(
     () =>
@@ -606,6 +669,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       });
   }, [detailGame, upsertSingleGameInState]);
 
+  /**
+   * Where a genre or tag picked on `game`'s sheet is listed: with "installed only" on, a game
+   * that is not on disk leads to the others like it, or it would not be among the results.
+   */
+  const collectionOf = (game: DetectedGame | null): LibraryCollection =>
+    game && !game.isInstalled && installedOnly ? "notInstalled" : "all";
+
   const hasApiKey = config.steamgriddbApiKey.trim().length > 0;
   const filterCount = activeFilterCount(filters);
   const isNarrowed = hasActiveFilters(filters) || searchQuery.trim().length > 0;
@@ -615,9 +685,15 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       ? counts.hidden
       : filters.collection === "notInstalled"
         ? counts.notInstalled
-        : filters.status || searchQuery.trim()
-          ? counts.visible + counts.notInstalled
-          : counts.visible;
+        : counts.visible;
+  // Games the search or the filters would also find, were "installed only" switched off
+  const absentMatches = useMemo(
+    () =>
+      installedOnly && isNarrowed && scope === "installed"
+        ? applyLibraryFilters(games, filters, searchQuery, false).length - filteredGames.length
+        : 0,
+    [installedOnly, isNarrowed, scope, games, filters, searchQuery, filteredGames.length]
+  );
 
   return (
     <div className="flex h-full flex-col text-zinc-100">
@@ -660,8 +736,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           view={mainView}
           onOpenHome={() => showView("home")}
           onOpenStats={() => showView("stats")}
+          onOpenOverview={showView}
           filters={filters}
           onFiltersChange={changeFilters}
+          installedOnly={installedOnly}
+          onInstalledOnlyChange={changeInstalledOnly}
           counts={counts}
           genres={genres}
           tags={tags}
@@ -685,11 +764,30 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
               onOpenGame={(game) => setDetailGameId(game.id)}
               onError={setStatusMessage}
             />
+          ) : mainView === "genres" || mainView === "tags" ? (
+            <CategoryGrid
+              kind={mainView}
+              categories={mainView === "genres" ? genres : tags}
+              games={scopedGames}
+              onOpen={(key) => openCategory(mainView, key)}
+            />
           ) : (
             <>
               {/* Active filters: always visible, even with the sidebar collapsed */}
               {isNarrowed && games.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+                  {/* The way back to the tiles the genre or tag was picked from */}
+                  {(activeGenre || activeTag) && (
+                    <button
+                      id="back-to-overview"
+                      type="button"
+                      onClick={() => showView(activeGenre ? "genres" : "tags")}
+                      className="inline-flex items-center gap-1.5 rounded-full py-0.5 pr-1 text-2xs font-medium text-zinc-400 transition-colors hover:text-zinc-100"
+                    >
+                      <LayoutGrid className="h-3 w-3" />
+                      <span>{t(activeGenre ? "overview.allGenres" : "overview.allTags")}</span>
+                    </button>
+                  )}
                   {filters.collection !== "all" && (
                     <FilterChip
                       label={t(COLLECTION_KEYS[filters.collection])}
@@ -738,6 +836,17 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                       total: poolSize,
                     })}
                   </span>
+                  {absentMatches > 0 && (
+                    <button
+                      id="show-absent-matches"
+                      type="button"
+                      onClick={() => changeInstalledOnly(false)}
+                      title={t("filters.absentMatchesHint")}
+                      className="tabular-nums text-zinc-400 underline-offset-2 hover:text-zinc-200 hover:underline"
+                    >
+                      {plural("filters.absentMatches", absentMatches)}
+                    </button>
+                  )}
                   {filterCount > 1 && (
                     <button
                       type="button"
@@ -779,13 +888,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onToggleHidden={handleToggleHidden}
         onEdit={(game) => setEditingGameId(game.id)}
         onSelectGenre={(key) => {
-          setFilters({ ...EMPTY_FILTERS, genre: key });
+          setFilters({ ...EMPTY_FILTERS, collection: collectionOf(detailGame), genre: key });
           setSearchQuery("");
           showView("library");
           closeDetail();
         }}
         onSelectTag={(key) => {
-          setFilters({ ...EMPTY_FILTERS, tag: key });
+          setFilters({ ...EMPTY_FILTERS, collection: collectionOf(detailGame), tag: key });
           setSearchQuery("");
           showView("library");
           closeDetail();
@@ -851,6 +960,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           onConfigChange(saved);
           await reloadPlugins();
         }}
+        onStoreSignedIn={() => void completeLibraryInBackground().catch(() => {})}
       />
 
       <ThemeEditor

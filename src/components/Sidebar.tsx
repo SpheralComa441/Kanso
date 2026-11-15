@@ -1,9 +1,12 @@
 import {
   ChartNoAxesColumn,
+  ChevronDown,
   CloudDownload,
   EyeOff,
+  HardDrive,
   History,
   Home,
+  LayoutGrid,
   Library,
   Star,
 } from "lucide-react";
@@ -13,24 +16,38 @@ import {
   EMPTY_FILTERS,
   GAME_STATUSES,
   hasActiveFilters,
+  readUiPreference,
+  writeUiPreference,
   type GenreSummary,
   type LibraryCollection,
   type LibraryCounts,
   type LibraryFilters,
 } from "../lib/library";
 import { PLATFORM_ORDER, platformLabel } from "../lib/platforms";
+import type { CategoryKind } from "./CategoryGrid";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
-export type MainView = "home" | "library" | "stats";
+/** The library, or one of the pages beside it; `genres` and `tags` are the walls of tiles. */
+export type MainView = "home" | "library" | "stats" | CategoryKind;
+
+const SECTION_PREF_KEYS: Record<CategoryKind, string> = {
+  genres: "kanso.ui.sidebar.genres",
+  tags: "kanso.ui.sidebar.tags",
+};
 
 interface SidebarProps {
   isOpen: boolean;
   view: MainView;
   onOpenHome: () => void;
   onOpenStats: () => void;
+  /** Shows the tiles of the genres or of the tags. */
+  onOpenOverview: (kind: CategoryKind) => void;
   filters: LibraryFilters;
   /** Changing a filter always shows the library. */
   onFiltersChange: (next: LibraryFilters) => void;
+  /** The global switch: leave out everything that is not on disk. */
+  installedOnly: boolean;
+  onInstalledOnlyChange: (next: boolean) => void;
   counts: LibraryCounts;
   genres: GenreSummary[];
   /** Steam community tags found in the library, most common first. */
@@ -87,6 +104,101 @@ function SectionTitle({ children }: { children: ReactNode }) {
   );
 }
 
+interface SectionToggleProps {
+  id: string;
+  label: string;
+  hint: string;
+  count: number;
+  expanded: boolean;
+  /** Its tiles are what the main area shows. */
+  active: boolean;
+  controls: string;
+  onClick: () => void;
+}
+
+/**
+ * A section title that is also a way in: it opens the tiles of its entries in the main area
+ * and unfolds their list below. Pressed again while the tiles are showing, it folds the list.
+ */
+function SectionToggle({
+  id,
+  label,
+  hint,
+  count,
+  expanded,
+  active,
+  controls,
+  onClick,
+}: SectionToggleProps) {
+  return (
+    <h2 className="pb-1">
+      <button
+        id={id}
+        type="button"
+        onClick={onClick}
+        aria-expanded={expanded}
+        aria-controls={controls}
+        aria-current={active ? "page" : undefined}
+        title={hint}
+        className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-3xs font-semibold uppercase tracking-[0.12em] transition-colors ${
+          active
+            ? "bg-oled-elevated text-zinc-100"
+            : "text-zinc-500 hover:bg-oled-surface hover:text-zinc-200"
+        }`}
+      >
+        <LayoutGrid className={`h-3 w-3 shrink-0 ${active ? "text-accent" : ""}`} />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <span className="shrink-0 font-medium tabular-nums tracking-normal">{count}</span>
+        <ChevronDown
+          className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
+            expanded ? "" : "-rotate-90"
+          }`}
+        />
+      </button>
+    </h2>
+  );
+}
+
+interface SwitchRowProps {
+  id: string;
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+}
+
+function SwitchRow({ id, label, hint, checked, onChange }: SwitchRowProps) {
+  return (
+    <button
+      id={id}
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      title={hint}
+      onClick={() => onChange(!checked)}
+      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-oled-surface hover:text-zinc-200 ${
+        checked ? "text-zinc-100" : "text-zinc-400"
+      }`}
+    >
+      <HardDrive className="h-3.5 w-3.5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span
+        aria-hidden="true"
+        className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${
+          checked ? "bg-accent" : "bg-zinc-500"
+        }`}
+      >
+        {/* The knob takes the page's own color: it stands out on a dark and on a light theme */}
+        <span
+          className={`absolute left-0.5 top-0.5 h-3 w-3 rounded-full transition-transform duration-200 ${
+            checked ? "translate-x-3 bg-zinc-950" : "bg-oled-bg"
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
 /**
  * Collapsible side panel: the Home (deals) entry, then the library with its collections
  * (favorites, recently played, hidden), platforms and the genres found in the metadata.
@@ -97,15 +209,38 @@ export function Sidebar({
   view,
   onOpenHome,
   onOpenStats,
+  onOpenOverview,
   filters,
   onFiltersChange,
+  installedOnly,
+  onInstalledOnlyChange,
   counts,
   genres,
   tags,
 }: SidebarProps) {
   const { t } = useI18n();
   const [showAllTags, setShowAllTags] = useState(false);
+  // The two long lists start folded: their titles open them, together with their tiles
+  const [unfolded, setUnfolded] = useState<Record<CategoryKind, boolean>>(() => ({
+    genres: readUiPreference(SECTION_PREF_KEYS.genres, ["open", "closed"], "closed") === "open",
+    tags: readUiPreference(SECTION_PREF_KEYS.tags, ["open", "closed"], "closed") === "open",
+  }));
   const inLibrary = view === "library";
+
+  const setSectionUnfolded = (kind: CategoryKind, open: boolean) => {
+    setUnfolded((current) => ({ ...current, [kind]: open }));
+    writeUiPreference(SECTION_PREF_KEYS[kind], open ? "open" : "closed");
+  };
+
+  /** A section title: shows the tiles and unfolds the list; with the tiles in view, folds it. */
+  const browse = (kind: CategoryKind) => {
+    if (view === kind) {
+      setSectionUnfolded(kind, !unfolded[kind]);
+    } else {
+      onOpenOverview(kind);
+      setSectionUnfolded(kind, true);
+    }
+  };
   const nothingFiltered = !hasActiveFilters(filters);
   const viewingHidden = filters.collection === "hidden";
   const collectionActive = (collection: LibraryCollection) =>
@@ -129,10 +264,15 @@ export function Sidebar({
     ...next,
   });
 
-  // The selected tag stays in sight even when it is not among the most common ones
-  const shownTags = showAllTags
-    ? tags
-    : tags.filter((tag, index) => index < TAGS_SHOWN_AT_FIRST || tag.key === filters.tag);
+  // What is selected stays in sight, in a folded list as among the less common tags
+  const shownGenres = unfolded.genres
+    ? genres
+    : genres.filter((genre) => genre.key === filters.genre);
+  const shownTags = !unfolded.tags
+    ? tags.filter((tag) => tag.key === filters.tag)
+    : showAllTags
+      ? tags
+      : tags.filter((tag, index) => index < TAGS_SHOWN_AT_FIRST || tag.key === filters.tag);
 
   // Statuses are set by hand: the section appears once the user has started using them
   const statusesInUse =
@@ -173,6 +313,16 @@ export function Sidebar({
         <section>
           <SectionTitle>{t("sidebar.library")}</SectionTitle>
           <div className="space-y-0.5">
+            {/* Above the lists it changes; pointless while every game is on disk */}
+            {(counts.notInstalled > 0 || installedOnly) && (
+              <SwitchRow
+                id="installed-only-switch"
+                label={t("sidebar.installedOnly")}
+                hint={t("sidebar.installedOnlyHint")}
+                checked={installedOnly}
+                onChange={onInstalledOnlyChange}
+              />
+            )}
             <NavRow
               id="filter-all"
               label={t("collection.all")}
@@ -276,38 +426,61 @@ export function Sidebar({
         )}
 
         <section>
-          <SectionTitle>{t("sidebar.genre")}</SectionTitle>
           {genres.length === 0 ? (
-            <p className="px-2.5 text-2xs leading-relaxed text-zinc-500">
-              {t("sidebar.genresEmpty")}
-            </p>
+            <>
+              <SectionTitle>{t("sidebar.genre")}</SectionTitle>
+              <p className="px-2.5 text-2xs leading-relaxed text-zinc-500">
+                {t("sidebar.genresEmpty")}
+              </p>
+            </>
           ) : (
-            <div className="space-y-0.5">
-              {genres.map((genre) => {
-                const active = inLibrary && filters.genre === genre.key;
-                return (
-                  <NavRow
-                    key={genre.key}
-                    id={`filter-genre-${genre.key}`}
-                    label={genre.label}
-                    count={genre.count}
-                    active={active}
-                    onClick={() =>
-                      onFiltersChange(
-                        withVisiblePool({ genre: active ? null : genre.key })
-                      )
-                    }
-                  />
-                );
-              })}
-            </div>
+            <>
+              <SectionToggle
+                id="browse-genres"
+                label={t("sidebar.genre")}
+                hint={t("sidebar.browseGenres")}
+                count={genres.length}
+                expanded={unfolded.genres}
+                active={view === "genres"}
+                controls="sidebar-genres"
+                onClick={() => browse("genres")}
+              />
+              <div id="sidebar-genres" className="space-y-0.5">
+                {shownGenres.map((genre) => {
+                  const active = inLibrary && filters.genre === genre.key;
+                  return (
+                    <NavRow
+                      key={genre.key}
+                      id={`filter-genre-${genre.key}`}
+                      label={genre.label}
+                      count={genre.count}
+                      active={active}
+                      onClick={() =>
+                        onFiltersChange(
+                          withVisiblePool({ genre: active ? null : genre.key })
+                        )
+                      }
+                    />
+                  );
+                })}
+              </div>
+            </>
           )}
         </section>
 
         {tags.length > 0 && (
           <section>
-            <SectionTitle>{t("sidebar.tags")}</SectionTitle>
-            <div className="space-y-0.5">
+            <SectionToggle
+              id="browse-tags"
+              label={t("sidebar.tags")}
+              hint={t("sidebar.browseTags")}
+              count={tags.length}
+              expanded={unfolded.tags}
+              active={view === "tags"}
+              controls="sidebar-tags"
+              onClick={() => browse("tags")}
+            />
+            <div id="sidebar-tags" className="space-y-0.5">
               {shownTags.map((tag) => {
                 const active = inLibrary && filters.tag === tag.key;
                 return (
@@ -324,7 +497,7 @@ export function Sidebar({
                 );
               })}
             </div>
-            {tags.length > TAGS_SHOWN_AT_FIRST && (
+            {unfolded.tags && tags.length > TAGS_SHOWN_AT_FIRST && (
               <button
                 id="toggle-all-tags-button"
                 type="button"

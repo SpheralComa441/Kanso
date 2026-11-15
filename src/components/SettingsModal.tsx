@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   Trash2,
   Upload,
+  UserRound,
   X,
 } from "lucide-react";
 import {
@@ -48,6 +49,7 @@ import type {
   Theme,
 } from "../types/game";
 import { PluginsSettings } from "./PluginsSettings";
+import { StoreAccountsSettings } from "./StoreAccountsSettings";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -68,6 +70,8 @@ interface SettingsModalProps {
   pluginWarnings: string[];
   /** A plugin was installed or removed: adopt the settings the backend saved. */
   onPluginsChanged: (saved: AppConfig) => Promise<void>;
+  /** Someone signed in to a store: its games can be fetched. */
+  onStoreSignedIn: () => void;
 }
 
 const SKIPPED_EXE_PATTERNS = "unins, crash, redist, dxsetup, vc_redist, launcher";
@@ -86,6 +90,7 @@ export function SettingsModal({
   plugins,
   pluginWarnings,
   onPluginsChanged,
+  onStoreSignedIn,
 }: SettingsModalProps) {
   const { t } = useI18n();
   const [apiKey, setApiKey] = useState(initialConfig.steamgriddbApiKey);
@@ -581,6 +586,16 @@ export function SettingsModal({
               onStatesChange={setPluginStates}
               onInstalledChanged={onPluginsChanged}
             />
+          </section>
+
+          {/* Store accounts */}
+          <section id="settings-accounts" className="space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
+              <UserRound className="h-3.5 w-3.5 text-accent" />
+              <span>{t("accounts.title")}</span>
+            </div>
+            <p className="text-2xs leading-relaxed text-zinc-500">{t("accounts.help")}</p>
+            <StoreAccountsSettings isOpen={isOpen} onSignedIn={onStoreSignedIn} />
           </section>
 
           {/* SteamGridDB API Key */}

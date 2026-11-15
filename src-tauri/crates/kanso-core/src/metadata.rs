@@ -156,6 +156,74 @@ pub struct SteamAppSummary {
     pub cover_url: Option<String>,
 }
 
+/// Community tags that are also store genres, with the genre's official name in each interface
+/// language (Italian, English, Spanish, Russian), as the store's `appdetails` spells it. The
+/// tag itself is named differently in some languages ("Simulación" / "Simuladores"), and a
+/// genre must be spelled one way for the games carrying it to be listed together.
+/// "Early Access" is left out on purpose: the tag outlives the early access.
+///
+/// Read off an app's [`MAX_GAME_TAGS`] most relevant tags, these agree with the genres its
+/// publisher chose about three times out of four either way (measured on fifty games of a
+/// real library; fewer tags miss genres, more tags invent them).
+const STEAM_GENRE_TAGS: &[(u64, [&str; 4])] = &[
+    (19, ["Azione", "Action", "Acción", "Экшены"]),
+    (21, ["Avventura", "Adventure", "Aventura", "Приключенческие игры"]),
+    (122, ["GDR", "RPG", "Rol", "Ролевые игры"]),
+    (9, ["Strategia", "Strategy", "Estrategia", "Стратегии"]),
+    (599, ["Simulazione", "Simulation", "Simuladores", "Симуляторы"]),
+    (597, ["Passatempo", "Casual", "Casual", "Казуальные игры"]),
+    (492, ["Indie", "Indie", "Indie", "Инди"]),
+    (699, ["Corse", "Racing", "Carreras", "Гонки"]),
+    (701, ["Sport", "Sports", "Deportes", "Спорт"]),
+    (
+        128,
+        [
+            "Multigiocatore di massa",
+            "Massively Multiplayer",
+            "Multijugador masivo",
+            "Многопользовательские игры",
+        ],
+    ),
+];
+/// The store's "Free to Play" genre: read from the app's `is_free` flag, not from a tag.
+const STEAM_FREE_TO_PLAY_GENRE: [&str; 4] =
+    ["Free-to-Play", "Free To Play", "Free to Play", "Бесплатные"];
+
+fn in_language(names: &[&'static str; 4], lang: Lang) -> &'static str {
+    match lang {
+        Lang::It => names[0],
+        Lang::En => names[1],
+        Lang::Es => names[2],
+        Lang::Ru => names[3],
+    }
+}
+
+/// The store genre a community tag stands for, named in `lang`.
+fn steam_genre_of_tag(tag_id: u64, lang: Lang) -> Option<&'static str> {
+    STEAM_GENRE_TAGS
+        .iter()
+        .find(|(id, _)| *id == tag_id)
+        .map(|(_, names)| in_language(names, lang))
+}
+
+/// Steam could not be asked, or its answer could not be read: nothing was learned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SteamUnreachable;
+
+/// What the store service says about a Steam app when many are asked about at once: what a
+/// game needs to be found by genre and by tag.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SteamAppDetails {
+    pub appid: u64,
+    /// `false`: the store does not list the app, so nothing else is known.
+    pub listed: bool,
+    pub short_description: Option<String>,
+    /// Store genres read off the app's tags, most relevant first, in the client's language.
+    pub genres: Vec<String>,
+    /// Community tags, most relevant first, in the client's language.
+    pub tags: Vec<String>,
+}
+
 /// Outcome of matching a detected game against SteamGridDB.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SgdbResolution {
@@ -239,6 +307,16 @@ impl MetadataClient {
         self.lang = lang;
         self.tag_names = Arc::default();
         self
+    }
+
+    /// Points the store service (`IStoreBrowseService`) at another host than the store site.
+    pub fn set_steam_api_base_url(&mut self, base_url: &str) {
+        self.steam_api_base_url = base_url.trim_end_matches('/').to_string();
+    }
+
+    /// Language descriptions, genres and tags are requested in.
+    pub fn language(&self) -> Lang {
+        self.lang
     }
 
     /// Queries the dedicated SteamGridDB endpoint for an exact Steam `appid`:
@@ -530,37 +608,42 @@ impl MetadataClient {
         (artwork != SteamArtwork::default()).then_some(artwork)
     }
 
-    /// One app as Steam's public store service describes it, with the parts `data_request`
-    /// asks for. `Ok(None)`: the service answered and has no such (visible) app. `Err`: it
-    /// could not be asked.
+    /// Address of a question to Steam's public store service about `appids`.
+    fn steam_store_items_url(&self, appids: &[u64], data_request: &Value) -> String {
+        let input = serde_json::json!({
+            "ids": appids.iter().map(|appid| serde_json::json!({ "appid": appid })).collect::<Vec<_>>(),
+            "context": { "language": self.lang.steam_language(), "country_code": "US" },
+            "data_request": data_request,
+        });
+        format!(
+            "{}/IStoreBrowseService/GetItems/v1/?input_json={}",
+            self.steam_api_base_url,
+            percent_encode_path_segment(&input.to_string())
+        )
+    }
+
+    /// One request to Steam's public store service (no key) about up to
+    /// [`STEAM_SUMMARY_BATCH`] apps, with the parts `data_request` asks for. `None`: the
+    /// service could not be asked.
+    fn fetch_steam_store_items(&self, appids: &[u64], data_request: &Value) -> Option<Vec<Value>> {
+        let url = self.steam_store_items_url(appids, data_request);
+        let root: Value = self.agent.get(&url).call().ok()?.into_json().ok()?;
+        root.get("response")
+            .and_then(|response| response.get("store_items"))
+            .and_then(Value::as_array)
+            .cloned()
+    }
+
     /// Name and kind of many Steam apps at once, from the public store service (no key).
     /// Apps the store does not list come back without a name. `None` means Steam could not
     /// be reached: nothing is known, ask again later.
     pub fn fetch_steam_app_summaries(&self, appids: &[u64]) -> Option<Vec<SteamAppSummary>> {
+        let data_request = serde_json::json!({ "include_assets": true });
         let mut summaries = Vec::with_capacity(appids.len());
         for batch in appids.chunks(STEAM_SUMMARY_BATCH) {
-            let input = serde_json::json!({
-                "ids": batch.iter().map(|appid| serde_json::json!({ "appid": appid })).collect::<Vec<_>>(),
-                "context": { "language": self.lang.steam_language(), "country_code": "US" },
-                "data_request": { "include_assets": true },
-            });
-            let url = format!(
-                "{}/IStoreBrowseService/GetItems/v1/?input_json={}",
-                self.steam_api_base_url,
-                percent_encode_path_segment(&input.to_string())
-            );
-            let root: Value = self.agent.get(&url).call().ok()?.into_json().ok()?;
-            let items = root
-                .get("response")
-                .and_then(|response| response.get("store_items"))
-                .and_then(Value::as_array)?;
-
+            let items = self.fetch_steam_store_items(batch, &data_request)?;
             for appid in batch {
-                // An unlisted app is answered with a stub: `success` other than 1, `appid: 0`
-                let listed = items.iter().find(|item| {
-                    item.get("appid").and_then(Value::as_u64) == Some(*appid)
-                        && item.get("success").and_then(Value::as_u64) == Some(1)
-                });
+                let listed = listed_store_item(&items, *appid);
                 summaries.push(SteamAppSummary {
                     appid: *appid,
                     name: listed
@@ -579,6 +662,53 @@ impl MetadataClient {
         Some(summaries)
     }
 
+    /// Genres, community tags and description of many Steam apps at once (fifty per request),
+    /// in the client's language. The store service has no genre field: the genres are read
+    /// off the app's most relevant tags, the ones that are also store genres, and named as
+    /// the store names them. `None` means Steam could not be asked: try again later.
+    pub fn fetch_steam_app_details(&self, appids: &[u64]) -> Option<Vec<SteamAppDetails>> {
+        let names = self.steam_tag_names()?;
+        let data_request = serde_json::json!({
+            "include_tag_count": MAX_GAME_TAGS,
+            "include_basic_info": true,
+        });
+        let mut details = Vec::with_capacity(appids.len());
+        for batch in appids.chunks(STEAM_SUMMARY_BATCH) {
+            let items = self.fetch_steam_store_items(batch, &data_request)?;
+            for appid in batch {
+                let Some(item) = listed_store_item(&items, *appid) else {
+                    details.push(SteamAppDetails { appid: *appid, ..Default::default() });
+                    continue;
+                };
+                let ranked = ranked_tag_ids(item);
+
+                let mut genres: Vec<String> = Vec::new();
+                for genre in ranked.iter().filter_map(|id| steam_genre_of_tag(*id, self.lang)) {
+                    if !genres.iter().any(|known| known == genre) {
+                        genres.push(genre.to_string());
+                    }
+                }
+                if item.get("is_free").and_then(Value::as_bool) == Some(true) {
+                    genres.push(in_language(&STEAM_FREE_TO_PLAY_GENRE, self.lang).to_string());
+                }
+
+                details.push(SteamAppDetails {
+                    appid: *appid,
+                    listed: true,
+                    short_description: item
+                        .get("basic_info")
+                        .and_then(|info| info.get("short_description"))
+                        .and_then(Value::as_str)
+                        .map(|text| decode_basic_html_entities(text).replace("\r\n", "\n").trim().to_string())
+                        .filter(|text| !text.is_empty()),
+                    genres,
+                    tags: named_tags(&ranked, names),
+                });
+            }
+        }
+        Some(details)
+    }
+
     /// The cover in a store item's `assets`: the vertical capsule, else the header.
     fn steam_cover_url(&self, item: &Value) -> Option<String> {
         let assets = item.get("assets")?;
@@ -595,17 +725,11 @@ impl MetadataClient {
         })
     }
 
+    /// One app as the store service describes it, with the parts `data_request` asks for.
+    /// `Ok(None)`: the service answered and has no such (visible) app. `Err`: it could not
+    /// be asked.
     fn fetch_steam_store_item(&self, appid: u64, data_request: Value) -> Result<Option<Value>, ()> {
-        let input = serde_json::json!({
-            "ids": [{ "appid": appid }],
-            "context": { "language": self.lang.steam_language(), "country_code": "US" },
-            "data_request": data_request,
-        });
-        let url = format!(
-            "{}/IStoreBrowseService/GetItems/v1/?input_json={}",
-            self.steam_api_base_url,
-            percent_encode_path_segment(&input.to_string())
-        );
+        let url = self.steam_store_items_url(&[appid], &data_request);
         let root: Value = self
             .agent
             .get(&url)
@@ -665,32 +789,7 @@ impl MetadataClient {
             return Some(Vec::new());
         };
 
-        let mut weighted: Vec<(u64, u64)> = item
-            .get("tags")
-            .and_then(Value::as_array)
-            .map(|tags| {
-                tags.iter()
-                    .filter_map(|tag| {
-                        let id = tag.get("tagid")?.as_u64()?;
-                        Some((id, tag.get("weight").and_then(Value::as_u64).unwrap_or(0)))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        weighted.sort_by_key(|&(_, weight)| std::cmp::Reverse(weight));
-
-        let mut tags: Vec<String> = Vec::new();
-        for (id, _) in weighted {
-            if let Some(name) = names.get(&id) {
-                if !tags.iter().any(|known| known.eq_ignore_ascii_case(name)) {
-                    tags.push(name.clone());
-                }
-            }
-            if tags.len() == MAX_GAME_TAGS {
-                break;
-            }
-        }
-        Some(tags)
+        Some(named_tags(&ranked_tag_ids(&item), names))
     }
 
     fn fetch_best_grid_url(
@@ -850,6 +949,30 @@ impl MetadataClient {
         known
             .get_or_insert_with(|| self.search_steam_store_appid(title))
             .clone()
+    }
+
+    /// The Steam store app called exactly `title`, give or take edition suffixes, trademark
+    /// signs, punctuation and case. Stricter than the first search hit that the metadata of
+    /// a single game settles for: this is used on whole libraries, where a near miss would
+    /// file a game under another game's genres. `Ok(None)`: no app by that name. `Err`: the
+    /// search could not be run.
+    pub fn find_steam_app_by_title(&self, title: &str) -> Result<Option<String>, SteamUnreachable> {
+        let cleaned = clean_game_title(title);
+        let wanted = title_key(&cleaned);
+        if wanted.is_empty() {
+            return Ok(None);
+        }
+        let url = format!(
+            "{}/actions/SearchApps/{}",
+            self.steam_community_base_url,
+            percent_encode_path_segment(&cleaned)
+        );
+        let resp = self.agent.get(&url).call().map_err(|_| SteamUnreachable)?;
+        let items: Vec<SteamSearchAppItem> = resp.into_json().map_err(|_| SteamUnreachable)?;
+        Ok(items
+            .iter()
+            .find(|item| title_key(&clean_game_title(&decode_basic_html_entities(&item.name))) == wanted)
+            .and_then(SteamSearchAppItem::appid_string))
     }
 
     fn search_steam_store_appid(&self, raw_title: &str) -> Result<Option<String>, ()> {
@@ -1127,6 +1250,57 @@ impl MetadataClient {
     }
 }
 
+/// What is left of a title when only its letters and digits count: "Assassin's Creed®:
+/// Odyssey" and "ASSASSINS CREED ODYSSEY" are the same game.
+pub fn title_key(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// The answer about `appid` among the items of a store service reply, if the store lists the
+/// app: one it does not list is answered with a stub (`success` other than 1, `appid: 0`).
+fn listed_store_item(items: &[Value], appid: u64) -> Option<&Value> {
+    items.iter().find(|item| {
+        item.get("appid").and_then(Value::as_u64) == Some(appid)
+            && item.get("success").and_then(Value::as_u64) == Some(1)
+    })
+}
+
+/// Ids of a store item's community tags, most relevant (heaviest) first.
+fn ranked_tag_ids(item: &Value) -> Vec<u64> {
+    let mut weighted: Vec<(u64, u64)> = item
+        .get("tags")
+        .and_then(Value::as_array)
+        .map(|tags| {
+            tags.iter()
+                .filter_map(|tag| {
+                    let id = tag.get("tagid")?.as_u64()?;
+                    Some((id, tag.get("weight").and_then(Value::as_u64).unwrap_or(0)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    weighted.sort_by_key(|&(_, weight)| std::cmp::Reverse(weight));
+    weighted.into_iter().map(|(id, _)| id).collect()
+}
+
+/// The first [`MAX_GAME_TAGS`] of `ranked` that Steam has a name for, each once.
+fn named_tags(ranked: &[u64], names: &HashMap<u64, String>) -> Vec<String> {
+    let mut tags: Vec<String> = Vec::new();
+    for name in ranked.iter().filter_map(|id| names.get(id)) {
+        if !tags.iter().any(|known| known.eq_ignore_ascii_case(name)) {
+            tags.push(name.clone());
+        }
+        if tags.len() == MAX_GAME_TAGS {
+            break;
+        }
+    }
+    tags
+}
+
 /// Replaces a provisional title with an official `name`, clearing `title_provisional`.
 /// Returns `false` (leaving the game untouched) when `name` is itself unusable.
 fn apply_resolved_title(game: &mut DetectedGame, name: &str) -> bool {
@@ -1143,6 +1317,8 @@ fn apply_resolved_title(game: &mut DetectedGame, name: &str) -> bool {
 #[derive(Debug, Deserialize)]
 struct SteamSearchAppItem {
     appid: Value,
+    #[serde(default)]
+    name: String,
 }
 
 impl SteamSearchAppItem {
@@ -1352,6 +1528,20 @@ pub(crate) mod tests {
                         ("200 OK", "application/json", body_str.into_bytes())
                     } else if path == "/mock-cover.png" {
                         ("200 OK", "image/png", b"\x89PNG\r\n\x1a\nmockcover".to_vec())
+                    } else if path.to_ascii_lowercase().starts_with("/actions/searchapps/assassin") {
+                        // The exact game is not the first hit
+                        (
+                            "200 OK",
+                            "application/json",
+                            r#"[{"appid":"2208920","name":"Assassin's Creed Valhalla"},{"appid":"812140","name":"Assassin's Creed\u00ae Odyssey"},{"appid":"311560","name":"Assassin's Creed Rogue"}]"#.as_bytes().to_vec(),
+                        )
+                    } else if path.starts_with("/actions/SearchApps/Anno") {
+                        // Near misses only
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"[{"appid":"916440","name":"Anno 1800 - Season 4 Pass"},{"appid":"1028630","name":"Anno 1404 - History Edition"}]"#.to_vec(),
+                        )
                     } else if path.starts_with("/actions/SearchApps/Unknown") {
                         ("200 OK", "application/json", b"[]".to_vec())
                     } else if path.starts_with("/actions/SearchApps/") {
@@ -1374,6 +1564,33 @@ pub(crate) mod tests {
                             "application/json",
                             r#"{"1321440":{"success":true,"data":{"type":"game","name":"Cassette Beasts","short_description":"Colleziona mostri e trasformati in loro.","genres":[{"id":"23","description":"Indie"},{"id":"3","description":"GDR"}]}}}"#.as_bytes().to_vec(),
                         )
+                    } else if path.starts_with("/IStoreBrowseService/GetItems/v1/")
+                        && path.contains("include_basic_info")
+                    {
+                        // Details of several apps at once: tags out of order, a tag that is
+                        // also a genre but that the tag list does not name (19), a free game,
+                        // an app the store does not list
+                        let english = path.contains("english");
+                        let body = format!(
+                            r#"{{"response":{{"store_items":[
+                                {{"id":620,"appid":620,"success":1,"name":"Portal 2","type":0,
+                                 "basic_info":{{"short_description":"{portal}"}},
+                                 "tags":[{{"tagid":7178,"weight":300}},{{"tagid":19,"weight":900}},{{"tagid":122,"weight":100}},{{"tagid":493,"weight":50}}]}},
+                                {{"id":570,"appid":570,"success":1,"name":"Dota 2","type":0,"is_free":true,
+                                 "tags":[{{"tagid":9,"weight":10}},{{"tagid":29482,"weight":5}}]}},
+                                {{"id":228980,"success":15,"visible":false,"name":"","appid":0}},
+                                {{"id":2344520,"appid":2344520,"success":1,"name":"Diablo IV","type":0,
+                                 "basic_info":{{"short_description":"{diablo}"}},
+                                 "tags":[{{"tagid":122,"weight":300}},{{"tagid":29482,"weight":20}}]}}
+                            ]}}}}"#,
+                            portal = if english {
+                                "Co-op puzzles.\\r\\n\\r\\nWith portals &amp; lasers."
+                            } else {
+                                "Rompicapo cooperativi.\\r\\n\\r\\nCon portali &amp; laser."
+                            },
+                            diablo = if english { "Dark action RPG." } else { "GDR d'azione oscuro." },
+                        );
+                        ("200 OK", "application/json", body.into_bytes())
                     } else if path.starts_with("/IStoreBrowseService/GetItems/v1/")
                         && path.contains("%7D%2C%7B%22appid%22")
                     {
@@ -2003,6 +2220,138 @@ pub(crate) mod tests {
         assert_eq!(game.tags, vec!["Turn-Based Combat", "RPG"]);
         assert_eq!(game.tags_lang.as_deref(), Some("en"));
         assert!(!needs_metadata(&game, false, Lang::En));
+    }
+
+    #[test]
+    fn details_of_many_steam_apps_come_from_one_request_with_genres_read_off_the_tags() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+
+        let details = client.fetch_steam_app_details(&[620, 570, 228_980]).expect("answered");
+        assert_eq!(details.len(), 3, "one answer per app asked about, in the same order");
+
+        let portal = &details[0];
+        assert!(portal.listed);
+        assert_eq!(
+            portal.short_description.as_deref(),
+            Some("Rompicapo cooperativi.\n\nCon portali & laser.")
+        );
+        // By weight; "Accesso anticipato" (493) is never taken for a genre
+        assert_eq!(portal.genres, ["Azione", "GDR"]);
+        // Only tags Steam names, by weight: 19 is not in the (mock) tag list
+        assert_eq!(portal.tags, ["Giochi di società", "GDR"]);
+
+        let dota = &details[1];
+        assert_eq!(dota.genres, ["Strategia", "Free-to-Play"], "free games get the store's genre");
+        assert_eq!(dota.tags, ["Stile Souls"]);
+        assert_eq!(dota.short_description, None);
+
+        assert_eq!(
+            details[2],
+            SteamAppDetails { appid: 228_980, ..Default::default() },
+            "the store does not list it"
+        );
+
+        let asked: Vec<String> = recorded
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|path| path.starts_with("/IStoreBrowseService/"))
+            .cloned()
+            .collect();
+        assert_eq!(asked.len(), 1, "{asked:?}");
+        assert!(asked[0].contains("include_tag_count") && asked[0].contains("italian"));
+
+        // Another language: genres as the store spells them there, not as the tags are named
+        let english = client.clone().with_language(Lang::En);
+        let details = english.fetch_steam_app_details(&[620, 570]).unwrap();
+        assert_eq!(details[0].genres, ["Action", "RPG"]);
+        assert_eq!(details[0].tags, ["Party Game", "RPG"]);
+        assert_eq!(details[1].genres, ["Strategy", "Free To Play"]);
+        assert_eq!(steam_genre_of_tag(599, Lang::Es), Some("Simuladores"));
+        assert_eq!(steam_genre_of_tag(21, Lang::Ru), Some("Приключенческие игры"));
+        assert_eq!(steam_genre_of_tag(493, Lang::En), None);
+
+        // Steam unreachable: nothing is known, rather than "these apps have nothing"
+        let dead = MetadataClient::with_base_urls("http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9");
+        assert_eq!(dead.fetch_steam_app_details(&[620]), None);
+    }
+
+    #[test]
+    fn a_steam_page_is_matched_by_exact_title_only() {
+        let (base_url, _recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+
+        // Not the first hit, written with other signs and capitals
+        assert_eq!(
+            client.find_steam_app_by_title("ASSASSIN'S CREED: ODYSSEY - Gold Edition™"),
+            Ok(None),
+            "an edition the cleaner does not know is another title"
+        );
+        assert_eq!(client.find_steam_app_by_title("Assassin's Creed Odyssey"), Ok(Some("812140".into())));
+        assert_eq!(client.find_steam_app_by_title("assassins creed® odyssey"), Ok(Some("812140".into())));
+        // Only near misses: better no page than another game's
+        assert_eq!(client.find_steam_app_by_title("Anno 1800"), Ok(None));
+        assert_eq!(client.find_steam_app_by_title("Unknown Game"), Ok(None));
+        assert_eq!(client.find_steam_app_by_title("™"), Ok(None));
+        // The single-hit answer of the mock: the title has to be that very one
+        assert_eq!(client.find_steam_app_by_title("Diablo IV"), Ok(Some("2344520".into())));
+        assert_eq!(client.find_steam_app_by_title("Diablo"), Ok(None));
+
+        let dead = MetadataClient::with_base_urls("http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9");
+        assert_eq!(dead.find_steam_app_by_title("Diablo IV"), Err(SteamUnreachable));
+
+        assert_eq!(title_key("Assassin's Creed®: Odyssey"), "assassinscreedodyssey");
+        assert_eq!(title_key("Ведьмак 3: Дикая Охота"), "ведьмак3дикаяохота");
+    }
+
+    /// Run by hand against the real search (or a local forwarder to steamcommunity.com), to
+    /// see how many typical titles of other stores find their Steam page:
+    /// `KANSO_STEAM_COMMUNITY=https://steamcommunity.com cargo test -p kanso-core real_title_matching -- --nocapture`
+    #[test]
+    fn real_title_matching_when_the_search_is_provided() {
+        let Ok(community) = std::env::var("KANSO_STEAM_COMMUNITY") else {
+            return;
+        };
+        let client = MetadataClient::with_base_urls(&community, &community, &community);
+        let titles = [
+            "The Witcher 3: Wild Hunt - Game of the Year Edition",
+            "Cyberpunk 2077",
+            "Assassin's Creed® Odyssey",
+            "Anno 1800",
+            "Tom Clancy's Rainbow Six® Siege",
+            "Far Cry® 5",
+            "Alan Wake 2",
+            "Rocket League®",
+            "Control",
+            "Hades",
+            "DEATH STRANDING",
+            "Baldur's Gate 3",
+            "Heroes of Might and Magic® 3: Complete",
+            "Disco Elysium - The Final Cut",
+            "GWENT: The Witcher Card Game",
+            "Grand Theft Auto V",
+            "Fortnite",
+            "Kingdom Come: Deliverance",
+            "Prey",
+            "DOOM Eternal",
+            "Tomb Raider GAME OF THE YEAR EDITION",
+            "Sid Meier's Civilization® VI",
+            "Immortals Fenyx Rising",
+            "STAR WARS™ Battlefront™ II",
+            "Shadow of the Tomb Raider: Definitive Edition",
+        ];
+        let mut found = 0;
+        for title in titles {
+            let answer = client.find_steam_app_by_title(title);
+            if matches!(answer, Ok(Some(_))) {
+                found += 1;
+            }
+            println!("  {title:55} -> {answer:?}");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        println!("{found} of {} matched", titles.len());
+        assert!(found > 0);
     }
 
     #[test]
