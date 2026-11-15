@@ -3,8 +3,11 @@
 //! Two ways of signing in, and in neither does Kanso see, keep or send the password: it is
 //! typed on the store's own page and goes to the store.
 //!
-//! - **Epic, GOG and Xbox** sign in in the user's browser and end on a code, which the user
-//!   pastes here. Kanso exchanges the code with the store for a session token.
+//! - **Epic and GOG** sign in in the user's browser and end on a code, which the user pastes
+//!   here. Kanso exchanges the code with the store for a session token.
+//! - **Xbox** signs in in the user's browser too, on Microsoft's page, which then sends the
+//!   browser back to Kanso on this PC with the code ([`crate::browser_signin`]): nothing is
+//!   copied by hand.
 //! - **Ubisoft, EA and Battle.net** have no such code: the store's own page is shown in a
 //!   window of Kanso ([`crate::signin_window`]), and once the store has signed the user in
 //!   Kanso reads what the page was handed ([`kanso_core::signin`] says exactly what).
@@ -17,6 +20,7 @@
 //!
 //! The interface never handles a token: it asks for a sign-in and is told who is signed in.
 
+use crate::browser_signin::{Listener, Wait};
 use crate::signin_window::{self, Outcome};
 use crate::{resolve_app_data_dir, AppState, SharedDb, GAMES_REMOVED_EVENT, GAMES_UPDATED_EVENT};
 use kanso_core::accounts::{
@@ -30,10 +34,11 @@ use kanso_core::models::{now_timestamp_ms, DetectedGame};
 use kanso_core::owned::{merge_owned_games, OwnedGame};
 use kanso_core::signin::SignInFlow;
 use kanso_core::ubisoft_account::{UbisoftApi, UbisoftFlow, UbisoftLibrary, UbisoftSession};
-use kanso_core::xbox_account::{self, XboxApi};
+use kanso_core::xbox_account::{self, Callback, SignInAttempt, XboxApi};
 use kanso_core::T;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
@@ -61,6 +66,8 @@ enum Method {
     Code,
     /// On the store's page, in a window of Kanso.
     Window,
+    /// In the browser, which the store sends back to Kanso on this PC when the user is done.
+    Browser,
 }
 
 /// A store Kanso can sign in to.
@@ -79,7 +86,7 @@ const STORES: &[Store] = &[
     Store { platform: UBISOFT, slug: "ubisoft", name: "Ubisoft Connect", method: Method::Window },
     Store { platform: EA, slug: "ea", name: "EA app", method: Method::Window },
     Store { platform: BATTLENET, slug: "battlenet", name: "Battle.net", method: Method::Window },
-    Store { platform: XBOX, slug: "xbox", name: "Xbox", method: Method::Code },
+    Store { platform: XBOX, slug: "xbox", name: "Xbox", method: Method::Browser },
 ];
 
 /// What the interface shows about a store's account.
@@ -302,7 +309,6 @@ pub(crate) fn list_store_accounts(app: AppHandle) -> Result<Vec<StoreAccountInfo
 pub(crate) fn open_store_sign_in(app: AppHandle, platform: String) -> Result<(), String> {
     let url = match supported(&platform, Method::Code)?.platform {
         EPIC => epic_account::sign_in_url(),
-        XBOX => xbox_account::sign_in_url(),
         _ => gog_account::sign_in_url(),
     };
     app.opener()
@@ -327,14 +333,6 @@ pub(crate) async fn store_sign_in(
         EPIC => EpicApi::new().exchange_code(&code).map(|session| {
             (session.account_id.clone(), session.display_name.clone(), session.refresh_token.clone())
         }),
-        XBOX => {
-            let api = xbox_api();
-            let session = api.exchange_code(&code)?;
-            // Signing in to Xbox Live is part of the sign-in: an account Xbox Live refuses
-            // (no Xbox profile) has no library to read
-            let identity = api.identity(&session)?;
-            Ok((identity.xuid.clone(), identity.gamertag.clone(), session.refresh_token.clone()))
-        }
         _ => {
             let api = GogApi::new();
             let session = api.exchange_code(&code)?;
@@ -354,6 +352,76 @@ pub(crate) async fn store_sign_in(
     )?;
     let _ = app.emit(ACCOUNTS_CHANGED_EVENT, ());
     Ok(info_of(&accounts, store))
+}
+
+/// Set while a sign-in in the browser waits for the user: one at a time.
+static BROWSER_SIGN_IN_RUNNING: AtomicBool = AtomicBool::new(false);
+/// Set by the interface when the user gives up on the sign-in under way.
+static BROWSER_SIGN_IN_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Opens Microsoft's own sign-in page in the user's browser and waits for Microsoft to send
+/// the browser back to Kanso, on this PC, with the authorization code (or for the user to
+/// give up). The password is typed on Microsoft's page, in the user's browser: it never
+/// passes through here. `signed_in` is `false` when the user gave up.
+#[tauri::command]
+pub(crate) async fn store_sign_in_browser(app: AppHandle, platform: String) -> Result<WindowSignIn, String> {
+    let store = supported(&platform, Method::Browser)?;
+    if BROWSER_SIGN_IN_RUNNING.swap(true, Ordering::SeqCst) {
+        return Err(T::SignInWindowBusy.s().to_string());
+    }
+    BROWSER_SIGN_IN_CANCELLED.store(false, Ordering::SeqCst);
+    let background = app.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || sign_in_with_browser(&background, store))
+        .await
+        .map_err(|e| format!("{}: {e}", T::SignInFailed.s()));
+    BROWSER_SIGN_IN_RUNNING.store(false, Ordering::SeqCst);
+    outcome?
+}
+
+/// The user gave up on the sign-in they started in the browser: Kanso stops listening.
+#[tauri::command]
+pub(crate) fn cancel_store_sign_in_browser() {
+    BROWSER_SIGN_IN_CANCELLED.store(true, Ordering::SeqCst);
+}
+
+fn sign_in_with_browser(app: &AppHandle, store: &'static Store) -> Result<WindowSignIn, String> {
+    let accounts = account_store(app)?;
+    let attempt = SignInAttempt::new().ok_or_else(|| T::SignInFailed.s().to_string())?;
+    // Listening comes first: a port another program holds is known before the browser opens
+    let listener = Listener::on(xbox_account::CALLBACK_PORT)
+        .ok_or_else(|| T::SignInPortBusy.s().replace("{port}", &xbox_account::CALLBACK_PORT.to_string()))?;
+    app.opener()
+        .open_url(attempt.sign_in_url(), None::<&str>)
+        .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))?;
+
+    let read = |request_line: &str| match attempt.read_callback(request_line) {
+        Callback::Code(code) => Some((Ok(code), T::BrowserSignInDone.s().to_string())),
+        Callback::Refused(why) => Some((Err(why), T::BrowserSignInRefused.s().to_string())),
+        Callback::NotOurs => None,
+    };
+    let code = match listener.wait_for_sign_in(&read, &BROWSER_SIGN_IN_CANCELLED) {
+        Wait::Answered(Ok(code)) => code,
+        Wait::Answered(Err(why)) => return Err(format!("{} ({why})", T::SignInRefused.s())),
+        Wait::Cancelled => return Ok(WindowSignIn { signed_in: false, account: info_of(&accounts, store), note: None }),
+        Wait::TimedOut => return Err(T::BrowserSignInTimedOut.s().to_string()),
+    };
+
+    let api = xbox_api();
+    let session = api.exchange_code(&code, &attempt).map_err(code_failure)?;
+    // Signing in to Xbox Live is part of the sign-in: an account Xbox Live refuses (no Xbox
+    // profile) has no library to read
+    let identity = api.identity(&session).map_err(code_failure)?;
+    accounts.save(
+        store.platform,
+        &StoreAccount {
+            account_id: identity.xuid.clone(),
+            display_name: identity.gamertag.clone(),
+            refresh_token: session.refresh_token.clone(),
+            connected_at: now_timestamp_ms(),
+        },
+    )?;
+    let _ = app.emit(ACCOUNTS_CHANGED_EVENT, ());
+    Ok(WindowSignIn { signed_in: true, account: info_of(&accounts, store), note: None })
 }
 
 /// Shows the store's own sign-in page in a window and waits for the user to sign in there

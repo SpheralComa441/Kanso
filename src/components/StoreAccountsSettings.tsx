@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { AppWindow, ExternalLink, LogIn, LogOut } from "lucide-react";
+import { AppWindow, ExternalLink, Globe, LogIn, LogOut } from "lucide-react";
 import { useI18n, type MessageKey } from "../i18n";
 import {
   isRunningInTauri,
   listStoreAccounts,
   openStoreSignIn,
+  cancelStoreSignInBrowser,
   storeSignIn,
+  storeSignInBrowser,
   storeSignInWindow,
   storeSignOut,
 } from "../lib/backend";
@@ -16,7 +18,6 @@ import type { GamePlatform, StoreAccountInfo } from "../types/game";
 const STEP_TWO: Partial<Record<GamePlatform, MessageKey>> = {
   epic: "accounts.step2.epic",
   gog: "accounts.step2.gog",
-  xbox: "accounts.step2.xbox",
 };
 
 /**
@@ -99,13 +100,16 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
     }
   };
 
-  /** Opens the store's own sign-in page in a window and waits for the user to be done. */
-  const signInInWindow = async (platform: GamePlatform) => {
+  /**
+   * Opens the store's own sign-in page, in a window of Kanso or in the user's browser, and
+   * waits for the user to be done.
+   */
+  const signInInWindow = async (platform: GamePlatform, inBrowser = false) => {
     setWindowOpenFor(platform);
     setError(null);
     setNotice(null);
     try {
-      const outcome = await storeSignInWindow(platform);
+      const outcome = await (inBrowser ? storeSignInBrowser(platform) : storeSignInWindow(platform));
       replace(outcome.account);
       if (outcome.signedIn) {
         setSigningIn(null);
@@ -113,7 +117,7 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
         setNotice(outcome.note);
         onSignedIn();
       } else {
-        setNotice(t("accounts.window.closed"));
+        setNotice(t(inBrowser ? "accounts.browser.cancelled" : "accounts.window.closed"));
       }
     } catch (err) {
       failure(err);
@@ -239,6 +243,44 @@ export function StoreAccountsSettings({ isOpen, onSignedIn }: StoreAccountsSetti
                 {windowOpenFor === account.platform && (
                   <p role="status" className="text-zinc-300">
                     {t("accounts.window.waiting", { store })}
+                  </p>
+                )}
+                {!isRunningInTauri() && <p className="text-zinc-500">{t("accounts.previewNote")}</p>}
+              </div>
+            )}
+
+            {open && account.method === "browser" && (
+              <div
+                data-account-browser
+                className="mt-3 space-y-2.5 border-t border-oled-border pt-3 text-2xs leading-relaxed text-zinc-400"
+              >
+                <p>{t("accounts.browser.explain")}</p>
+                <p>{t("accounts.browser.kept")}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    id={`account-open-browser-${account.platform}`}
+                    type="button"
+                    disabled={windowOpenFor !== null}
+                    onClick={() => void signInInWindow(account.platform, true)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover disabled:opacity-50"
+                  >
+                    <Globe className="h-3.5 w-3.5" />
+                    <span>{t("accounts.browser.open")}</span>
+                  </button>
+                  {windowOpenFor === account.platform && (
+                    <button
+                      id={`account-cancel-browser-${account.platform}`}
+                      type="button"
+                      onClick={() => void cancelStoreSignInBrowser()}
+                      className="rounded-lg border border-oled-border px-2.5 py-1.5 text-xs text-zinc-300 transition-colors hover:border-zinc-600 hover:text-zinc-100"
+                    >
+                      {t("accounts.cancel")}
+                    </button>
+                  )}
+                </div>
+                {windowOpenFor === account.platform && (
+                  <p role="status" className="text-zinc-300">
+                    {t("accounts.browser.waiting")}
                   </p>
                 )}
                 {!isRunningInTauri() && <p className="text-zinc-500">{t("accounts.previewNote")}</p>}

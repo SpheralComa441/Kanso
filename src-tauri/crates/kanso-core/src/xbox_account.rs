@@ -1,11 +1,19 @@
 //! The Xbox (Microsoft) account: signing in, and the PC games it has played.
 //!
 //! Signing in never shows Kanso the password: the user signs in on Microsoft's own page, in
-//! the browser, and ends on a blank page whose address carries a short-lived authorization
-//! code. The user pastes that address into Kanso, which exchanges the code for a session
-//! ([`XboxApi::exchange_code`]). The session's refresh token is what is kept between runs,
-//! protected by Windows for the current user (see [`crate::accounts`]). It is sent to
+//! their own browser. When they are done, Microsoft sends the browser back to Kanso on this
+//! very PC, at `http://localhost` (an address that never leaves the machine), with a
+//! short-lived authorization code. This is how Microsoft wants desktop programs to sign in;
+//! its page for programs that ask the user to copy the code instead removes the code from
+//! the address, so that nobody can be talked into copying it. Kanso exchanges the code for a
+//! session ([`XboxApi::exchange_code`]). The session's refresh token is what is kept between
+//! runs, protected by Windows for the current user (see [`crate::accounts`]). It is sent to
 //! Microsoft's sign-in service only, to renew the session.
+//!
+//! Two things keep the way back honest ([`SignInAttempt`]): a random mark Microsoft has to
+//! hand back, so that Kanso only listens to the answer to the sign-in it started, and a
+//! secret that never leaves Kanso and that Microsoft checks before turning the code into a
+//! session (PKCE), so that a code read by another program on the PC is useless to it.
 //!
 //! With a session, Xbox Live is asked two things: who signed in (the gamertag, to show it)
 //! and the account's title history. Everything goes to Microsoft's own services and nowhere
@@ -26,6 +34,8 @@ use crate::cleaner::clean_game_title;
 use crate::deals::parse_iso8601_ms;
 use crate::models::GamePlatform;
 use crate::owned::OwnedGame;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use serde_json::{json, Value};
 use std::time::Duration;
 
@@ -33,9 +43,14 @@ use std::time::Duration;
 /// client for personal Microsoft accounts: no secret exists). A fork that registers its own
 /// application only has to change this constant.
 pub const CLIENT_ID: &str = "2b0d074d-ab89-4874-9ea9-43e9d2f51994";
-/// Where Microsoft sends the browser after a sign-in, with the code in the address: its own
-/// blank page for desktop programs.
-const REDIRECT_URI: &str = "https://login.live.com/oauth20_desktop.srf";
+/// The port Kanso listens on, on this PC only, while a sign-in is under way: where Microsoft
+/// sends the browser back. It is part of the address registered with Microsoft for
+/// [`CLIENT_ID`], so it cannot change without changing the registration.
+pub const CALLBACK_PORT: u16 = 42813;
+const CALLBACK_PATH: &str = "/xbox";
+/// Where Microsoft sends the browser after a sign-in, with the code in the address: Kanso
+/// itself, on this PC.
+const REDIRECT_URI: &str = "http://localhost:42813/xbox";
 /// Signing in to Xbox Live, and staying signed in: nothing else of the Microsoft account.
 const SCOPE: &str = "Xboxlive.signin Xboxlive.offline_access";
 
@@ -47,13 +62,96 @@ const TITLE_SERVICE: &str = "https://titlehub.xboxlive.com";
 /// How an address of the Microsoft Store that opens a game's page begins.
 pub const STORE_PAGE_PREFIX: &str = "ms-windows-store://pdp/?PFN=";
 
-/// Where the user signs in: Microsoft's own page, which ends on an address carrying the code.
-pub fn sign_in_url() -> String {
-    format!(
-        "{SIGN_IN_SERVICE}/oauth20_authorize.srf?client_id={CLIENT_ID}&response_type=code&approval_prompt=auto&scope={}&redirect_uri={}",
-        percent_encode(SCOPE),
-        percent_encode(REDIRECT_URI)
-    )
+/// One sign-in the user started: what Microsoft has to hand back, and what it has to be
+/// shown, for the answer to count.
+#[derive(Clone)]
+pub struct SignInAttempt {
+    /// Sent along and expected back unchanged: an answer without it is not to this attempt.
+    state: String,
+    /// Never sent until the code is exchanged; Microsoft only gets its fingerprint first.
+    verifier: String,
+}
+
+impl std::fmt::Debug for SignInAttempt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignInAttempt").finish_non_exhaustive()
+    }
+}
+
+impl SignInAttempt {
+    /// A new attempt, with marks nobody can guess. `None` only if the system gives no
+    /// random numbers.
+    pub fn new() -> Option<Self> {
+        let random = |length: usize| {
+            let mut bytes = vec![0u8; length];
+            ring::rand::SecureRandom::fill(&ring::rand::SystemRandom::new(), &mut bytes).ok()?;
+            Some(URL_SAFE_NO_PAD.encode(bytes))
+        };
+        Some(Self { state: random(18)?, verifier: random(48)? })
+    }
+
+    /// Where the user signs in: Microsoft's own page. The page is asked to let the user
+    /// choose the account each time: a browser already signed in to one Microsoft account
+    /// would otherwise go on with it without asking, and the account with the games is
+    /// often another one.
+    pub fn sign_in_url(&self) -> String {
+        let challenge = URL_SAFE_NO_PAD.encode(ring::digest::digest(&ring::digest::SHA256, self.verifier.as_bytes()));
+        format!(
+            "{SIGN_IN_SERVICE}/oauth20_authorize.srf?client_id={CLIENT_ID}&response_type=code&prompt=select_account&scope={}&redirect_uri={}&state={}&code_challenge={challenge}&code_challenge_method=S256",
+            percent_encode(SCOPE),
+            percent_encode(REDIRECT_URI),
+            self.state
+        )
+    }
+
+    /// What a request received on [`CALLBACK_PORT`] means for this attempt. `request_line`
+    /// is the first line of the request (`GET /xbox?code=...&state=... HTTP/1.1`).
+    pub fn read_callback(&self, request_line: &str) -> Callback {
+        let mut parts = request_line.split_whitespace();
+        let (Some("GET"), Some(target)) = (parts.next(), parts.next()) else {
+            return Callback::NotOurs;
+        };
+        let Some(query) = target.strip_prefix(CALLBACK_PATH).and_then(|rest| rest.strip_prefix('?')) else {
+            return Callback::NotOurs;
+        };
+        let field = |name: &str| {
+            query
+                .split('&')
+                .filter_map(|pair| pair.split_once('='))
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| percent_decode(value))
+        };
+        // Anything on this PC can ask this address for a page: only the answer that carries
+        // the mark of this attempt is Microsoft's answer to it
+        if field("state").as_deref() != Some(self.state.as_str()) {
+            return Callback::NotOurs;
+        }
+        if let Some(error) = field("error") {
+            let plain: String = error.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(60).collect();
+            return Callback::Refused(plain);
+        }
+        match field("code") {
+            Some(code)
+                if (8..=2048).contains(&code.len())
+                    && code.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'!' | b'*' | b'$')) =>
+            {
+                Callback::Code(code)
+            }
+            _ => Callback::NotOurs,
+        }
+    }
+}
+
+/// What a request on the callback port turned out to be.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Callback {
+    /// Microsoft's answer to this attempt: the authorization code.
+    Code(String),
+    /// Microsoft's answer to this attempt: no (the user declined, or Microsoft refused), with
+    /// its own short name for why.
+    Refused(String),
+    /// Something else: not answered to, not acted upon.
+    NotOurs,
 }
 
 /// A signed-in Microsoft session.
@@ -124,9 +222,10 @@ impl XboxApi {
         }
     }
 
-    /// Turns the authorization code of Microsoft's sign-in into a session.
-    pub fn exchange_code(&self, code: &str) -> Result<XboxSession, StoreError> {
-        self.token(&[("grant_type", "authorization_code"), ("code", code)])
+    /// Turns the authorization code of Microsoft's sign-in into a session, showing Microsoft
+    /// the secret of the attempt the code answers.
+    pub fn exchange_code(&self, code: &str, attempt: &SignInAttempt) -> Result<XboxSession, StoreError> {
+        self.token(&[("grant_type", "authorization_code"), ("code", code), ("code_verifier", &attempt.verifier)])
     }
 
     /// Renews a session from its refresh token.
@@ -311,6 +410,30 @@ fn read(response: Result<ureq::Response, ureq::Error>, what: &str) -> Result<Val
     }
 }
 
+/// Text with the `%XX` escapes of an address turned back into the characters they stand for.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut position = 0;
+    while position < bytes.len() {
+        let escaped = (bytes[position] == b'%')
+            .then(|| text.get(position + 1..position + 3))
+            .flatten()
+            .and_then(|hex| u8::from_str_radix(hex, 16).ok());
+        match escaped {
+            Some(byte) => {
+                out.push(byte);
+                position += 3;
+            }
+            None => {
+                out.push(bytes[position]);
+                position += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 fn percent_encode(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for byte in input.bytes() {
@@ -334,9 +457,11 @@ pub(crate) mod tests {
             let form = |name: &str, value: &str| request.body.split('&').any(|pair| pair == format!("{name}={value}"));
             let ours = form("client_id", CLIENT_ID)
                 && form("scope", "Xboxlive.signin+Xboxlive.offline_access")
-                && form("redirect_uri", "https%3A%2F%2Flogin.live.com%2Foauth20_desktop.srf");
+                && form("redirect_uri", "http%3A%2F%2Flocalhost%3A42813%2Fxbox");
+            // The secret of the attempt: forty-eight random bytes, as sixty-four characters
+            let verified = request.body.split('&').any(|pair| pair.strip_prefix("code_verifier=").is_some_and(|secret| secret.len() == 64));
             match (request.method.as_str(), request.path.as_str()) {
-                ("POST", "/oauth20_token.srf") if ours && form("grant_type", "authorization_code") && form("code", "M.C507_BAY.2.U.code-1") => (
+                ("POST", "/oauth20_token.srf") if ours && verified && form("grant_type", "authorization_code") && form("code", "M.C507_BAY.2.U.code-1") => (
                     200,
                     r#"{"token_type":"bearer","expires_in":3600,"scope":"XboxLive.signin XboxLive.offline_access","access_token":"access-1","refresh_token":"refresh-1","user_id":"abc"}"#.to_string(),
                 ),
@@ -396,14 +521,59 @@ pub(crate) mod tests {
 
     #[test]
     fn the_sign_in_address_is_microsofts_own_and_asks_for_xbox_live_only() {
-        let url = sign_in_url();
+        let attempt = SignInAttempt::new().expect("random numbers");
+        let url = attempt.sign_in_url();
         assert!(url.starts_with("https://login.live.com/oauth20_authorize.srf?"));
         assert!(url.contains("response_type=code"));
+        assert!(url.contains("prompt=select_account"), "the user chooses which account, each time");
         assert!(url.contains("scope=Xboxlive.signin%20Xboxlive.offline_access"));
-        assert!(url.contains("redirect_uri=https%3A%2F%2Flogin.live.com%2Foauth20_desktop.srf"));
-        // What the user pastes back: the address Microsoft's blank page ends on
-        let pasted = "https://login.live.com/oauth20_desktop.srf?code=M.C507_BAY.2.U.code-1&lc=1040";
-        assert_eq!(crate::accounts::authorization_code_in(pasted).as_deref(), Some("M.C507_BAY.2.U.code-1"));
+        assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A42813%2Fxbox"), "back to this PC, nowhere else");
+        assert_eq!(REDIRECT_URI, format!("http://localhost:{CALLBACK_PORT}{CALLBACK_PATH}"));
+        assert!(url.contains(&format!("state={}", attempt.state)));
+        assert!(url.contains("code_challenge_method=S256"));
+        assert!(!url.contains(&attempt.verifier), "the secret stays in Kanso until the code is exchanged");
+        assert_eq!(format!("{attempt:?}"), "SignInAttempt { .. }");
+
+        // Each attempt has its own marks
+        let other = SignInAttempt::new().unwrap();
+        assert_ne!(attempt.state, other.state);
+        assert_ne!(attempt.verifier, other.verifier);
+    }
+
+    #[test]
+    fn only_microsofts_answer_to_this_attempt_is_listened_to() {
+        let attempt = SignInAttempt { state: "mark-1".into(), verifier: "v".repeat(64) };
+        let line = |target: &str| format!("GET {target} HTTP/1.1");
+
+        assert_eq!(
+            attempt.read_callback(&line("/xbox?code=M.C507_BAY.2.U.code-1&state=mark-1")),
+            Callback::Code("M.C507_BAY.2.U.code-1".into())
+        );
+        assert_eq!(
+            attempt.read_callback(&line("/xbox?state=mark-1&code=M.C507%21abc%2Adef")),
+            Callback::Code("M.C507!abc*def".into()),
+            "escapes of the address are undone"
+        );
+        assert_eq!(
+            attempt.read_callback(&line("/xbox?error=access_denied&error_description=The%20user%20has%20denied%20access&state=mark-1")),
+            Callback::Refused("access_denied".into())
+        );
+
+        // Another attempt's answer, no mark, another page, another kind of request, junk
+        for other in [
+            "/xbox?code=M.C507_BAY.2.U.code-1&state=mark-2",
+            "/xbox?code=M.C507_BAY.2.U.code-1",
+            "/xbox?error=access_denied",
+            "/favicon.ico",
+            "/?code=M.C507_BAY.2.U.code-1&state=mark-1",
+            "/xbox?state=mark-1",
+            "/xbox?state=mark-1&code=short",
+            "/xbox?state=mark-1&code=with%20spaces%20inside",
+        ] {
+            assert_eq!(attempt.read_callback(&line(other)), Callback::NotOurs, "{other}");
+        }
+        assert_eq!(attempt.read_callback("POST /xbox?code=M.C507_BAY.2.U.code-1&state=mark-1 HTTP/1.1"), Callback::NotOurs);
+        assert_eq!(attempt.read_callback(""), Callback::NotOurs);
     }
 
     #[test]
@@ -411,7 +581,8 @@ pub(crate) mod tests {
         let base_url = spawn_mock_xbox();
         let api = api(&base_url);
 
-        let session = api.exchange_code("M.C507_BAY.2.U.code-1").expect("signed in");
+        let attempt = SignInAttempt::new().unwrap();
+        let session = api.exchange_code("M.C507_BAY.2.U.code-1", &attempt).expect("signed in");
         assert_eq!(session.refresh_token, "refresh-1");
         assert_eq!(format!("{session:?}"), "XboxSession { .. }", "tokens are never printed");
 
@@ -446,7 +617,8 @@ pub(crate) mod tests {
         let base_url = spawn_mock_xbox();
         let api = api(&base_url);
 
-        assert_eq!(api.exchange_code("wrong-code"), Err(StoreError::Refused("sign-in: invalid_grant".into())));
+        let attempt = SignInAttempt::new().unwrap();
+        assert_eq!(api.exchange_code("wrong-code", &attempt), Err(StoreError::Refused("sign-in: invalid_grant".into())));
         assert_eq!(api.refresh("spent"), Err(StoreError::Refused("sign-in: invalid_grant".into())));
 
         // A Microsoft account with no Xbox profile: Xbox Live says so with its own number
@@ -459,7 +631,7 @@ pub(crate) mod tests {
         assert_eq!(api.library(&stale), Err(StoreError::Refused("library: HTTP 401".into())));
 
         let dead = XboxApi::with_services("http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9");
-        assert_eq!(dead.exchange_code("M.C507_BAY.2.U.code-1"), Err(StoreError::Unreachable));
+        assert_eq!(dead.exchange_code("M.C507_BAY.2.U.code-1", &attempt), Err(StoreError::Unreachable));
     }
 
     #[test]

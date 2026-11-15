@@ -1,6 +1,7 @@
 mod accounts;
 mod playtime;
 mod plugins;
+mod browser_signin;
 mod gamepass;
 mod signin_window;
 
@@ -962,6 +963,8 @@ pub fn run() {
             accounts::open_store_sign_in,
             accounts::store_sign_in,
             accounts::store_sign_in_window,
+            accounts::store_sign_in_browser,
+            accounts::cancel_store_sign_in_browser,
             accounts::store_sign_out
         ])
         .run(tauri::generate_context!())

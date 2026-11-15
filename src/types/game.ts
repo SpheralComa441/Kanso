@@ -361,7 +361,7 @@ export interface StoreAccountInfo {
    * store's own page shown in a window of Kanso ("window"). Either way the password is typed
    * on the store's page and never reaches Kanso.
    */
-  method: "code" | "window";
+  method: "code" | "window" | "browser";
   /** Someone signed in (even if the session has since been refused). */
   connected: boolean;
   displayName: string | null;

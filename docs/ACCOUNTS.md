@@ -36,7 +36,7 @@ Tutti i file stanno nella cartella dati di Kanso, `%LOCALAPPDATA%\com.kanso.laun
 | **Ubisoft Connect** | In una finestra di Kanso che mostra la pagina di Ubisoft | I ticket di sessione rilasciati da Ubisoft | `accounts.json`, cifrato | Solo a Ubisoft (`public-ubiservices.ubi.com` per la sessione e l'elenco dei giochi; `api-uplayplusvault.ubi.com` per i giochi dell'abbonamento Ubisoft+) |
 | **EA app** | In una finestra di Kanso che mostra la pagina di EA | I cookie del sito di EA | `signin\ea\` (profilo del browser di quella finestra) | Solo a EA: i cookie li usa la finestra con `accounts.ea.com`; il token temporaneo che EA rilascia va a `service-aggregation-layer.juno.ea.com` e non viene salvato |
 | **Battle.net** | In una finestra di Kanso che mostra la pagina di Battle.net | I cookie del sito di Battle.net | `signin\battlenet\` (profilo del browser di quella finestra) | Solo a Blizzard: l'elenco dei giochi viene letto nella finestra stessa, da `account.battle.net` |
-| **Xbox** | Nel tuo browser, sulla pagina di Microsoft; alla fine incolli l'indirizzo della pagina | Il token di rinnovo della sessione Microsoft | `accounts.json`, cifrato | Solo a Microsoft (`login.live.com` per la sessione; `user.auth.xboxlive.com` e `xsts.auth.xboxlive.com` per entrare in Xbox Live; `titlehub.xboxlive.com` per l'elenco dei giochi) |
+| **Xbox** | Nel tuo browser, sulla pagina di Microsoft; alla fine Microsoft rimanda il browser a Kanso, su questo PC | Il token di rinnovo della sessione Microsoft | `accounts.json`, cifrato | Solo a Microsoft (`login.live.com` per la sessione; `user.auth.xboxlive.com` e `xsts.auth.xboxlive.com` per entrare in Xbox Live; `titlehub.xboxlive.com` per l'elenco dei giochi) |
 
 - **Cifrato** significa protetto con la *Data Protection API* di Windows per il tuo utente: il
   file non serve a nulla su un altro PC o a un altro utente dello stesso PC
@@ -54,6 +54,18 @@ Tutti i file stanno nella cartella dati di Kanso, `%LOCALAPPDATA%\com.kanso.laun
   almeno una volta* su un PC. Un gioco comprato e mai avviato non c'è, e Microsoft non dà a un
   programma esterno l'elenco degli acquisti. Nemmeno dice in modo affidabile se l'account ha
   Game Pass: per questo il catalogo Game Pass è un'opzione a parte (vedi sotto).
+- **Xbox, come torna la risposta.** Microsoft non vuole che il codice di accesso venga copiato a
+  mano (la sua pagina lo cancella dall'indirizzo, per proteggere dalle truffe). Il modo che
+  prevede per i programmi desktop è un altro: finito l'accesso, rimanda il browser
+  all'indirizzo `http://localhost:42813/xbox`, cioè a Kanso **su questo stesso PC**. Per
+  questo, e solo mentre un accesso è in corso (al più dieci minuti), Kanso ascolta su quella
+  porta. L'ascolto è legato agli indirizzi locali del computer: **nessun altro dispositivo
+  può raggiungerlo**, nemmeno nella tua rete di casa. Risponde a una sola richiesta, quella che
+  porta il contrassegno casuale dell'accesso in corso; a tutto il resto risponde «non trovato».
+  Non serve file e non esegue nulla, e viene chiuso appena arriva la risposta, annulli o scade
+  il tempo. Il codice ricevuto vale pochi minuti e serve solo insieme a un segreto che non
+  esce da Kanso (PKCE): letto da un altro programma, è inutile
+  ([`browser_signin.rs`](../src-tauri/src/browser_signin.rs)).
 
 **Che cosa viene letto dall'account.** Solo l'elenco dei giochi: titolo, identificativo, e la
 copertina dove lo store la dà. Per Ubisoft anche le piattaforme su cui possiedi ogni gioco: un
@@ -211,7 +223,8 @@ tenta altre strade.
 | Il contratto della finestra e i due script | [`kanso-core/src/signin.rs`](../src-tauri/crates/kanso-core/src/signin.rs) |
 | La finestra: profilo separato, solo `https`, nessun download | [`src-tauri/src/signin_window.rs`](../src-tauri/src/signin_window.rs) |
 | I passi di ogni store, e i test che li percorrono | `ubisoft_account.rs`, `ea_account.rs`, `battlenet_account.rs` in [`kanso-core/src/`](../src-tauri/crates/kanso-core/src/) |
-| Accesso con codice (Epic, GOG, Xbox) | `epic_account.rs`, `gog_account.rs`, `xbox_account.rs` |
+| Accesso con codice (Epic, GOG) | `epic_account.rs`, `gog_account.rs` |
+| Accesso a Xbox: richieste a Microsoft e ritorno su questo PC | `xbox_account.rs`, [`browser_signin.rs`](../src-tauri/src/browser_signin.rs) |
 | Catalogo Game Pass (pubblico, senza account) | [`gamepass.rs`](../src-tauri/crates/kanso-core/src/gamepass.rs) |
 | Che cosa finisce in `accounts.json` e come | [`accounts.rs`](../src-tauri/crates/kanso-core/src/accounts.rs), [`secrets.rs`](../src-tauri/crates/kanso-core/src/secrets.rs) |
 | I comandi dell'app (accedi, esci, aggiorna) | [`src-tauri/src/accounts.rs`](../src-tauri/src/accounts.rs) |
@@ -249,7 +262,7 @@ All files are in Kanso's data folder, `%LOCALAPPDATA%\com.kanso.launcher`.
 | **Ubisoft Connect** | In a window of Kanso showing Ubisoft's page | The session tickets Ubisoft issued | `accounts.json`, encrypted | Ubisoft only (`public-ubiservices.ubi.com` for the session and the list of games; `api-uplayplusvault.ubi.com` for the games of the Ubisoft+ subscription) |
 | **EA app** | In a window of Kanso showing EA's page | The cookies of EA's site | `signin\ea\` (that window's browser profile) | EA only: the window uses the cookies with `accounts.ea.com`; the short-lived token EA issues goes to `service-aggregation-layer.juno.ea.com` and is never saved |
 | **Battle.net** | In a window of Kanso showing Battle.net's page | The cookies of Battle.net's site | `signin\battlenet\` (that window's browser profile) | Blizzard only: the list of games is read in the window itself, from `account.battle.net` |
-| **Xbox** | In your browser, on Microsoft's page; at the end you paste the page's address | The refresh token of the Microsoft session | `accounts.json`, encrypted | Microsoft only (`login.live.com` for the session; `user.auth.xboxlive.com` and `xsts.auth.xboxlive.com` to sign in to Xbox Live; `titlehub.xboxlive.com` for the list of games) |
+| **Xbox** | In your browser, on Microsoft's page; at the end Microsoft sends the browser back to Kanso, on this PC | The refresh token of the Microsoft session | `accounts.json`, encrypted | Microsoft only (`login.live.com` for the session; `user.auth.xboxlive.com` and `xsts.auth.xboxlive.com` to sign in to Xbox Live; `titlehub.xboxlive.com` for the list of games) |
 
 - **Encrypted** means protected with the Windows *Data Protection API* for your user: the file
   is useless on another PC or to another user of the same PC (`secrets.rs`).
@@ -265,6 +278,18 @@ All files are in Kanso's data folder, `%LOCALAPPDATA%\com.kanso.launcher`.
   PC. A game bought and never started is not in it, and Microsoft gives an outside program no
   list of purchases. Nor does it say reliably whether the account has Game Pass: that is why
   the Game Pass catalog is a separate option (see below).
+- **Xbox, how the answer comes back.** Microsoft does not want the sign-in code copied by hand
+  (its page removes it from the address, as a protection against scams). The way it provides
+  for desktop programs is another: once you have signed in, it sends the browser to
+  `http://localhost:42813/xbox`, that is to Kanso **on this very PC**. For that, and only while
+  a sign-in is under way (ten minutes at most), Kanso listens on that port. The listener is
+  bound to the computer's local addresses: **no other device can reach it**, not even on your
+  home network. It answers a single request, the one carrying the random mark of the sign-in
+  in progress; everything else gets "not found". It serves no file and runs nothing, and it is
+  closed as soon as the answer arrives, you cancel or the time is up. The code received is
+  good for a few minutes and only together with a secret that never leaves Kanso (PKCE): read
+  by another program, it is useless
+  ([`browser_signin.rs`](../src-tauri/src/browser_signin.rs)).
 
 **What is read from the account.** Only the list of games: title, identifier, and the cover
 where the store gives one. For Ubisoft also the platforms you have each game on: a game joins
