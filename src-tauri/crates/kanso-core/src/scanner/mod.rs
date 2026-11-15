@@ -6,6 +6,7 @@ pub mod gog;
 pub mod registry;
 pub mod standalone;
 pub mod steam;
+pub mod steam_packages;
 pub mod ubisoft;
 pub mod xbox;
 

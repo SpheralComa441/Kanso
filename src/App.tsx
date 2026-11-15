@@ -24,6 +24,7 @@ import {
   type MessageKey,
 } from "./i18n";
 import {
+  completeGameDetails,
   getSettings,
   installGame,
   isRunningInTauri,
@@ -582,6 +583,28 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     () => games.find((g) => g.id === editingGameId) ?? null,
     [games, editingGameId]
   );
+
+  // A game that is not on disk arrives with name and cover only: the rest is looked up the
+  // first time its sheet is opened (once per session, whether or not anything is found)
+  const completedIds = useRef(new Set<string>());
+  useEffect(() => {
+    const game = detailGame;
+    if (
+      !game ||
+      game.isInstalled ||
+      game.shortDescription ||
+      game.genres.length > 0 ||
+      completedIds.current.has(game.id)
+    ) {
+      return;
+    }
+    completedIds.current.add(game.id);
+    completeGameDetails(game)
+      .then(upsertSingleGameInState)
+      .catch(() => {
+        // The sheet simply stays as it is; opening it in a later session tries again
+      });
+  }, [detailGame, upsertSingleGameInState]);
 
   const hasApiKey = config.steamgriddbApiKey.trim().length > 0;
   const filterCount = activeFilterCount(filters);

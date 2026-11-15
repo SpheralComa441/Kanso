@@ -9,6 +9,9 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+/// How long a Steam app the store did not list is left alone before it is asked about again.
+pub const UNLISTED_RECHECK_MS: u64 = 30 * 24 * 60 * 60 * 1000;
+
 /// File name of the library database inside the app's local data folder.
 pub const LIBRARY_DB_FILE: &str = "library.db";
 /// Library file written by Kanso before the SQLite store existed.
@@ -397,16 +400,18 @@ impl LibraryDb {
         self.get_game(game_id)
     }
 
-    /// Steam appids already looked up and found not to be games (DLC, tools, soundtracks,
-    /// apps the store no longer lists).
-    pub fn known_steam_non_games(&self) -> Result<HashSet<u64>, String> {
+    /// Steam appids already looked up and found not to be games: DLC, tools and soundtracks
+    /// for good, apps the store did not list for [`UNLISTED_RECHECK_MS`] (a listing can
+    /// come back).
+    pub fn known_steam_non_games(&self, now_ms: u64) -> Result<HashSet<u64>, String> {
         let db_err = |e: rusqlite::Error| format!("{}: {e}", T::LibraryDbError.s());
         let mut stmt = self
             .conn
-            .prepare("SELECT appid FROM steam_apps")
+            .prepare("SELECT appid FROM steam_apps WHERE kind <> 'unlisted' OR checked_at > ?1")
             .map_err(db_err)?;
+        let recheck_before = to_db_int(now_ms.saturating_sub(UNLISTED_RECHECK_MS));
         let appids = stmt
-            .query_map([], |row| row.get::<_, i64>(0))
+            .query_map([recheck_before], |row| row.get::<_, i64>(0))
             .map_err(db_err)?
             .filter_map(|appid| appid.ok().and_then(|id| u64::try_from(id).ok()))
             .collect();
@@ -879,7 +884,7 @@ mod tests {
         let alan = games.iter().find(|g| g.id == "epic:x").unwrap();
         assert_eq!(alan.metadata_attempted_at, 0, "other stores get their Steam page looked up at once");
         assert!(games.iter().all(|g| g.is_installed), "what was in the library was on disk");
-        assert!(db.known_steam_non_games().unwrap().is_empty());
+        assert!(db.known_steam_non_games(0).unwrap().is_empty());
         assert!(db.load_play_sessions(0).unwrap().is_empty());
     }
 

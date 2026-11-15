@@ -72,7 +72,9 @@ const NON_GAME_APP_TYPES: &[&str] = &[
 /// genres, the official name behind a provisional title, the store type of a Steam app, its
 /// community tags, or texts cached in a language other than `lang`. Hidden games are left alone.
 pub fn needs_metadata(game: &DetectedGame, has_api_key: bool, lang: Lang) -> bool {
-    if game.is_hidden {
+    // A game that is not on disk is completed when its sheet is opened: a library can hold
+    // hundreds of them, and looking each one up unasked would be a download nobody wanted
+    if game.is_hidden || !game.is_installed {
         return false;
     }
     let missing_cover = cover_is_missing(game) && (has_api_key || steam_appid_of(game).is_some());
@@ -142,13 +144,16 @@ const STEAM_SUMMARY_BATCH: usize = 50;
 /// `type` of a game in the store service's answers (4 is DLC, 11 a soundtrack, ...).
 const STEAM_STORE_TYPE_GAME: u64 = 0;
 
-/// What the store says about a Steam app: enough to decide whether to list it.
+/// What the store says about a Steam app: enough to decide whether to list it, and to show it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SteamAppSummary {
     pub appid: u64,
     /// `None` when the store does not list the app (delisted, a tool, region-locked).
     pub name: Option<String>,
     pub is_game: bool,
+    /// Address of the vertical library cover on Steam's CDN (the landscape header when the
+    /// game has no vertical art).
+    pub cover_url: Option<String>,
 }
 
 /// Outcome of matching a detected game against SteamGridDB.
@@ -537,7 +542,7 @@ impl MetadataClient {
             let input = serde_json::json!({
                 "ids": batch.iter().map(|appid| serde_json::json!({ "appid": appid })).collect::<Vec<_>>(),
                 "context": { "language": self.lang.steam_language(), "country_code": "US" },
-                "data_request": {},
+                "data_request": { "include_assets": true },
             });
             let url = format!(
                 "{}/IStoreBrowseService/GetItems/v1/?input_json={}",
@@ -567,10 +572,27 @@ impl MetadataClient {
                         .and_then(|item| item.get("type"))
                         .and_then(Value::as_u64)
                         == Some(STEAM_STORE_TYPE_GAME),
+                    cover_url: listed.and_then(|item| self.steam_cover_url(item)),
                 });
             }
         }
         Some(summaries)
+    }
+
+    /// The cover in a store item's `assets`: the vertical capsule, else the header.
+    fn steam_cover_url(&self, item: &Value) -> Option<String> {
+        let assets = item.get("assets")?;
+        let url_format = assets.get("asset_url_format")?.as_str()?;
+        ["library_capsule", "header"].into_iter().find_map(|key| {
+            let file = assets.get(key)?.as_str()?.trim();
+            (!file.is_empty()).then(|| {
+                format!(
+                    "{}/{}",
+                    self.steam_assets_base_url,
+                    url_format.replace("${FILENAME}", file)
+                )
+            })
+        })
     }
 
     fn fetch_steam_store_item(&self, appid: u64, data_request: Value) -> Result<Option<Value>, ()> {
@@ -1353,7 +1375,7 @@ pub(crate) mod tests {
                             r#"{"1321440":{"success":true,"data":{"type":"game","name":"Cassette Beasts","short_description":"Colleziona mostri e trasformati in loro.","genres":[{"id":"23","description":"Indie"},{"id":"3","description":"GDR"}]}}}"#.as_bytes().to_vec(),
                         )
                     } else if path.starts_with("/IStoreBrowseService/GetItems/v1/")
-                        && path.contains("%22data_request%22%3A%7B%7D")
+                        && path.contains("%7D%2C%7B%22appid%22")
                     {
                         // Several apps at once, as the real service answers: a game, a DLC,
                         // an app it does not list, another game
@@ -1361,10 +1383,13 @@ pub(crate) mod tests {
                             "200 OK",
                             "application/json",
                             br#"{"response":{"store_items":[
-                                {"item_type":0,"id":620,"success":1,"visible":true,"name":"Portal 2","appid":620,"type":0},
+                                {"item_type":0,"id":620,"success":1,"visible":true,"name":"Portal 2","appid":620,"type":0,
+                                 "assets":{"asset_url_format":"steam/apps/620/${FILENAME}?t=1790187113","header":"header.jpg","library_capsule":"library_600x900.jpg"}},
                                 {"item_type":0,"id":1880832,"success":1,"visible":true,"name":"Hogwarts Legacy: Dark Arts Pack","appid":1880832,"type":4},
                                 {"item_type":0,"id":228980,"success":15,"visible":false,"name":"","appid":0},
-                                {"item_type":0,"id":220,"success":1,"visible":true,"name":"Half-Life\u00ae 2","appid":220,"type":0}
+                                {"item_type":0,"id":220,"success":1,"visible":true,"name":"Half-Life\u00ae 2","appid":220,"type":0,
+                                 "assets":{"asset_url_format":"steam/apps/220/${FILENAME}?t=1","header":"header.jpg"}},
+                                {"item_type":0,"id":105600,"success":1,"visible":true,"name":"Terraria","appid":105600,"type":0}
                             ]}}"#.to_vec(),
                         )
                     } else if path.starts_with("/IStoreBrowseService/GetItems/v1/") && path.contains("3883570") {

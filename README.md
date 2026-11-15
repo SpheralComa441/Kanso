@@ -12,7 +12,7 @@ Minimalist, fast Windows game launcher built with **Tauri v2**, **React**, **Typ
   - **Window chrome**: no system title bar — the top bar drags the window and carries its own minimize / maximize / close buttons; no divider lines, auto-hiding scrollbars
   - **Tags, playtime, accessibility**: Steam community tags (Souls-like, Party Game, Co-op...) as filters; Steam playtime and last session read from the client's local files, no sign-in; accessibility settings (text size, high contrast, reduced motion, legible fonts) that apply on top of any theme
   - **Status, statistics, achievements**: each game can be marked backlog / playing / finished / abandoned; a statistics page (hours, weekly activity, most played, platforms, genres); Steam achievements read from the client's local cache, no sign-in
-  - **Not installed games**: uninstalled games stay in the library with their status and hours, Steam games already played but not on disk are added from the client's local records, and an *Install* button hands them to the store's client
+  - **Not installed games**: uninstalled games stay in the library with their status and hours, the whole Steam library is added from the client's local records (owned packages and play history, no sign-in), and an *Install* button hands a game to its store's client
   - **Plugins**: community plugins (`plugin.json` + `main.js`) add sections to a game's sheet, labels to the cards and commands to a menu; six official ones ship in [`plugins/`](plugins/) — see [`docs/PLUGINS.md`](docs/PLUGINS.md)
   - Collapsible sidebar with combinable quick filters: favorites, recently played, hidden, platform, and genres generated from metadata
 - **`src-tauri/crates/kanso-core/`** — Pure Rust core library (no GUI dependencies, unit-tested on any OS):
@@ -20,6 +20,7 @@ Minimalist, fast Windows game launcher built with **Tauri v2**, **React**, **Typ
   - Steam manifests where Steam left an `appid_<id>` placeholder instead of the game name: the title falls back to the install folder and is replaced by the official store name during metadata sync
   - SteamGridDB v2 (`GET /games/steam/{appid}` exact match + `/search/autocomplete` fallback & manual search) & Steam Store API metadata client, in the interface language. Steam games fall back to Steam's own artwork (`IStoreBrowseService/GetItems`), so they get covers even without a SteamGridDB key.
   - Deals client for the public Steam, Epic and GOG endpoints, and the theme file validator. Incomplete games are retried at most once a day unless the user asks; Steam soundtracks/DLC are hidden automatically.
+  - Steam library without sign-in: binary `appcache/packageinfo.vdf` reader (`scanner/steam_packages.rs`) and batched store lookups that tell games from DLC and tools (`owned.rs`)
   - Play time measured for non-Steam games by matching running processes to install folders (`playtime.rs`), play sessions for every store, Steam achievements parser (`achievements.rs`)
   - Plugin engine (`plugins/`): manifest validation, an embedded QuickJS sandbox with memory/time/request limits, an `https`-only request gate restricted to the hosts a plugin declares, validated declarative output, per-game caching. Every official plugin is run in the real sandbox by the tests
   - Title cleaner (`GOTY`, `Definitive Edition`, `Remastered`, `Director's Cut`, `™`/`®`)

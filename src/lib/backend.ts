@@ -339,6 +339,17 @@ export async function launchGame(game: DetectedGame): Promise<void> {
   );
 }
 
+/**
+ * Looks up what a single game still lacks (description, genres, tags, a local cover). Games
+ * that are not on disk are left out of the automatic sync and completed through this.
+ */
+export async function completeGameDetails(game: DetectedGame): Promise<DetectedGame> {
+  if (isTauri()) {
+    return invoke<DetectedGame>("complete_game_details", { gameId: game.id });
+  }
+  return game;
+}
+
 /** Asks the game's store client to install a game that is not on disk. */
 export async function installGame(game: DetectedGame): Promise<void> {
   if (isTauri()) {

@@ -184,15 +184,6 @@ async fn sync_library_metadata(
         let client = MetadataClient::new().with_language(lang);
         let api_key = has_api_key.then_some(config.steamgriddb_api_key.as_str());
 
-        // Steam games the account has played but that are not on disk join the library (as
-        // "not installed") before the lookups below, which then find their covers too
-        if let Some(steam_root) = kanso_core::scanner::steam::detect_steam_root() {
-            let play_stats = kanso_core::scanner::steam::read_steam_play_stats(&steam_root);
-            for game in kanso_core::owned::sync_steam_played_games(&db, &client, &play_stats, now) {
-                let _ = app_handle.emit(GAME_UPDATED_EVENT, game);
-            }
-        }
-
         let candidates: Vec<DetectedGame> = lock_db(&db)
             .load_games()?
             .into_iter()
@@ -222,10 +213,66 @@ async fn sync_library_metadata(
             }
         }
 
+        // Steam games the account owns or has played but that are not on disk join the
+        // library as "not installed", from the Steam client's own records. They come with
+        // name and cover; the report below carries them to the interface in one go.
+        if let Some(steam_root) = kanso_core::scanner::steam::detect_steam_root() {
+            let play_stats = kanso_core::scanner::steam::read_steam_play_stats(&steam_root);
+            let owned_apps = kanso_core::scanner::steam_packages::read_owned_steam_apps(&steam_root);
+            kanso_core::owned::sync_steam_library(&db, &client, &play_stats, &owned_apps, now);
+        }
+
         let final_store = LibraryStore::load(&lock_db(&db))?;
         // The library is settled: plugins that label the game cards can catch up quietly
         plugin_host.wake_background_fill();
         Ok(final_store.to_report())
+    })
+    .await
+    .map_err(|e| format!("{}: {e}", T::SyncFailed.s()))?
+}
+
+/// Looks up whatever a single game still lacks (description, genres, tags, a local copy of
+/// its cover), whatever its state. Games that are not on disk are left out of the automatic
+/// sync and are completed through this when their sheet is opened.
+#[tauri::command]
+async fn complete_game_details(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+) -> Result<DetectedGame, String> {
+    let config_path = resolve_config_path(&app)?;
+    let covers_dir = resolve_covers_dir(&app)?;
+    let config = AppConfig::load_from_file(&config_path)?;
+    let db = Arc::clone(&state.db);
+    let app_handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut game = lock_db(&db)
+            .get_game(&game_id)?
+            .ok_or_else(|| game_not_found(&game_id))?;
+        let client =
+            MetadataClient::new().with_language(config.lang().unwrap_or(FALLBACK_LANGUAGE));
+        let api_key = config
+            .has_api_key()
+            .then_some(config.steamgriddb_api_key.as_str());
+        let outcome = client.enrich_game_automatically(&mut game, api_key, &covers_dir);
+
+        let stored = {
+            let db = lock_db(&db);
+            let mut current = load_single_game_store(&db, &game_id)?;
+            match current.commit_enriched_game(game, outcome.auto_hidden) {
+                Some(updated) => {
+                    db.upsert_game(&updated)?;
+                    updated
+                }
+                // The user edited the game by hand meanwhile: their version stands
+                None => current.games.remove(0),
+            }
+        };
+        if outcome.changed {
+            let _ = app_handle.emit(GAME_UPDATED_EVENT, stored.clone());
+        }
+        Ok(stored)
     })
     .await
     .map_err(|e| format!("{}: {e}", T::SyncFailed.s()))?
@@ -723,6 +770,7 @@ pub fn run() {
             save_settings,
             scan_games,
             sync_library_metadata,
+            complete_game_details,
             search_steamgriddb_games,
             apply_steamgriddb_match,
             update_game_details,
