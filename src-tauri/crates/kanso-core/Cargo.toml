@@ -18,6 +18,8 @@ url = "2.5"
 sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 # QuickJS: the sandbox community plugins run in (no file, network or UI access of their own)
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
+# Reads the game configurations (YAML) inside Ubisoft Connect's local product cache
+yaml-rust2 = { version = "0.13", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"

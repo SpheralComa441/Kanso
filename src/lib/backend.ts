@@ -192,6 +192,30 @@ export async function subscribeToGameUpdates(
   return unlisten;
 }
 
+/** Several games changed at once (a pass that completes the library in the background). */
+export async function subscribeToGameBatchUpdates(
+  onUpdate: (games: DetectedGame[]) => void
+): Promise<() => void> {
+  if (!isTauri()) {
+    return () => {};
+  }
+  return listen<DetectedGame[]>("library:games-updated", (ev) => {
+    onUpdate(ev.payload);
+  });
+}
+
+/**
+ * Looks for the Steam store page of the games of other stores that are not installed, a few
+ * at a time, to file them under its genres and tags. It can take minutes on a large library:
+ * what it completes arrives through {@link subscribeToGameBatchUpdates}, and the promise
+ * settles when it is done or Steam cannot be reached.
+ */
+export async function matchAbsentGames(): Promise<void> {
+  if (isTauri()) {
+    await invoke("match_absent_games");
+  }
+}
+
 export async function searchSteamGridDbGames(
   query: string
 ): Promise<SgdbGameMatch[]> {

@@ -32,6 +32,7 @@ import {
   launchGame,
   listPlugins,
   listThemes,
+  matchAbsentGames,
   pluginBadges,
   runPluginCommand,
   saveSettings,
@@ -40,6 +41,7 @@ import {
   setGameFavorite,
   setGameHidden,
   setGameStatus,
+  subscribeToGameBatchUpdates,
   subscribeToGameUpdates,
   syncLibraryMetadata,
   watchPluginBadges,
@@ -345,6 +347,20 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     });
   }, []);
 
+  /** Games completed in the background, several at a time: one update of the library. */
+  const upsertGamesInState = useCallback((updated: DetectedGame[]) => {
+    if (updated.length === 0) return;
+    setReport((prev) => {
+      const byId = new Map(updated.map((game) => [game.id, game]));
+      const kept = prev.games.map((game) => {
+        const next = byId.get(game.id);
+        byId.delete(game.id);
+        return next ?? game;
+      });
+      return { ...prev, games: sortGamesByTitle([...kept, ...byId.values()]) };
+    });
+  }, []);
+
   const runMetadataSync = useCallback(async (retryNow: boolean) => {
     if (!isRunningInTauri()) return;
     setIsSyncingMetadata(true);
@@ -356,6 +372,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     } finally {
       setIsSyncingMetadata(false);
     }
+    // Games of other stores that are not installed get their genres and tags from the Steam
+    // page of the same title: a slow, quiet pass whose results arrive in batches
+    void matchAbsentGames().catch(() => {});
   }, []);
 
   /**
@@ -386,10 +405,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     if (!settingsLoaded) return;
     let mounted = true;
     let unlistenFn: (() => void) | null = null;
+    let unlistenBatchFn: (() => void) | null = null;
 
     (async () => {
       unlistenFn = await subscribeToGameUpdates((updated) => {
         if (mounted) upsertSingleGameInState(updated);
+      });
+      unlistenBatchFn = await subscribeToGameBatchUpdates((updated) => {
+        if (mounted) upsertGamesInState(updated);
       });
       if (mounted) await performScan(false);
     })();
@@ -397,8 +420,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     return () => {
       mounted = false;
       if (unlistenFn) unlistenFn();
+      if (unlistenBatchFn) unlistenBatchFn();
     };
-  }, [settingsLoaded, performScan, upsertSingleGameInState]);
+  }, [settingsLoaded, performScan, upsertSingleGameInState, upsertGamesInState]);
 
   const handleSaveSettings = async (updated: AppConfig) => {
     const foldersChanged =

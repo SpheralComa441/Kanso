@@ -11,11 +11,17 @@
 //! A library can hold hundreds of such games, so they are left out of the game-by-game
 //! metadata sync. What the lists are built from (genres, tags, a description) reaches them
 //! through [`sync_absent_game_details`], fifty games per request.
+//!
+//! The clients of the other stores keep fuller records: Epic, GOG Galaxy and Ubisoft Connect
+//! name each game of the account and its artwork (see `scanner::epic_catalog`,
+//! `scanner::gog_galaxy` and `scanner::ubisoft_cache`). Those games join the library through
+//! [`merge_owned_games`]; their genres and tags come from the Steam store page of the same
+//! title, found a few games at a time by [`match_absent_games_step`].
 
 use crate::cleaner::clean_game_title;
 use crate::db::LibraryDb;
 use crate::i18n::Lang;
-use crate::metadata::{MetadataClient, SteamAppDetails};
+use crate::metadata::{title_key, MetadataClient, SteamAppDetails};
 use crate::models::{DetectedGame, GamePlatform};
 use crate::scanner::steam::SteamPlayStats;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -26,6 +32,192 @@ const MAX_LOOKUPS_PER_PASS: usize = 4000;
 
 fn lock(db: &Mutex<LibraryDb>) -> MutexGuard<'_, LibraryDb> {
     db.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// A game a store's client lists for the account, ready to join the library as not installed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedGame {
+    pub game: DetectedGame,
+    /// Other library ids the same game may already be listed under (a client that knows a
+    /// game by two numbers).
+    pub other_ids: Vec<String>,
+}
+
+impl OwnedGame {
+    /// `id` is the library id the scanner of the same store gives the game once installed,
+    /// so that installing it later turns this very entry into an installed one.
+    pub fn new(
+        platform: GamePlatform,
+        id: String,
+        title: &str,
+        clean_title: String,
+        app_id: String,
+        launch_uri: Option<String>,
+        cover_url: Option<String>,
+    ) -> Self {
+        let mut game = DetectedGame::new_detected(
+            id,
+            title.to_string(),
+            clean_title,
+            platform,
+            Some(app_id),
+            String::new(),
+            None,
+            launch_uri,
+        );
+        game.is_installed = false;
+        game.app_type = Some("game".to_string());
+        game.cover_path = cover_url;
+        Self { game, other_ids: Vec::new() }
+    }
+}
+
+/// Adds to the library, as not installed, the games the store clients list and the library
+/// does not have yet. A game is taken for one the library already has when its id (or one of
+/// its other ids) is there, or when the same store already has a game of the same title: a
+/// scanner may know an installed game by another id than the client's records do.
+///
+/// A game listed before and still not installed gets its hours and last session refreshed
+/// when the client knows of more (GOG Galaxy counts them). Everything else about a game
+/// already in the library is left as it is. Returns the games added or changed, as stored.
+pub fn merge_owned_games(
+    db: &Mutex<LibraryDb>,
+    owned: Vec<OwnedGame>,
+    now_ms: u64,
+) -> Vec<DetectedGame> {
+    if owned.is_empty() {
+        return Vec::new();
+    }
+    let mut db = lock(db);
+    let library = db.load_games().unwrap_or_default();
+    let by_id: HashMap<&str, &DetectedGame> =
+        library.iter().map(|game| (game.id.as_str(), game)).collect();
+    let mut known_ids: HashSet<String> = library.iter().map(|game| game.id.clone()).collect();
+    let mut known_titles: HashSet<(&'static str, String)> = library
+        .iter()
+        .map(|game| (game.platform.as_str(), title_key(&game.clean_title)))
+        .collect();
+
+    let mut changed: Vec<DetectedGame> = Vec::new();
+    for OwnedGame { mut game, other_ids } in owned {
+        if let Some(existing) = by_id.get(game.id.as_str()) {
+            let playtime = game.playtime_minutes.max(existing.playtime_minutes);
+            let last_played = game.last_played_at.max(existing.last_played_at);
+            if !existing.is_installed
+                && (playtime, last_played) != (existing.playtime_minutes, existing.last_played_at)
+            {
+                let mut refreshed = (*existing).clone();
+                refreshed.playtime_minutes = playtime;
+                refreshed.last_played_at = last_played;
+                changed.push(refreshed);
+            }
+            continue;
+        }
+        let title = (game.platform.as_str(), title_key(&game.clean_title));
+        if title.1.is_empty()
+            || known_ids.contains(&game.id)
+            || other_ids.iter().any(|id| known_ids.contains(id))
+            || known_titles.contains(&title)
+        {
+            continue;
+        }
+        known_ids.insert(game.id.clone());
+        known_titles.insert(title);
+        game.updated_at = now_ms;
+        changed.push(game);
+    }
+
+    if db.upsert_games(&changed).is_err() {
+        return Vec::new();
+    }
+    changed
+}
+
+/// Games looked up on Steam in one [`match_absent_games_step`].
+pub const STORE_PAGE_STEP: usize = 20;
+
+/// What one step of matching games to their Steam store pages did.
+#[derive(Debug, Default)]
+pub struct MatchStep {
+    /// Games whose genres, tags or description changed, as stored.
+    pub changed: Vec<DetectedGame>,
+    /// Games still waiting to be looked up.
+    pub remaining: usize,
+    /// Steam could not be asked: stop, and try again at the next sync.
+    pub unreachable: bool,
+}
+
+/// A game of another store that is not installed and whose Steam page was never looked for.
+fn lacks_store_page(game: &DetectedGame) -> bool {
+    !game.is_installed
+        && !game.is_hidden
+        && game.platform != GamePlatform::Steam
+        && game.steam_store_appid.is_none()
+}
+
+/// Finds the Steam store page of up to [`STORE_PAGE_STEP`] games of other stores that are
+/// not installed, then gives the matched ones their genres, tags and description (see
+/// [`sync_absent_game_details`]). Steam's catalog covers most of what the other stores sell,
+/// and its genres and tags are the ones the rest of the library is filed under.
+///
+/// A page is accepted only when its title is the game's title (see
+/// [`MetadataClient::find_steam_app_by_title`]): a game without one is noted as such and not
+/// asked about again. One search per game, `pause` apart, so a large library is matched
+/// over a few minutes without hammering the store; callers repeat the step until nothing
+/// remains. The database is never locked while Steam is being asked.
+pub fn match_absent_games_step(
+    db: &Mutex<LibraryDb>,
+    client: &MetadataClient,
+    pause: std::time::Duration,
+    now_ms: u64,
+) -> MatchStep {
+    let mut pending: Vec<(String, String)> = lock(db)
+        .load_games()
+        .unwrap_or_default()
+        .iter()
+        .filter(|game| lacks_store_page(game))
+        .map(|game| (game.id.clone(), game.clean_title.clone()))
+        .collect();
+    let waiting = pending.len();
+    pending.truncate(STORE_PAGE_STEP);
+
+    let mut step = MatchStep::default();
+    let mut found: Vec<(String, String)> = Vec::new();
+    for (index, (game_id, title)) in pending.into_iter().enumerate() {
+        if index > 0 && !pause.is_zero() {
+            std::thread::sleep(pause);
+        }
+        match client.find_steam_app_by_title(&title) {
+            Ok(appid) => found.push((game_id, appid.unwrap_or_default())),
+            Err(_) => {
+                step.unreachable = true;
+                break;
+            }
+        }
+    }
+    step.remaining = waiting - found.len();
+
+    {
+        let mut db = lock(db);
+        let settled: Vec<DetectedGame> = found
+            .into_iter()
+            .filter_map(|(game_id, appid)| {
+                // As it is now: it may have been installed or hidden meanwhile
+                let mut game = db.get_game(&game_id).ok().flatten()?;
+                lacks_store_page(&game).then(|| {
+                    game.steam_store_appid = Some(appid);
+                    game
+                })
+            })
+            .collect();
+        if db.upsert_games(&settled).is_err() {
+            step.unreachable = true;
+            return step;
+        }
+    }
+
+    step.changed = sync_absent_game_details(db, client, now_ms);
+    step
 }
 
 /// Brings the Steam games that are not installed in line with the Steam client's records:
@@ -589,6 +781,241 @@ mod tests {
             library.upsert_games(&games).unwrap();
         }
         assert!(sync_absent_game_details(&db, &client, 3).is_empty(), "nothing left to ask");
+    }
+
+    fn owned(platform: GamePlatform, id: &str, title: &str) -> OwnedGame {
+        let app_id = id.split(':').nth(1).unwrap_or_default().to_string();
+        OwnedGame::new(
+            platform,
+            id.to_string(),
+            title,
+            clean_game_title(title),
+            app_id,
+            None,
+            Some(format!("https://cdn.example/{id}.jpg")),
+        )
+    }
+
+    #[test]
+    fn games_listed_by_the_store_clients_join_the_library_once() {
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        {
+            let db = lock(&db);
+            // Installed, known to the scanner by the client's install id
+            let mut anno = installed("0", "Anno 1800");
+            anno.id = "ubisoft:4554".into();
+            anno.platform = GamePlatform::Ubisoft;
+            db.upsert_game(&anno).unwrap();
+            // Installed, known to the scanner by another id altogether, with a trademark sign
+            let mut rocket = installed("0", "Rocket League®");
+            rocket.id = "epic:rocket-league".into();
+            rocket.platform = GamePlatform::Epic;
+            rocket.clean_title = "Rocket League".into();
+            db.upsert_game(&rocket).unwrap();
+            // The same title on another store is another copy
+            db.upsert_game(&installed("1091500", "Cyberpunk 2077")).unwrap();
+        }
+
+        let mut anno = owned(GamePlatform::Ubisoft, "ubisoft:4553", "Anno 1800 Complete Edition");
+        anno.other_ids.push("ubisoft:4554".into());
+        let mut witcher = owned(GamePlatform::Gog, "gog:1207664643", "The Witcher 3: Wild Hunt");
+        witcher.game.playtime_minutes = Some(6000);
+        witcher.game.last_played_at = Some(1_700_000_000_000);
+        let listed = vec![
+            anno,
+            owned(GamePlatform::Epic, "epic:Sugar", "ROCKET LEAGUE"),
+            owned(GamePlatform::Gog, "gog:1423049311", "Cyberpunk 2077"),
+            witcher.clone(),
+            owned(GamePlatform::Gog, "gog:1495134320", "The Witcher 3: Wild Hunt - Game of the Year Edition"),
+            owned(GamePlatform::Epic, "epic:nameless", "™"),
+        ];
+
+        let added = merge_owned_games(&db, listed.clone(), 500);
+        let mut ids: Vec<&str> = added.iter().map(|game| game.id.as_str()).collect();
+        ids.sort();
+        assert_eq!(
+            ids,
+            ["gog:1207664643", "gog:1423049311"],
+            "not the installed ones, not the second edition of a game just added, nothing nameless"
+        );
+        assert_eq!(lock(&db).game_count().unwrap(), 5);
+
+        let stored = lock(&db).get_game("gog:1207664643").unwrap().expect("stored");
+        assert!(!stored.is_installed);
+        assert_eq!(stored.app_type.as_deref(), Some("game"));
+        assert_eq!(stored.cover_path.as_deref(), Some("https://cdn.example/gog:1207664643.jpg"));
+        assert_eq!(stored.playtime_minutes, Some(6000));
+        assert_eq!(stored.updated_at, 500);
+        assert_eq!(stored.steam_store_appid, None, "its Steam page is looked for later");
+
+        // Again: nothing new, nothing rewritten
+        assert!(merge_owned_games(&db, listed.clone(), 600).is_empty());
+        assert!(merge_owned_games(&db, Vec::new(), 600).is_empty());
+
+        // Played some more through the client: the hours follow, the user's own data stays
+        {
+            let db = lock(&db);
+            let mut game = db.get_game("gog:1207664643").unwrap().unwrap();
+            game.is_favorite = true;
+            game.status = Some(crate::models::GameStatus::Playing);
+            db.upsert_game(&game).unwrap();
+        }
+        witcher.game.playtime_minutes = Some(6120);
+        let changed = merge_owned_games(&db, vec![witcher.clone()], 700);
+        assert_eq!(changed.len(), 1);
+        let stored = lock(&db).get_game("gog:1207664643").unwrap().unwrap();
+        assert_eq!(stored.playtime_minutes, Some(6120));
+        assert!(stored.is_favorite);
+        assert_eq!(stored.status, Some(crate::models::GameStatus::Playing));
+        assert_eq!(stored.updated_at, 500);
+
+        // Once installed, the scanner's hours are the ones that count
+        {
+            let db = lock(&db);
+            let mut game = db.get_game("gog:1207664643").unwrap().unwrap();
+            game.is_installed = true;
+            db.upsert_game(&game).unwrap();
+        }
+        witcher.game.playtime_minutes = Some(9000);
+        assert!(merge_owned_games(&db, vec![witcher], 800).is_empty());
+    }
+
+    #[test]
+    fn games_of_other_stores_are_filed_under_the_genres_of_their_steam_page() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        merge_owned_games(
+            &db,
+            vec![
+                owned(GamePlatform::Ubisoft, "ubisoft:5059", "Assassin's Creed® Odyssey"),
+                owned(GamePlatform::Ubisoft, "ubisoft:4553", "Anno 1800"),
+                owned(GamePlatform::BattleNet, "Battle.net:fenris", "Diablo IV"),
+                owned(GamePlatform::Gog, "gog:1", "Unknown Gem"),
+            ],
+            1,
+        );
+        // Not part of this: a Steam game, an installed game, a hidden one, one already settled
+        {
+            let db = lock(&db);
+            db.upsert_game(&absent("620", "Portal 2")).unwrap();
+            let mut installed_gog = installed("0", "Diablo IV");
+            installed_gog.id = "gog:2".into();
+            installed_gog.platform = GamePlatform::Gog;
+            db.upsert_game(&installed_gog).unwrap();
+            let mut hidden = owned(GamePlatform::Gog, "gog:3", "Diablo IV").game;
+            hidden.is_hidden = true;
+            db.upsert_game(&hidden).unwrap();
+            let mut settled = owned(GamePlatform::Gog, "gog:4", "Diablo IV").game;
+            settled.steam_store_appid = Some(String::new());
+            db.upsert_game(&settled).unwrap();
+        }
+        let searches = |recorded: &std::sync::Arc<Mutex<Vec<String>>>| {
+            recorded.lock().unwrap().iter().filter(|path| path.starts_with("/actions/SearchApps/")).count()
+        };
+
+        let step = match_absent_games_step(&db, &client, std::time::Duration::ZERO, 50);
+        assert!(!step.unreachable);
+        assert_eq!(step.remaining, 0);
+        assert_eq!(searches(&recorded), 4, "one search per game without a page");
+
+        let page = |id: &str| lock(&db).get_game(id).unwrap().unwrap().steam_store_appid;
+        assert_eq!(page("ubisoft:5059").as_deref(), Some("812140"));
+        assert_eq!(page("Battle.net:fenris").as_deref(), Some("2344520"));
+        assert_eq!(page("ubisoft:4553").as_deref(), Some(""), "near misses are no page");
+        assert_eq!(page("gog:1").as_deref(), Some(""));
+        assert_eq!(page("gog:2"), None);
+        assert_eq!(page("gog:3"), None);
+
+        // The matched game the store answers about got its genres, tags and description;
+        // the Steam game that was waiting too, in the same request
+        let mut changed: Vec<&str> = step.changed.iter().map(|game| game.id.as_str()).collect();
+        changed.sort();
+        assert_eq!(changed, ["Battle.net:fenris", "steam:620"]);
+        let diablo = lock(&db).get_game("Battle.net:fenris").unwrap().unwrap();
+        assert_eq!(diablo.genres, ["GDR"]);
+        assert_eq!(diablo.tags, ["GDR", "Stile Souls"]);
+        assert_eq!(diablo.short_description.as_deref(), Some("GDR d'azione oscuro."));
+        assert_eq!(diablo.cover_path.as_deref(), Some("https://cdn.example/Battle.net:fenris.jpg"));
+
+        // Nothing left: no more searches
+        let step = match_absent_games_step(&db, &client, std::time::Duration::ZERO, 60);
+        assert_eq!((step.remaining, step.changed.len(), step.unreachable), (0, 0, false));
+        assert_eq!(searches(&recorded), 4);
+    }
+
+    #[test]
+    fn matching_goes_a_few_games_at_a_time_and_stops_while_steam_is_unreachable() {
+        let (base_url, _recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let many: Vec<OwnedGame> = (0..STORE_PAGE_STEP + 7)
+            .map(|n| owned(GamePlatform::Epic, &format!("epic:game{n}"), &format!("Unknown Game {n}")))
+            .collect();
+        assert_eq!(merge_owned_games(&db, many, 1).len(), STORE_PAGE_STEP + 7);
+
+        // Offline: nothing is settled, so nothing is lost
+        let dead = "http://127.0.0.1:9";
+        let offline = MetadataClient::with_base_urls(dead, dead, dead);
+        let step = match_absent_games_step(&db, &offline, std::time::Duration::ZERO, 2);
+        assert!(step.unreachable);
+        assert_eq!(step.remaining, STORE_PAGE_STEP + 7);
+
+        let step = match_absent_games_step(&db, &client, std::time::Duration::ZERO, 3);
+        assert_eq!((step.remaining, step.unreachable), (7, false));
+        let step = match_absent_games_step(&db, &client, std::time::Duration::ZERO, 4);
+        assert_eq!((step.remaining, step.unreachable), (0, false));
+    }
+
+    /// Run by hand: the games the three client readers find (their `KANSO_*` overrides point
+    /// at real or sample files) matched against the real Steam store.
+    /// `KANSO_STEAM_COMMUNITY` is steamcommunity.com (the search), `KANSO_STEAM_STORE` the
+    /// store site (tag names), `KANSO_STEAM_API` the store service.
+    #[test]
+    fn real_other_stores_when_clients_and_steam_are_provided() {
+        let (Ok(api), Ok(store), Ok(community)) = (
+            std::env::var("KANSO_STEAM_API"),
+            std::env::var("KANSO_STEAM_STORE"),
+            std::env::var("KANSO_STEAM_COMMUNITY"),
+        ) else {
+            return;
+        };
+        let listed = crate::scanner::read_owned_games_from_clients();
+        if listed.is_empty() {
+            return;
+        }
+        let mut client = MetadataClient::with_base_urls(&store, &store, &community);
+        client.set_steam_api_base_url(&api);
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let added = merge_owned_games(&db, listed, 1).len();
+
+        let started = std::time::Instant::now();
+        let mut completed = 0;
+        loop {
+            let step = match_absent_games_step(&db, &client, std::time::Duration::from_millis(200), 2);
+            completed += step.changed.len();
+            assert!(!step.unreachable, "Steam could not be asked");
+            if step.remaining == 0 {
+                break;
+            }
+        }
+        let games = lock(&db).load_games().unwrap();
+        let matched = games.iter().filter(|game| game.steam_store_id().is_some()).count();
+        println!(
+            "{added} games from the clients -> {matched} with a Steam page, {completed} completed, in {:.1} s",
+            started.elapsed().as_secs_f32()
+        );
+        for game in &games {
+            println!(
+                "  {:9} {:52} page {:8} {:?} | {:?}",
+                game.platform.as_str(),
+                game.title,
+                game.steam_store_id().unwrap_or("-"),
+                game.genres,
+                &game.tags[..game.tags.len().min(3)]
+            );
+        }
+        assert!(matched > 0);
     }
 
     #[test]

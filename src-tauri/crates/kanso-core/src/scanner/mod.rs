@@ -1,13 +1,16 @@
 pub mod battlenet;
 pub mod ea;
 pub mod epic;
+pub mod epic_catalog;
 pub mod exe_pick;
 pub mod gog;
+pub mod gog_galaxy;
 pub mod registry;
 pub mod standalone;
 pub mod steam;
 pub mod steam_packages;
 pub mod ubisoft;
+pub mod ubisoft_cache;
 pub mod xbox;
 
 use crate::config::AppConfig;
@@ -53,6 +56,23 @@ pub fn scan_all_installed_games(config: &AppConfig) -> ScanReport {
 
     sort_games_by_title(&mut report.games);
     report
+}
+
+/// The games the store clients on this PC list for the account, installed or not, read from
+/// the clients' own local records: no sign-in, no network. Steam is not here: its records
+/// give ids only, and [`crate::owned::sync_steam_library`] asks the store for the rest.
+pub fn read_owned_games_from_clients() -> Vec<crate::owned::OwnedGame> {
+    let mut owned = Vec::new();
+    if let Some(path) = epic_catalog::detect_epic_catalog_cache() {
+        owned.extend(epic_catalog::read_owned_epic_games(&path));
+    }
+    if let Some(path) = gog_galaxy::detect_gog_galaxy_db() {
+        owned.extend(gog_galaxy::read_owned_gog_games(&path));
+    }
+    if let Some(path) = ubisoft_cache::detect_ubisoft_cache() {
+        owned.extend(ubisoft_cache::read_owned_ubisoft_games(&path));
+    }
+    owned
 }
 
 /// Concatenates store scan results in priority order, dropping games whose install folder was

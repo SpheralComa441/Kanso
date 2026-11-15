@@ -21,6 +21,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 pub(crate) const GAME_UPDATED_EVENT: &str = "library:game-updated";
+/// Several games changed at once (payload: the games as stored).
+const GAMES_UPDATED_EVENT: &str = "library:games-updated";
+/// Pause between two searches of the Steam store while matching a library to its pages.
+const STORE_SEARCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Shared handle to the library database; commands lock it only around reads and writes,
 /// never across network requests.
@@ -43,6 +47,8 @@ pub(crate) struct AppState {
     /// Games Kanso currently sees running, kept by the play time tracker.
     pub(crate) running_games: Arc<Mutex<Vec<String>>>,
     pub(crate) plugins: Arc<plugins::PluginHost>,
+    /// A pass matching games to their Steam store pages is under way: one at a time.
+    matching_store_pages: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Language used when none is configured yet (the UI picks one from the OS on first run).
@@ -221,6 +227,13 @@ async fn sync_library_metadata(
             let owned_apps = kanso_core::scanner::steam_packages::read_owned_steam_apps(&steam_root);
             kanso_core::owned::sync_steam_library(&db, &client, &play_stats, &owned_apps, now);
         }
+        // The clients of Epic, GOG Galaxy and Ubisoft Connect name the account's games in
+        // their own local records: those join too, with no sign-in and no request
+        kanso_core::owned::merge_owned_games(
+            &db,
+            kanso_core::scanner::read_owned_games_from_clients(),
+            now,
+        );
         // What is not on disk is left out of the loop above: its genres, tags and description
         // come fifty games per request, so that it can be browsed like the rest
         kanso_core::owned::sync_absent_game_details(&db, &client, now);
@@ -279,6 +292,46 @@ async fn complete_game_details(
     })
     .await
     .map_err(|e| format!("{}: {e}", T::SyncFailed.s()))?
+}
+
+/// Finds the Steam store page of the games of other stores that are not installed, a few at
+/// a time, and gives them the genres, tags and description found there. A library of a few
+/// hundred games takes some minutes, so this runs apart from the sync: the games it completes
+/// reach the interface in batches through [`GAMES_UPDATED_EVENT`]. Stops quietly while Steam
+/// cannot be reached; what is left is picked up by the next call.
+#[tauri::command]
+async fn match_absent_games(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    let running = Arc::clone(&state.matching_store_pages);
+    if running.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    let config = load_config(&app);
+    let db = Arc::clone(&state.db);
+
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        let client =
+            MetadataClient::new().with_language(config.lang().unwrap_or(FALLBACK_LANGUAGE));
+        loop {
+            let step = kanso_core::owned::match_absent_games_step(
+                &db,
+                &client,
+                STORE_SEARCH_PAUSE,
+                now_timestamp_ms(),
+            );
+            if !step.changed.is_empty() {
+                let _ = app.emit(GAMES_UPDATED_EVENT, &step.changed);
+            }
+            if step.unreachable || step.remaining == 0 {
+                break;
+            }
+            std::thread::sleep(STORE_SEARCH_PAUSE);
+        }
+    })
+    .await;
+    running.store(false, Ordering::SeqCst);
+    outcome.map_err(|e| format!("{}: {e}", T::SyncFailed.s()))
 }
 
 #[tauri::command]
@@ -736,6 +789,7 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         deals_cache: Arc::new(Mutex::new(None)),
         running_games: Arc::clone(&running_games),
         plugins: Arc::clone(&plugin_host),
+        matching_store_pages: Arc::default(),
     });
     remove_legacy_sql_mirror(app);
     playtime::spawn_tracker(app.clone(), Arc::clone(&db), running_games);
@@ -774,6 +828,7 @@ pub fn run() {
             scan_games,
             sync_library_metadata,
             complete_game_details,
+            match_absent_games,
             search_steamgriddb_games,
             apply_steamgriddb_match,
             update_game_details,

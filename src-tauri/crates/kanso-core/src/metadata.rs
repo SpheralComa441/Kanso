@@ -206,6 +206,10 @@ fn steam_genre_of_tag(tag_id: u64, lang: Lang) -> Option<&'static str> {
         .map(|(_, names)| in_language(names, lang))
 }
 
+/// Steam could not be asked, or its answer could not be read: nothing was learned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SteamUnreachable;
+
 /// What the store service says about a Steam app when many are asked about at once: what a
 /// game needs to be found by genre and by tag.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -947,6 +951,30 @@ impl MetadataClient {
             .clone()
     }
 
+    /// The Steam store app called exactly `title`, give or take edition suffixes, trademark
+    /// signs, punctuation and case. Stricter than the first search hit that the metadata of
+    /// a single game settles for: this is used on whole libraries, where a near miss would
+    /// file a game under another game's genres. `Ok(None)`: no app by that name. `Err`: the
+    /// search could not be run.
+    pub fn find_steam_app_by_title(&self, title: &str) -> Result<Option<String>, SteamUnreachable> {
+        let cleaned = clean_game_title(title);
+        let wanted = title_key(&cleaned);
+        if wanted.is_empty() {
+            return Ok(None);
+        }
+        let url = format!(
+            "{}/actions/SearchApps/{}",
+            self.steam_community_base_url,
+            percent_encode_path_segment(&cleaned)
+        );
+        let resp = self.agent.get(&url).call().map_err(|_| SteamUnreachable)?;
+        let items: Vec<SteamSearchAppItem> = resp.into_json().map_err(|_| SteamUnreachable)?;
+        Ok(items
+            .iter()
+            .find(|item| title_key(&clean_game_title(&decode_basic_html_entities(&item.name))) == wanted)
+            .and_then(SteamSearchAppItem::appid_string))
+    }
+
     fn search_steam_store_appid(&self, raw_title: &str) -> Result<Option<String>, ()> {
         let cleaned = clean_game_title(raw_title);
         if cleaned.is_empty() {
@@ -1222,6 +1250,16 @@ impl MetadataClient {
     }
 }
 
+/// What is left of a title when only its letters and digits count: "Assassin's Creed®:
+/// Odyssey" and "ASSASSINS CREED ODYSSEY" are the same game.
+pub fn title_key(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
 /// The answer about `appid` among the items of a store service reply, if the store lists the
 /// app: one it does not list is answered with a stub (`success` other than 1, `appid: 0`).
 fn listed_store_item(items: &[Value], appid: u64) -> Option<&Value> {
@@ -1279,6 +1317,8 @@ fn apply_resolved_title(game: &mut DetectedGame, name: &str) -> bool {
 #[derive(Debug, Deserialize)]
 struct SteamSearchAppItem {
     appid: Value,
+    #[serde(default)]
+    name: String,
 }
 
 impl SteamSearchAppItem {
@@ -1488,6 +1528,20 @@ pub(crate) mod tests {
                         ("200 OK", "application/json", body_str.into_bytes())
                     } else if path == "/mock-cover.png" {
                         ("200 OK", "image/png", b"\x89PNG\r\n\x1a\nmockcover".to_vec())
+                    } else if path.to_ascii_lowercase().starts_with("/actions/searchapps/assassin") {
+                        // The exact game is not the first hit
+                        (
+                            "200 OK",
+                            "application/json",
+                            r#"[{"appid":"2208920","name":"Assassin's Creed Valhalla"},{"appid":"812140","name":"Assassin's Creed\u00ae Odyssey"},{"appid":"311560","name":"Assassin's Creed Rogue"}]"#.as_bytes().to_vec(),
+                        )
+                    } else if path.starts_with("/actions/SearchApps/Anno") {
+                        // Near misses only
+                        (
+                            "200 OK",
+                            "application/json",
+                            br#"[{"appid":"916440","name":"Anno 1800 - Season 4 Pass"},{"appid":"1028630","name":"Anno 1404 - History Edition"}]"#.to_vec(),
+                        )
                     } else if path.starts_with("/actions/SearchApps/Unknown") {
                         ("200 OK", "application/json", b"[]".to_vec())
                     } else if path.starts_with("/actions/SearchApps/") {
@@ -2221,6 +2275,83 @@ pub(crate) mod tests {
         // Steam unreachable: nothing is known, rather than "these apps have nothing"
         let dead = MetadataClient::with_base_urls("http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9");
         assert_eq!(dead.fetch_steam_app_details(&[620]), None);
+    }
+
+    #[test]
+    fn a_steam_page_is_matched_by_exact_title_only() {
+        let (base_url, _recorded) = spawn_mock_api_server();
+        let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url);
+
+        // Not the first hit, written with other signs and capitals
+        assert_eq!(
+            client.find_steam_app_by_title("ASSASSIN'S CREED: ODYSSEY - Gold Edition™"),
+            Ok(None),
+            "an edition the cleaner does not know is another title"
+        );
+        assert_eq!(client.find_steam_app_by_title("Assassin's Creed Odyssey"), Ok(Some("812140".into())));
+        assert_eq!(client.find_steam_app_by_title("assassins creed® odyssey"), Ok(Some("812140".into())));
+        // Only near misses: better no page than another game's
+        assert_eq!(client.find_steam_app_by_title("Anno 1800"), Ok(None));
+        assert_eq!(client.find_steam_app_by_title("Unknown Game"), Ok(None));
+        assert_eq!(client.find_steam_app_by_title("™"), Ok(None));
+        // The single-hit answer of the mock: the title has to be that very one
+        assert_eq!(client.find_steam_app_by_title("Diablo IV"), Ok(Some("2344520".into())));
+        assert_eq!(client.find_steam_app_by_title("Diablo"), Ok(None));
+
+        let dead = MetadataClient::with_base_urls("http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9");
+        assert_eq!(dead.find_steam_app_by_title("Diablo IV"), Err(SteamUnreachable));
+
+        assert_eq!(title_key("Assassin's Creed®: Odyssey"), "assassinscreedodyssey");
+        assert_eq!(title_key("Ведьмак 3: Дикая Охота"), "ведьмак3дикаяохота");
+    }
+
+    /// Run by hand against the real search (or a local forwarder to steamcommunity.com), to
+    /// see how many typical titles of other stores find their Steam page:
+    /// `KANSO_STEAM_COMMUNITY=https://steamcommunity.com cargo test -p kanso-core real_title_matching -- --nocapture`
+    #[test]
+    fn real_title_matching_when_the_search_is_provided() {
+        let Ok(community) = std::env::var("KANSO_STEAM_COMMUNITY") else {
+            return;
+        };
+        let client = MetadataClient::with_base_urls(&community, &community, &community);
+        let titles = [
+            "The Witcher 3: Wild Hunt - Game of the Year Edition",
+            "Cyberpunk 2077",
+            "Assassin's Creed® Odyssey",
+            "Anno 1800",
+            "Tom Clancy's Rainbow Six® Siege",
+            "Far Cry® 5",
+            "Alan Wake 2",
+            "Rocket League®",
+            "Control",
+            "Hades",
+            "DEATH STRANDING",
+            "Baldur's Gate 3",
+            "Heroes of Might and Magic® 3: Complete",
+            "Disco Elysium - The Final Cut",
+            "GWENT: The Witcher Card Game",
+            "Grand Theft Auto V",
+            "Fortnite",
+            "Kingdom Come: Deliverance",
+            "Prey",
+            "DOOM Eternal",
+            "Tomb Raider GAME OF THE YEAR EDITION",
+            "Sid Meier's Civilization® VI",
+            "Immortals Fenyx Rising",
+            "STAR WARS™ Battlefront™ II",
+            "Shadow of the Tomb Raider: Definitive Edition",
+        ];
+        let mut found = 0;
+        for title in titles {
+            let answer = client.find_steam_app_by_title(title);
+            if matches!(answer, Ok(Some(_))) {
+                found += 1;
+            }
+            println!("  {title:55} -> {answer:?}");
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+        println!("{found} of {} matched", titles.len());
+        assert!(found > 0);
     }
 
     #[test]
