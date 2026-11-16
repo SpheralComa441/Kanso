@@ -9,6 +9,7 @@ import type {
   ThemeColors,
   ThemeDetail,
   ThemeEffects,
+  ThemeHome,
   ThemeFontFile,
   NavColor,
   ThemeIcons,
@@ -74,6 +75,10 @@ const DEFAULT_DETAIL: ThemeDetail = {
 };
 
 const DEFAULT_MOTION: ThemeMotion = { level: "smooth", sheet: "rise", view: "rise", stagger: true };
+export const DEFAULT_HOME: ThemeHome = {
+  sections: ["resume", "upNext", "mostPlayed", "recommendations", "deals"],
+  effects: "seasonal",
+};
 
 /** A theme whose optional sections may be missing or partial (theme files, older data). */
 export type ThemeInput = Pick<Theme, "name" | "colors"> & {
@@ -90,6 +95,7 @@ export type ThemeInput = Pick<Theme, "name" | "colors"> & {
   effects?: Partial<ThemeEffects>;
   detail?: Partial<Record<keyof ThemeDetail, unknown>>;
   motion?: Partial<Record<keyof ThemeMotion, unknown>>;
+  home?: Partial<Record<keyof ThemeHome, unknown>>;
   fontFiles?: ThemeFontFile[];
 };
 
@@ -111,6 +117,7 @@ export function withThemeDefaults(input: ThemeInput): Theme {
     effects: { ...DEFAULT_EFFECTS, ...input.effects },
     detail: { ...DEFAULT_DETAIL, ...input.detail } as ThemeDetail,
     motion: { ...DEFAULT_MOTION, ...input.motion } as ThemeMotion,
+    home: { ...DEFAULT_HOME, ...input.home } as ThemeHome,
     fontFiles: input.fontFiles ?? [],
   };
 }

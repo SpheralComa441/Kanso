@@ -26,6 +26,9 @@ import type {
   Theme,
   WindowSignIn,
   HideableSection,
+  HomeConfig,
+  HomeSection,
+  PlaceMatch,
 } from "../types/game";
 import {
   PREVIEW_MOCK_DEALS,
@@ -47,6 +50,7 @@ import {
   withThemeDefaults,
   type ThemeInput,
 } from "./themes";
+import type { WeatherNow } from "./ambience";
 import { CARD_INFO_DEFAULT, withCardInfo } from "./cardInfo";
 
 const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
@@ -65,6 +69,7 @@ const DEFAULT_CONFIG: AppConfig = {
   animations: "theme",
   cardInfo: [...CARD_INFO_DEFAULT],
   hiddenSections: [],
+  home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
@@ -154,6 +159,7 @@ export async function getSettings(): Promise<AppConfig> {
       animations: withAnimationsChoice(parsed.animations),
       cardInfo: withCardInfo(parsed.cardInfo),
       hiddenSections: withHiddenSections(parsed.hiddenSections),
+      home: withHomeConfig(parsed.home),
       emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
       gamePassCatalog: parsed.gamePassCatalog === true,
@@ -178,6 +184,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     animations: withAnimationsChoice(config.animations),
     cardInfo: withCardInfo(config.cardInfo),
     hiddenSections: withHiddenSections(config.hiddenSections),
+    home: withHomeConfig(config.home),
     emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
     gamePassCatalog: config.gamePassCatalog === true,
@@ -596,6 +603,76 @@ export async function openGameFolder(game: DetectedGame): Promise<void> {
     return;
   }
   throw new Error(`Anteprima: nell'app si aprirebbe la cartella di ${game.title}.`);
+}
+
+/**
+ * The weather at the place chosen in Settings, for the background of Home; `null` when the
+ * user does not follow the weather or the service cannot be reached.
+ */
+export async function homeWeather(): Promise<WeatherNow | null> {
+  if (isTauri()) {
+    return invoke<WeatherNow | null>("home_weather");
+  }
+  // The browser preview contacts nothing: a place named "Neve…" or "Pioggia…" shows that
+  const config = await getSettings();
+  if (!config.home.weather || !config.home.place) return null;
+  const name = config.home.place.name.toLowerCase();
+  return { code: name.startsWith("neve") ? 73 : name.startsWith("pioggia") ? 63 : 2, isDay: true };
+}
+
+/** The places called `query`, for the user to choose the one whose weather to follow. */
+export async function searchWeatherPlaces(query: string): Promise<PlaceMatch[]> {
+  if (isTauri()) {
+    return invoke<PlaceMatch[]>("search_weather_places", { query });
+  }
+  const name = query.trim();
+  if (name.length < 2) return [];
+  return [
+    { name, region: "Piemonte, Italia", latitude: 45.07, longitude: 7.69 },
+    { name, region: "Anteprima, Altrove", latitude: -33.87, longitude: 151.21 },
+  ];
+}
+
+/** Opens the site the weather comes from, credited next to it. */
+export async function openWeatherSource(): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_weather_source");
+    return;
+  }
+  throw new Error("Anteprima: nell'app si aprirebbe open-meteo.com nel browser.");
+}
+
+/** The parts of the Home page, in Kanso's own order. */
+export const HOME_SECTIONS: HomeSection[] = ["resume", "upNext", "mostPlayed", "recommendations", "deals"];
+/** Most games lined up to play next. */
+export const MAX_UP_NEXT = 5;
+
+/** The Home settings as the backend would keep them: known names, a coarse place, five ids. */
+export function withHomeConfig(value: unknown): HomeConfig {
+  const raw = (value && typeof value === "object" ? value : {}) as Partial<HomeConfig>;
+  const hidden = Array.isArray(raw.hidden) ? raw.hidden : [];
+  const place =
+    raw.place &&
+    typeof raw.place.name === "string" &&
+    raw.place.name.trim() !== "" &&
+    Number.isFinite(raw.place.latitude) &&
+    Number.isFinite(raw.place.longitude) &&
+    Math.abs(raw.place.latitude) <= 90 &&
+    Math.abs(raw.place.longitude) <= 180
+      ? {
+          name: raw.place.name.trim().slice(0, 80),
+          latitude: Math.round(raw.place.latitude * 100) / 100,
+          longitude: Math.round(raw.place.longitude * 100) / 100,
+        }
+      : null;
+  const upNext = Array.isArray(raw.upNext) ? raw.upNext.filter((id): id is string => typeof id === "string" && id !== "") : [];
+  return {
+    hidden: HOME_SECTIONS.filter((section) => hidden.includes(section)),
+    effects: raw.effects !== false,
+    weather: raw.weather === true && place !== null,
+    place,
+    upNext: [...new Set(upNext)].slice(0, MAX_UP_NEXT),
+  };
 }
 
 /** The parts of the side panel that can be hidden, in the order Settings lists them. */

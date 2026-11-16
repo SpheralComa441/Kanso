@@ -3,6 +3,8 @@ import { CloudDownload, EyeOff, History, LayoutGrid, Star, X } from "lucide-reac
 import { ApiKeyBanner } from "./components/ApiKeyBanner";
 import { CategoryGrid, type CategoryKind } from "./components/CategoryGrid";
 import { DealsView } from "./components/DealsView";
+import { HomeView } from "./components/HomeView";
+import { ambienceFor, isSouthernTimeZone, type WeatherNow } from "./lib/ambience";
 import { EmulatorsView } from "./components/EmulatorsView";
 import { EditGameModal } from "./components/EditGameModal";
 import { GameDetail } from "./components/GameDetail";
@@ -43,7 +45,9 @@ import {
   scanGames,
   setGameFavorite,
   setGameHidden,
+  homeWeather,
   openGameFolder,
+  openWeatherSource,
   uninstallGame,
   setGameGenres,
   mergedGenres,
@@ -85,6 +89,7 @@ import type {
   PluginInfo,
   ScanReport,
   Theme,
+  HomeConfig,
 } from "./types/game";
 
 const INITIAL_CONFIG: AppConfig = {
@@ -99,6 +104,7 @@ const INITIAL_CONFIG: AppConfig = {
   animations: "theme",
   cardInfo: [...CARD_INFO_DEFAULT],
   hiddenSections: [],
+  home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
@@ -676,6 +682,66 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     [allGames]
   );
   const emulatedGames = useMemo(() => allGames.filter(isEmulated), [allGames]);
+  // Home is about every game the user plays, whatever runs it
+  const homeGames = useMemo(() => allGames.filter((game) => !game.isHidden), [allGames]);
+  const activeTheme = previewTheme ?? savedTheme;
+  // The background of Home moves only where things are allowed to move at all
+  const animationsChoice = previewAnimations ?? config.animations;
+  const motionOff =
+    animationsChoice === "off" ||
+    (animationsChoice === "theme" && activeTheme.motion.level === "none") ||
+    (previewAccessibility ?? config.accessibility).reduceMotion ||
+    (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const showsAmbience = config.home.effects && activeTheme.home.effects === "seasonal" && !motionOff;
+  // The weather outside, when the user follows it: asked while Home is in view, and again
+  // every half hour. Anything that goes wrong leaves the season to show
+  const [weather, setWeather] = useState<WeatherNow | null>(null);
+  const followsWeather = showsAmbience && config.home.weather && config.home.place !== null;
+  const weatherPlaceKey = config.home.place ? `${config.home.place.latitude},${config.home.place.longitude}` : "";
+  useEffect(() => {
+    if (!followsWeather || mainView !== "home") {
+      setWeather(null);
+      return;
+    }
+    let current = true;
+    const ask = () => {
+      homeWeather()
+        .then((answer) => current && setWeather(answer))
+        .catch(() => current && setWeather(null));
+    };
+    ask();
+    const timer = window.setInterval(ask, 30 * 60 * 1000);
+    return () => {
+      current = false;
+      window.clearInterval(timer);
+    };
+  }, [followsWeather, weatherPlaceKey, mainView]);
+  const homeAmbience = useMemo(
+    () =>
+      showsAmbience
+        ? ambienceFor(
+            new Date(),
+            // South of the equator the seasons are the other way round: the place says so,
+            // or else the time zone of this PC
+            config.home.place && config.home.weather
+              ? config.home.place.latitude < 0
+              : isSouthernTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone ?? ""),
+            weather
+          )
+        : null,
+    [showsAmbience, weather, config.home.place, config.home.weather]
+  );
+  /** Saves a change to the Home settings made on the page itself (the queue of next games). */
+  const changeHome = (next: HomeConfig) => {
+    const previous = config;
+    onConfigChange({ ...config, home: next });
+    saveSettings({ ...config, language: lang, home: next })
+      .then(onConfigChange)
+      .catch((err) => {
+        onConfigChange(previous);
+        setStatusMessage(typeof err === "string" ? err : t("settings.saveError"));
+      });
+  };
   // What genres, tags, platforms and statuses are counted on: everything, what is on disk
   // ("installed only") or, inside the "not installed" collection, what is not
   const scope = libraryScope(filters.collection, installedOnly);
@@ -893,9 +959,24 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           {/* Another entry of the side panel: the content is new, and comes in as such */}
           <div key={viewKey} className="motion-view space-y-4">
           {mainView === "home" ? (
-            <DealsView
-              ownedSteamAppIds={ownedSteamAppIds}
-              onError={setStatusMessage}
+            <HomeView
+              games={homeGames}
+              home={config.home}
+              theme={activeTheme.home}
+              themeKey={`${activeTheme.id}|${activeTheme.colors.accent}|${activeTheme.colors.accentSecondary}`}
+              ambience={homeAmbience}
+              weatherPlace={weather && config.home.place ? config.home.place.name : null}
+              onOpenWeatherSource={() => {
+                openWeatherSource().catch((err) =>
+                  setStatusMessage(err instanceof Error ? err.message : typeof err === "string" ? err : t("app.statusError"))
+                );
+              }}
+              onChangeHome={changeHome}
+              onOpenGame={(game) => setDetailGameId(game.id)}
+              onLaunch={handleLaunchGame}
+              launchingId={launchingId}
+              onOpenSettings={() => openSettings("home")}
+              deals={<DealsView ownedSteamAppIds={ownedSteamAppIds} onError={setStatusMessage} />}
             />
           ) : mainView === "stats" ? (
             <StatsView

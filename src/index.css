@@ -636,6 +636,44 @@
     width: clamp(15.5rem, 21%, 25rem);
   }
 
+  /* ------------------------------------------------------------- Home */
+
+  /*
+   * What moves behind the top of Home: it fades out before the content, takes no clicks
+   * and sits under everything on the page.
+   */
+  .home-ambience {
+    position: absolute;
+    inset: -1.25rem calc(var(--content-padding) * -1) auto;
+    width: calc(100% + var(--content-padding) * 2);
+    height: min(26rem, 55vh);
+    pointer-events: none;
+    mask-image: linear-gradient(to bottom, black 35%, transparent);
+  }
+
+  /* A shelf is one row of covers: as many as fit, never a cut second row */
+  .home-shelf {
+    display: grid;
+    gap: var(--grid-gap);
+    align-items: start;
+  }
+
+  .home-heading {
+    color: var(--nav-heading-color);
+  }
+
+  /* The empty place at the end of the queue of next games */
+  .home-add-tile {
+    aspect-ratio: var(--cover-aspect);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--card-radius);
+    background-color: color-mix(in srgb, var(--bg-surface) 40%, transparent);
+  }
+
+  .home-add-tile:hover {
+    border-color: var(--accent-color);
+  }
+
   /* ---------------------------------------- the cards of a game's sheet */
 
   /* The figures: time played a little wider than the two beside it */

@@ -68,6 +68,38 @@ export interface DetectedGame {
   updatedAt: number;
 }
 
+/** A part of the Home page. */
+export type HomeSection = "resume" | "upNext" | "mostPlayed" | "recommendations" | "deals";
+
+/** A place the user named for the weather on the Home page, kept coarse (about a kilometre). */
+export interface WeatherPlace {
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** A place found for a name, with what tells it from its namesakes. */
+export interface PlaceMatch {
+  name: string;
+  /** Region and country, as one line. */
+  region: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** How the user wants the Home page. */
+export interface HomeConfig {
+  /** Parts left out. */
+  hidden: HomeSection[];
+  /** The moving background of the season and of the holidays. */
+  effects: boolean;
+  /** Let the background follow the weather at `place` (asks Open-Meteo; off until chosen). */
+  weather: boolean;
+  place: WeatherPlace | null;
+  /** The games lined up to play next, in order: at most five ids. */
+  upNext: string[];
+}
+
 /** A part of the side panel the user can leave out. */
 export type HideableSection = "home" | "store" | "tags";
 
@@ -153,6 +185,7 @@ export interface AppConfig {
   cardInfo: CardInfoItem[];
   /** Parts of the side panel the user hid; with Home hidden, Kanso opens on the library. */
   hiddenSections: HideableSection[];
+  home: HomeConfig;
   /** Emulators added by the user, and folders added to the ones Kanso found. */
   emulators: EmulatorSetting[];
   /**
@@ -353,6 +386,14 @@ export interface ThemeShapes {
   panelShape: "rounded" | "cut";
 }
 
+/** The Home page as a theme arranges it. */
+export interface ThemeHome {
+  /** The parts shown, in order; a part not named is not shown. */
+  sections: HomeSection[];
+  /** What moves behind the top of the page: of the season, or nothing. */
+  effects: "seasonal" | "none";
+}
+
 /** How much the interface moves, and how. */
 export interface ThemeMotion {
   level: MotionLevel;
@@ -483,6 +524,7 @@ export interface Theme {
   effects: ThemeEffects;
   detail: ThemeDetail;
   motion: ThemeMotion;
+  home: ThemeHome;
   fontFiles: ThemeFontFile[];
 }
 
