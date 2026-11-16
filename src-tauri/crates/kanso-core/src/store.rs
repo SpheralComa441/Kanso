@@ -18,9 +18,14 @@ pub struct LibraryStore {
 }
 
 /// Something the user did with the game, which outlives its installation.
+/// Most genres a user adds to one game, and the longest a genre's name gets.
+const MAX_CUSTOM_GENRES: usize = 24;
+const MAX_GENRE_CHARS: usize = 40;
+
 fn has_user_data(game: &DetectedGame) -> bool {
     game.is_favorite
         || game.status.is_some()
+        || !game.custom_genres.is_empty()
         || game.custom_override
         || game.play_count > 0
         || game.playtime_minutes.is_some_and(|minutes| minutes > 0)
@@ -68,6 +73,7 @@ impl LibraryStore {
                 scanned.last_played_at = scanned.last_played_at.max(cached.last_played_at);
                 scanned.playtime_minutes = scanned.playtime_minutes.or(cached.playtime_minutes);
                 scanned.status = cached.status;
+                scanned.custom_genres = cached.custom_genres.clone();
                 // Counts come from the Steam client's cache, which may be missing for a while
                 if scanned.achievements_total.is_none() {
                     scanned.achievements_unlocked = cached.achievements_unlocked;
@@ -140,6 +146,8 @@ impl LibraryStore {
             .cloned()
             .map(|mut game| {
                 game.is_installed = false;
+                // Nothing on disk says a version any more
+                game.version = None;
                 game
             })
             .collect();
@@ -164,6 +172,7 @@ impl LibraryStore {
             });
             if let Some(twin) = twin {
                 scanned.status = twin.status;
+                scanned.custom_genres = twin.custom_genres.clone();
                 scanned.is_favorite = twin.is_favorite;
                 scanned.is_hidden = twin.is_hidden;
                 scanned.playtime_minutes = scanned.playtime_minutes.max(twin.playtime_minutes);
@@ -223,6 +232,10 @@ impl LibraryStore {
         enriched.last_played_at = existing.last_played_at;
         enriched.playtime_minutes = existing.playtime_minutes;
         enriched.status = existing.status;
+        enriched.custom_genres = existing.custom_genres.clone();
+        // What the scan read from disk, not something a lookup online knows
+        enriched.version = existing.version.clone();
+        enriched.is_family_shared = existing.is_family_shared;
         enriched.achievements_unlocked = existing.achievements_unlocked;
         enriched.achievements_total = existing.achievements_total;
         enriched.play_count = existing.play_count;
@@ -260,6 +273,31 @@ impl LibraryStore {
             return Err(format!("{}: {game_id}", T::GameNotFound.s()));
         };
         game.status = status;
+        Ok(game.clone())
+    }
+
+    /// Sets the genres the user gives a game besides its store's own: plain names, each once
+    /// (whatever the capitals), and none that the game already has from its store.
+    pub fn set_custom_genres(&mut self, game_id: &str, genres: &[String]) -> Result<DetectedGame, String> {
+        let Some(game) = self.get_game_mut(game_id) else {
+            return Err(format!("{}: {game_id}", T::GameNotFound.s()));
+        };
+        let mut seen: HashSet<String> = game.genres.iter().map(|genre| genre.trim().to_lowercase()).collect();
+        game.custom_genres = genres
+            .iter()
+            .map(|genre| {
+                genre
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .filter(|c| !c.is_control())
+                    .take(MAX_GENRE_CHARS)
+                    .collect::<String>()
+            })
+            .filter(|genre| !genre.is_empty() && seen.insert(genre.to_lowercase()))
+            .take(MAX_CUSTOM_GENRES)
+            .collect();
         Ok(game.clone())
     }
 
@@ -741,6 +779,40 @@ mod tests {
         assert!(db.get_game("steam:2").unwrap().unwrap().is_favorite);
         assert!(db.get_game("steam:2").unwrap().unwrap().is_installed);
         assert!(!db.get_game("steam:1").unwrap().unwrap().is_installed);
+    }
+
+    #[test]
+    fn the_user_s_own_genres_are_kept_apart_from_the_store_s() {
+        let mut hades = scanned_steam("1145360", "Hades", false);
+        hades.genres = vec!["Azione".to_string(), "GDR".to_string()];
+        let mut store = LibraryStore { games: vec![hades] };
+
+        let typed = ["  Da   rigiocare ", "azione", "DA RIGIOCARE", "", "Roguelike\u{7}", &"x".repeat(60)].map(str::to_string);
+        let saved = store.set_custom_genres("steam:1145360", &typed).unwrap();
+        assert_eq!(
+            saved.custom_genres,
+            ["Da rigiocare".to_string(), "Roguelike".to_string(), "x".repeat(40)],
+            "tidied, each once whatever the capitals, none the store already gives"
+        );
+        assert_eq!(saved.genres, ["Azione", "GDR"], "the store's own are not touched");
+        assert!(store.set_custom_genres("steam:missing", &[]).is_err());
+
+        // A rescan, and a sync that fetched the store's genres again, leave them alone
+        let rescanned = store.merge_with_scan(ScanReport { games: vec![scanned_steam("1145360", "Hades", false)], ..Default::default() });
+        assert_eq!(rescanned.games[0].custom_genres.len(), 3);
+        let mut synced = rescanned.games[0].clone();
+        synced.genres = vec!["Action".to_string()];
+        synced.custom_genres = Vec::new();
+        synced.version = Some("stale".to_string());
+        let committed = store.commit_enriched_game(synced, false).unwrap();
+        assert_eq!((committed.genres.as_slice(), committed.custom_genres.len()), (&["Action".to_string()][..], 3));
+        assert_eq!(committed.version, None, "the version is what the scan read, not what a sync carries");
+
+        // They are the user's: a game with only that to its name is not forgotten when it goes
+        let gone = store.merge_with_scan(ScanReport::default());
+        assert_eq!(gone.games.len(), 1);
+        // Clearing them is setting none
+        assert!(store.set_custom_genres("steam:1145360", &[]).unwrap().custom_genres.is_empty());
     }
 
     #[test]

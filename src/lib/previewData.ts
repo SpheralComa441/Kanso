@@ -66,6 +66,9 @@ function seed(game: PreviewSeed): DetectedGame {
     achievementsTotal: null,
     steamStoreAppid: null,
     isInstalled: true,
+    customGenres: [],
+    version: null,
+    isFamilyShared: false,
     updatedAt: 1700000000000,
     ...rest,
   };

@@ -598,6 +598,17 @@ fn set_game_status(
     })
 }
 
+/// Sets the genres the user gives a game besides the ones its store lists.
+#[tauri::command]
+fn set_game_genres(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+    genres: Vec<String>,
+) -> Result<DetectedGame, String> {
+    update_stored_game(&app, &state, &game_id, |store| store.set_custom_genres(&game_id, &genres))
+}
+
 /// Launches a game by library id. The launch target is always read from the local store,
 /// never taken from the webview.
 #[tauri::command]
@@ -974,6 +985,7 @@ pub fn run() {
             export_theme,
             open_themes_folder,
             set_game_status,
+            set_game_genres,
             playtime::get_game_achievements,
             playtime::get_play_sessions,
             playtime::get_running_games,

@@ -175,6 +175,7 @@ export function SettingsModal({
   const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
   const [animations, setAnimations] = useState(initialConfig.animations);
   const [cardInfo, setCardInfo] = useState(initialConfig.cardInfo);
+  const [hiddenSections, setHiddenSections] = useState(initialConfig.hiddenSections);
   const [emulators, setEmulators] = useState(initialConfig.emulators);
   const [hasGamePass, setHasGamePass] = useState(initialConfig.hasGamePass);
   const [gamePassCatalog, setGamePassCatalog] = useState(initialConfig.gamePassCatalog);
@@ -200,6 +201,7 @@ export function SettingsModal({
       setTrackPlaytime(initialConfig.trackPlaytime);
       setAnimations(initialConfig.animations);
       setCardInfo(initialConfig.cardInfo);
+      setHiddenSections(initialConfig.hiddenSections);
       setEmulators(initialConfig.emulators);
       setHasGamePass(initialConfig.hasGamePass);
       setGamePassCatalog(initialConfig.gamePassCatalog);
@@ -371,6 +373,7 @@ export function SettingsModal({
         animations,
         // Kept in Kanso's order, whatever order they were ticked in
         cardInfo: CARD_INFO_CHOICES.filter((item) => cardInfo.includes(item)),
+        hiddenSections,
         // An entry that says nothing (no executable, folder or argument) is not kept
         emulators: emulators.filter(
           (emulator) => emulator.exePath.trim() || emulator.folders.length > 0 || emulator.args.trim()
@@ -506,6 +509,43 @@ export function SettingsModal({
                   ))}
                 </select>
                 <p className="text-2xs text-zinc-500">{t("settings.languageHelp")}</p>
+              </section>
+
+              {/* What the side panel shows */}
+              <section id="settings-sidebar" className="space-y-2">
+                <div>
+                  <span className="block text-xs font-medium text-zinc-200">{t("settings.sidebar")}</span>
+                  <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.sidebarHelp")}</p>
+                </div>
+                {(
+                  [
+                    ["home", "settings.showHome", "settings.showHomeHelp"],
+                    ["tags", "settings.showTags", "settings.showTagsHelp"],
+                  ] as const
+                ).map(([name, label, help]) => (
+                  <div
+                    key={name}
+                    className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2"
+                  >
+                    <div>
+                      <label htmlFor={`show-section-${name}`} className="block text-xs font-medium text-zinc-200">
+                        {t(label)}
+                      </label>
+                      <p className="text-2xs text-zinc-500">{t(help)}</p>
+                    </div>
+                    <input
+                      id={`show-section-${name}`}
+                      type="checkbox"
+                      checked={!hiddenSections.includes(name)}
+                      onChange={(e) =>
+                        setHiddenSections((current) =>
+                          e.target.checked ? current.filter((entry) => entry !== name) : [...current, name]
+                        )
+                      }
+                      className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                    />
+                  </div>
+                ))}
               </section>
 
               {/* How the app behaves around a game */}

@@ -115,6 +115,13 @@ const MIGRATIONS: &[&str] = &["
         PRIMARY KEY (platform, item_id)
     );
 ",
+    // v7: genres the user adds to a game, the version installed and whether a Steam game is
+    // borrowed through family sharing.
+    "
+    ALTER TABLE games ADD COLUMN custom_genres TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE games ADD COLUMN version TEXT;
+    ALTER TABLE games ADD COLUMN is_family_shared INTEGER NOT NULL DEFAULT 0;
+",
 ];
 
 const GAME_COLUMNS: &str = "id, title, clean_title, platform, platform_app_id, install_dir, \
@@ -122,7 +129,7 @@ const GAME_COLUMNS: &str = "id, title, clean_title, platform, platform_app_id, i
     is_favorite, is_hidden, metadata_synced, custom_override, title_provisional, \
     metadata_attempted_at, last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, \
     playtime_minutes, status, achievements_unlocked, achievements_total, steam_store_appid, \
-    is_installed";
+    is_installed, custom_genres, version, is_family_shared";
 
 const UPSERT_GAME_SQL: &str = "
     INSERT INTO games (
@@ -130,9 +137,10 @@ const UPSERT_GAME_SQL: &str = "
         launch_uri, steamgriddb_id, cover_path, short_description, genres, app_type, is_favorite,
         is_hidden, metadata_synced, custom_override, title_provisional, metadata_attempted_at,
         last_played_at, play_count, updated_at, metadata_lang, tags, tags_lang, playtime_minutes,
-        status, achievements_unlocked, achievements_total, steam_store_appid, is_installed
+        status, achievements_unlocked, achievements_total, steam_store_appid, is_installed,
+        custom_genres, version, is_family_shared
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-              ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31)
+              ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)
     ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
         clean_title = excluded.clean_title,
@@ -163,7 +171,10 @@ const UPSERT_GAME_SQL: &str = "
         achievements_unlocked = excluded.achievements_unlocked,
         achievements_total = excluded.achievements_total,
         steam_store_appid = excluded.steam_store_appid,
-        is_installed = excluded.is_installed";
+        is_installed = excluded.is_installed,
+        custom_genres = excluded.custom_genres,
+        version = excluded.version,
+        is_family_shared = excluded.is_family_shared";
 
 /// Shape of the `library.json` file written by Kanso before the SQLite store existed.
 #[derive(Debug, Default, Deserialize)]
@@ -677,6 +688,7 @@ pub fn sort_games_by_title(games: &mut [DetectedGame]) {
 fn execute_upsert(conn: &Connection, game: &DetectedGame) -> rusqlite::Result<usize> {
     let genres_json = serde_json::to_string(&game.genres).unwrap_or_else(|_| "[]".to_string());
     let tags_json = serde_json::to_string(&game.tags).unwrap_or_else(|_| "[]".to_string());
+    let custom_genres_json = serde_json::to_string(&game.custom_genres).unwrap_or_else(|_| "[]".to_string());
     conn.execute(
         UPSERT_GAME_SQL,
         params![
@@ -711,6 +723,9 @@ fn execute_upsert(conn: &Connection, game: &DetectedGame) -> rusqlite::Result<us
             game.achievements_total.map(i64::from),
             game.steam_store_appid,
             game.is_installed,
+            custom_genres_json,
+            game.version,
+            game.is_family_shared,
         ],
     )
 }
@@ -758,6 +773,9 @@ fn game_from_row(row: &Row<'_>) -> rusqlite::Result<DetectedGame> {
         achievements_total: optional_count(row, "achievements_total")?,
         steam_store_appid: row.get("steam_store_appid")?,
         is_installed: row.get("is_installed")?,
+        custom_genres: serde_json::from_str(&row.get::<_, String>("custom_genres")?).unwrap_or_default(),
+        version: row.get("version")?,
+        is_family_shared: row.get("is_family_shared")?,
     })
 }
 
@@ -826,6 +844,9 @@ mod tests {
         full.achievements_total = Some(78);
         full.steam_store_appid = Some("292030".to_string());
         full.is_installed = false;
+        full.custom_genres = vec!["Da rigiocare".to_string(), "Сюжетные".to_string()];
+        full.version = Some("4.04".to_string());
+        full.is_family_shared = true;
         full.updated_at = 1_731_700_000_000;
 
         let bare = sample("steam:10", "alpha");

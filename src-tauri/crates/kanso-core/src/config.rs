@@ -62,6 +62,10 @@ pub const CARD_INFO_CHOICES: [&str; 7] =
 /// What it tells until the user chooses.
 const CARD_INFO_DEFAULT: [&str; 3] = ["genres", "playtime", "badges"];
 
+/// The parts of the side panel the user can leave out: the Home page, the Store page, the
+/// list of tags. Anything else in `config.json` is dropped.
+pub const HIDEABLE_SECTIONS: [&str; 3] = ["home", "store", "tags"];
+
 /// Most emulators remembered, folders per emulator and extensions per emulator.
 const MAX_EMULATORS: usize = 48;
 const MAX_EMULATOR_FOLDERS: usize = 16;
@@ -208,6 +212,9 @@ pub struct AppConfig {
     /// What a cover tells about its game under the pointer, from [`CARD_INFO_CHOICES`]. An
     /// empty list is a choice too: the title alone.
     pub card_info: Vec<String>,
+    /// Parts of the side panel the user hid, from [`HIDEABLE_SECTIONS`]. With the Home page
+    /// hidden, Kanso opens on the library.
+    pub hidden_sections: Vec<String>,
     /// Emulators added by the user, and folders added to the ones Kanso found.
     pub emulators: Vec<EmulatorSetting>,
     /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
@@ -233,6 +240,7 @@ impl Default for AppConfig {
             plugins: BTreeMap::new(),
             animations: ANIMATION_CHOICES[0].to_string(),
             card_info: CARD_INFO_DEFAULT.iter().map(|item| item.to_string()).collect(),
+            hidden_sections: Vec::new(),
             emulators: Vec::new(),
             has_game_pass: false,
             game_pass_catalog: false,
@@ -290,6 +298,11 @@ impl AppConfig {
             card_info: CARD_INFO_CHOICES
                 .iter()
                 .filter(|choice| self.card_info.iter().any(|item| item.trim() == **choice))
+                .map(|choice| choice.to_string())
+                .collect(),
+            hidden_sections: HIDEABLE_SECTIONS
+                .iter()
+                .filter(|choice| self.hidden_sections.iter().any(|item| item.trim() == **choice))
                 .map(|choice| choice.to_string())
                 .collect(),
             emulators: {
@@ -430,6 +443,7 @@ mod tests {
                     ..EmulatorSetting::default()
                 },
             ],
+            hidden_sections: vec![" tags ".to_string(), "library".to_string(), "home".to_string(), "tags".to_string()],
             card_info: vec![
                 "badges".to_string(),
                 " genres ".to_string(),
@@ -465,6 +479,7 @@ mod tests {
 
         assert!(!saved.track_playtime);
         assert_eq!(saved.card_info, ["genres", "badges"], "known names, once, in Kanso's order");
+        assert_eq!(saved.hidden_sections, ["home", "tags"], "only what can be hidden, once each");
         assert_eq!(
             saved.emulators[..1],
             [EmulatorSetting {

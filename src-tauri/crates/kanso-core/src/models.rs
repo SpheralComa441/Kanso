@@ -220,6 +220,18 @@ pub struct DetectedGame {
     /// first saw it, or known to be owned without ever having been installed here.
     #[serde(default = "default_true")]
     pub is_installed: bool,
+    /// Genres the user gave the game, besides the ones its store page lists. They are the
+    /// user's: a sync that fetches the store's genres again leaves them alone.
+    #[serde(default)]
+    pub custom_genres: Vec<String>,
+    /// The version installed, as the game's client or its files say it: a build number, a
+    /// version string. `None` when nothing on disk says.
+    #[serde(default)]
+    pub version: Option<String>,
+    /// A Steam game on this PC that belongs to someone else's account: played through
+    /// family sharing.
+    #[serde(default)]
+    pub is_family_shared: bool,
     /// Last metadata/cover update timestamp in ms (also used for UI image cache busting).
     #[serde(default)]
     pub updated_at: u64,
@@ -269,6 +281,9 @@ impl DetectedGame {
             achievements_total: None,
             steam_store_appid: None,
             is_installed: true,
+            custom_genres: Vec::new(),
+            version: None,
+            is_family_shared: false,
             updated_at: now_timestamp_ms(),
         }
     }

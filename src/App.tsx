@@ -43,6 +43,8 @@ import {
   scanGames,
   setGameFavorite,
   setGameHidden,
+  setGameGenres,
+  mergedGenres,
   setGameStatus,
   subscribeToGameBatchUpdates,
   subscribeToGameRemovals,
@@ -94,6 +96,7 @@ const INITIAL_CONFIG: AppConfig = {
   plugins: {},
   animations: "theme",
   cardInfo: [...CARD_INFO_DEFAULT],
+  hiddenSections: [],
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
@@ -564,6 +567,15 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     }
   };
 
+  /** The genres the user gives a game, besides its store's own. */
+  const handleSetGenres = async (game: DetectedGame, customGenres: string[]) => {
+    try {
+      upsertSingleGameInState(await setGameGenres(game.id, customGenres));
+    } catch (err) {
+      setStatusMessage(typeof err === "string" ? err : t("app.statusError"));
+    }
+  };
+
   /* ------------------------------------------------------------- navigation */
 
   /**
@@ -584,6 +596,15 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     setMainView(view);
     writeUiPreference(MAIN_VIEW_PREF_KEY, view);
   };
+
+  // A page the user hid is not a place to be left on: the library takes over
+  const hiddenSections = config.hiddenSections;
+  useEffect(() => {
+    if ((mainView === "home" || mainView === "tags") && hiddenSections.includes(mainView)) {
+      setMainView("library");
+      writeUiPreference(MAIN_VIEW_PREF_KEY, "library");
+    }
+  }, [hiddenSections, mainView]);
 
   const changeFilters = (next: LibraryFilters) => {
     setFilters(next);
@@ -638,7 +659,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   /* --------------------------------------------------------------- derived */
 
   // Emulated games have their own section: the library, its counts, genres and tags are
-  const allGames = report.games;
+  // A game shows its store's genres and the user's as one list
+  const allGames = useMemo(
+    () =>
+      report.games.map((game) =>
+        game.customGenres?.length ? { ...game, genres: mergedGenres(game.genres, game.customGenres) } : game
+      ),
+    [report.games]
+  );
   // about everything else. A hidden emulated game is the exception: "Nascosti" is the one
   // place hidden games can be brought back from, whatever they are.
   const games = useMemo(
@@ -651,13 +679,26 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const scope = libraryScope(filters.collection, installedOnly);
   const genres = useMemo(() => summarizeGenres(games, scope), [games, scope]);
   const tags = useMemo(() => summarizeTags(games, genres, scope), [games, genres, scope]);
-  const counts = useMemo(
-    () => countLibrary(games, installedOnly, scope),
-    [games, installedOnly, scope]
-  );
+  // Where the user stands with a game is about the game, whatever runs it: the statuses
+  // count the emulated games too, and choosing one lists them with the others
+  const counts = useMemo(() => {
+    const counted = countLibrary(games, installedOnly, scope);
+    for (const game of emulatedGames) {
+      if (!game.isHidden && game.status && isInScope(game, scope)) counted.byStatus[game.status] += 1;
+    }
+    return counted;
+  }, [games, emulatedGames, installedOnly, scope]);
   const filteredGames = useMemo(
-    () => applyLibraryFilters(games, filters, searchQuery, installedOnly),
-    [games, filters, searchQuery, installedOnly]
+    () =>
+      applyLibraryFilters(
+        filters.status === null
+          ? games
+          : allGames.filter((game) => !isEmulated(game) || game.isHidden || game.status === filters.status),
+        filters,
+        searchQuery,
+        installedOnly
+      ),
+    [games, allGames, filters, searchQuery, installedOnly]
   );
   const scopedGames = useMemo(
     () => games.filter((game) => isInScope(game, scope)),
@@ -727,8 +768,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     [allGames, detailGameId]
   );
   const editingGame = useMemo(
-    () => allGames.find((g) => g.id === editingGameId) ?? null,
-    [allGames, editingGameId]
+    // The editor works on the store's genres alone: the user's own are kept apart
+    () => report.games.find((g) => g.id === editingGameId) ?? null,
+    [report.games, editingGameId]
   );
 
   // A game that is not on disk arrives with name and cover only: the rest is looked up the
@@ -836,6 +878,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           counts={counts}
           genres={genres}
           tags={tags}
+          hidden={config.hiddenSections}
         />
 
         <main className="app-main scroll-area fade-top min-w-0 flex-1 space-y-4 overflow-y-auto">
@@ -1038,6 +1081,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         }}
         isRunning={detailGame !== null && runningIds.has(detailGame.id)}
         onSetStatus={handleSetStatus}
+        onSetGenres={handleSetGenres}
+        knownGenres={genres.map((genre) => genre.label)}
         plugins={detailPlugins}
       />
 

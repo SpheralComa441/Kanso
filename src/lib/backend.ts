@@ -25,6 +25,7 @@ import type {
   StoreAccountInfo,
   Theme,
   WindowSignIn,
+  HideableSection,
 } from "../types/game";
 import {
   PREVIEW_MOCK_DEALS,
@@ -63,6 +64,7 @@ const DEFAULT_CONFIG: AppConfig = {
   plugins: {},
   animations: "theme",
   cardInfo: [...CARD_INFO_DEFAULT],
+  hiddenSections: [],
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
@@ -151,6 +153,7 @@ export async function getSettings(): Promise<AppConfig> {
       plugins: withPluginDefaults(parsed.plugins),
       animations: withAnimationsChoice(parsed.animations),
       cardInfo: withCardInfo(parsed.cardInfo),
+      hiddenSections: withHiddenSections(parsed.hiddenSections),
       emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
       gamePassCatalog: parsed.gamePassCatalog === true,
@@ -174,6 +177,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     plugins: withPluginDefaults(config.plugins),
     animations: withAnimationsChoice(config.animations),
     cardInfo: withCardInfo(config.cardInfo),
+    hiddenSections: withHiddenSections(config.hiddenSections),
     emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
     gamePassCatalog: config.gamePassCatalog === true,
@@ -543,6 +547,45 @@ export async function setGameStatus(
   const updated: DetectedGame = { ...previewGamesState[idx], status };
   previewGamesState[idx] = updated;
   return updated;
+}
+
+/** The genres a game shows: its store's and the user's, each once whatever the capitals. */
+export function mergedGenres(storeGenres: string[], customGenres: string[]): string[] {
+  const seen = new Set<string>();
+  return [...storeGenres, ...customGenres].filter((genre) => {
+    const key = genre.trim().toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** Sets the genres the user gives a game besides the ones its store lists. */
+export async function setGameGenres(gameId: string, genres: string[]): Promise<DetectedGame> {
+  if (isTauri()) {
+    return invoke<DetectedGame>("set_game_genres", { gameId, genres });
+  }
+
+  const idx = previewGamesState.findIndex((g) => g.id === gameId);
+  if (idx === -1) throw new Error("Gioco non trovato.");
+  const own = previewGamesState[idx].genres.map((genre) => genre.toLowerCase());
+  const customGenres = mergedGenres(
+    [],
+    genres.map((genre) => genre.trim().replace(/\s+/g, " ").slice(0, 40))
+  )
+    .filter((genre) => !own.includes(genre.toLowerCase()))
+    .slice(0, 24);
+  const updated: DetectedGame = { ...previewGamesState[idx], customGenres };
+  previewGamesState[idx] = updated;
+  return updated;
+}
+
+/** The parts of the side panel that can be hidden, in the order Settings lists them. */
+export const HIDEABLE_SECTIONS: HideableSection[] = ["home", "store", "tags"];
+
+function withHiddenSections(value: unknown): HideableSection[] {
+  const chosen = Array.isArray(value) ? value : [];
+  return HIDEABLE_SECTIONS.filter((section) => chosen.includes(section));
 }
 
 export async function launchGame(game: DetectedGame): Promise<void> {

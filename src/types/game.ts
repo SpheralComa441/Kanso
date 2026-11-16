@@ -59,8 +59,17 @@ export interface DetectedGame {
   steamStoreAppid: string | null;
   /** `false` for a game in the library that is not on disk (uninstalled, or owned only). */
   isInstalled: boolean;
+  /** Genres the user gave the game, besides the ones its store lists. */
+  customGenres: string[];
+  /** The version installed, as the client or the files say it; `null` when nothing says. */
+  version: string | null;
+  /** A Steam game on this PC that belongs to someone else's account (family sharing). */
+  isFamilyShared: boolean;
   updatedAt: number;
 }
+
+/** A part of the side panel the user can leave out. */
+export type HideableSection = "home" | "store" | "tags";
 
 /** A stretch of play time, the unit of the statistics page. */
 export interface PlaySession {
@@ -142,6 +151,8 @@ export interface AppConfig {
   animations: AnimationsChoice;
   /** What a cover tells about its game under the pointer, besides the title. */
   cardInfo: CardInfoItem[];
+  /** Parts of the side panel the user hid; with Home hidden, Kanso opens on the library. */
+  hiddenSections: HideableSection[];
   /** Emulators added by the user, and folders added to the ones Kanso found. */
   emulators: EmulatorSetting[];
   /**
