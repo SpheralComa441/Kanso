@@ -62,6 +62,15 @@ spostato in fondo torna davanti, il trattino diventa due punti. `Legend of Zelda
 Time (USA) (Rev 2) [!].z64` diventa *The Legend of Zelda: Ocarina of Time*. Dalla scheda del
 gioco puoi cambiare titolo e copertina come per ogni altro.
 
+Alcuni giochi non hanno un file con il loro nome: ogni gioco PlayStation è un `eboot.bin`, ogni
+gioco Xbox 360 estratto un `default.xex`. Per i file di avvio (`eboot`, `default`, `boot`, `main`)
+il titolo è quello scritto nel file dei titoli del gioco (`sce_sys\param.sfo` o `PARAM.SFO`: un
+file di pochi kilobyte, da cui Kanso legge solo il nome) oppure, se manca, il nome della cartella.
+
+Se una scansione dà a un gioco emulato un titolo diverso da prima, copertina e descrizione trovate
+con il vecchio titolo vengono cercate di nuovo: erano di un altro gioco. Un gioco che hai
+modificato a mano resta com'è.
+
 ## Emulatori riconosciuti
 
 File di impostazioni, sezioni, chiavi e argomenti sono stati controllati sul codice sorgente di
@@ -75,6 +84,7 @@ l'emulatore tiene le impostazioni accanto all'eseguibile.
 | PCSX2 (Qt) | PlayStation 2 | `inis\PCSX2.ini`, `[GameList]` `Paths` / `RecursivePaths`, in `Documenti\PCSX2` (portatile con `portable.ini` o `portable.txt`) | `-batch -- <gioco>` |
 | DuckStation | PlayStation | `settings.ini`, `[GameList]`, in `%LOCALAPPDATA%\DuckStation` (o `Documenti\DuckStation`; portatile con `portable.txt` o `settings.ini`) | `-batch -- <gioco>` |
 | RPCS3 | PlayStation 3 | `config\games.yml`: l'elenco dei giochi per sigla; il titolo da `PARAM.SFO` | `--no-gui <EBOOT.BIN>` |
+| shadPS4 | PlayStation 4 | `config.json`, `General` → `install_dirs` (le cartelle spente in shadPS4 sono saltate); prima della 0.16 `config.toml`, `[GUI]` `installDirs`. In `user\` accanto all'eseguibile, altrimenti in `%APPDATA%\shadPS4`. Il gioco è ogni cartella con un `eboot.bin`; il titolo da `sce_sys\param.sfo` | `-g <eboot.bin>`; con il launcher `-d -g <eboot.bin>` |
 | PPSSPP | PSP | `ppsspp.ini`, `[PinnedPaths]` e `[General] CurrentDirectory`, in `memstick\PSP\SYSTEM` (o dove dice `installed.txt`) | `<gioco>` |
 | Cemu | Wii U | `settings.xml`, `<GamePaths>`, in `%APPDATA%\Cemu` (o accanto all'eseguibile, o in `portable\`) | `-g <gioco>` |
 | Ryujinx | Switch | `Config.json`, `game_dirs`, in `%APPDATA%\Ryujinx` (o accanto all'eseguibile, o in `portable\`) | `<gioco>` |
@@ -93,6 +103,13 @@ Note:
 - **RetroArch**: ogni gioco parte con il *core* che la playlist gli assegna. Finché un gioco non
   è stato avviato una volta da RetroArch la playlist dice `DETECT`: quei giochi non vengono
   elencati, e la scansione avvisa di quanti sono.
+- **shadPS4** esiste in due programmi. `shadPS4.exe` è l'emulatore: da qualche versione non ha
+  più una finestra propria, e aperto senza un gioco mostra solo un avviso. `shadPS4QtLauncher.exe`
+  è il launcher con la finestra, che avvia l'emulatore. Se Kanso li trova entrambi usa il
+  launcher, così *Apri shadPS4* apre la finestra; per avviare un gioco gli passa `-d`, che vuol
+  dire «la versione dell'emulatore scelta nel launcher»: nel launcher deve essercene una
+  selezionata. Le cartelle `…-UPDATE`, `…-patch` e `…-mods` accanto a un gioco sono suoi
+  aggiornamenti e mod, non altri giochi. I giochi in archivi `.zar` non sono elencati.
 - **Una cartella che è un intero disco** (per esempio l'ultima cartella sfogliata in PPSSPP)
   non viene letta.
 - **Argomenti di avvio**: in *Impostazioni → Emulatori* puoi scriverne di tuoi per ogni
@@ -105,8 +122,12 @@ Note:
 
 Emulatori che non avviano un file ma un nome o un titolo installato, e che quindi richiedono
 una lettura a parte: **MAME** (nomi dei set), **ScummVM** (giochi aggiunti nel programma),
-**Vita3K** e **shadPS4** (titoli installati). Si possono aggiungere come emulatore «non
-riconosciuto» solo dove basta passare un file.
+**Vita3K** (titoli installati). Si possono aggiungere come emulatore «non riconosciuto» solo
+dove basta passare un file.
+
+Un emulatore aggiunto a mano come «non riconosciuto» diventa da solo quello riconosciuto quando
+una versione successiva di Kanso impara a conoscerne l'eseguibile: restano le cartelle e gli
+argomenti che avevi scritto, nome ed estensioni diventano quelli dell'emulatore.
 
 ## Dove sta nel codice
 
@@ -116,6 +137,7 @@ riconosciuto» solo dove basta passare un file.
 - `…/emulators/own_settings.rs`: la lettura delle cartelle dei giochi dalle impostazioni di
   ciascun emulatore.
 - `…/emulators/roms.rs`: quali file sono giochi e come si chiamano.
-- `…/emulators/special.rs`: le playlist di RetroArch e l'elenco di RPCS3.
+- `…/emulators/special.rs`: le playlist di RetroArch, l'elenco di RPCS3 e le cartelle dei
+  giochi PlayStation 4.
 - `src-tauri/src/emulators.rs`: i comandi dell'app (elenco, avvio).
 - `src/components/EmulatorsView.tsx`, `src/components/EmulatorsSettings.tsx`: l'interfaccia.

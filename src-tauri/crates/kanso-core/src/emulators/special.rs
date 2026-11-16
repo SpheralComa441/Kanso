@@ -203,23 +203,24 @@ pub fn rpcs3_games(exe_dir: &Path) -> Vec<RomFile> {
     games
 }
 
-/// How deep below a games folder a PlayStation 4 game is looked for (collection/game).
-const PS4_MAX_DEPTH: usize = 3;
+/// How deep below a games folder a PlayStation 4 game is looked for: as deep as shadPS4
+/// itself goes.
+const PS4_MAX_DEPTH: usize = 5;
 /// Most folders opened while looking for PlayStation 4 games in one games folder.
 const PS4_MAX_FOLDERS: usize = 4000;
 
-/// Whether a folder holds an update or extra content of a game rather than a game: shadPS4
-/// keeps those next to the game, named after its serial (`CUSA00900-UPDATE`,
-/// `CUSA00900-patch`).
+/// Whether a folder holds an update or mods of a game rather than a game: shadPS4 keeps
+/// those next to the game, under its folder's name and a suffix (`CUSA00900-UPDATE`,
+/// `CUSA00900-patch`, `CUSA00900-mods`).
 fn is_ps4_addition(folder_name: &str) -> bool {
     let name = folder_name.to_ascii_lowercase();
-    name.ends_with("-update") || name.ends_with("-patch")
+    ["-update", "-patch", "-mods"].iter().any(|suffix| name.ends_with(suffix))
 }
 
 /// The PlayStation 4 games in `folders`: every folder that holds an `eboot.bin`, the file
 /// shadPS4 starts. The title is the one in the game's `sce_sys/param.sfo`, or the folder's
-/// name without one. A game's folder is not searched further, and updates kept in a folder
-/// of their own are not games.
+/// name without one. A game's folder is not searched further, and updates or mods kept in a
+/// folder of their own are not games.
 pub fn ps4_games(folders: &[PathBuf]) -> Vec<RomFile> {
     let mut games: Vec<RomFile> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -326,12 +327,13 @@ pub(crate) mod tests {
         // Its update, kept next to it: part of the same game
         s.file("Giochi PS4/CUSA00900-UPDATE/eboot.bin", "x");
         s.file("Giochi PS4/CUSA00900-patch/eboot.bin", "x");
+        s.file("Giochi PS4/CUSA00900-mods/eboot.bin", "x");
         // A game with no title file is called as its folder
         s.file("Giochi PS4/Gravity Rush 2 [CUSA04943]/EBOOT.BIN", "x");
         // Games grouped in a folder; a folder too deep; a hidden one; one with no game
         s.file("Giochi PS4/Sparatutto/CUSA07408/eboot.bin", "x");
         fs::write(s.dir("Giochi PS4/Sparatutto/CUSA07408/sce_sys").join("param.sfo"), sfo(&[("TITLE", "God of War")])).unwrap();
-        s.file("Giochi PS4/a/b/c/d/CUSA11111/eboot.bin", "x");
+        s.file("Giochi PS4/a/b/c/d/e/CUSA11111/eboot.bin", "x");
         s.file("Giochi PS4/.trash/CUSA22222/eboot.bin", "x");
         s.file("Giochi PS4/Salvataggi/readme.txt", "x");
 

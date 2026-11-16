@@ -165,6 +165,82 @@ fn xml_elements<'a>(text: &'a str, tag: &str) -> Vec<&'a str> {
     found
 }
 
+/// The strings of the array `key` in the section `section` of a TOML file, whether written on
+/// one line or on several. Only what this module needs of TOML: `"basic"` strings with their
+/// backslash escapes and `'literal'` ones.
+fn toml_string_array(text: &str, section: &str, key: &str) -> Vec<String> {
+    let mut in_section = false;
+    let mut lines = text.trim_start_matches('\u{feff}').lines();
+    let mut body = String::new();
+    while let Some(line) = lines.next() {
+        let line = line.trim();
+        if let Some(name) = line.strip_prefix('[').and_then(|rest| rest.strip_suffix(']')) {
+            in_section = name.trim() == section;
+            continue;
+        }
+        let Some((name, value)) = line.split_once('=').filter(|_| in_section) else {
+            continue;
+        };
+        if name.trim() != key {
+            continue;
+        }
+        // The array may go on over the next lines
+        body.push_str(value);
+        while !closed_array(&body) {
+            let Some(more) = lines.next() else {
+                break;
+            };
+            body.push('\n');
+            body.push_str(more);
+        }
+        break;
+    }
+
+    let mut values = Vec::new();
+    let mut chars = body.trim_start().strip_prefix('[').unwrap_or_default().chars();
+    while let Some(c) = chars.next() {
+        match c {
+            ']' => break,
+            '\'' => values.push(chars.by_ref().take_while(|c| *c != '\'').collect()),
+            '"' => {
+                let mut value = String::new();
+                while let Some(c) = chars.next() {
+                    match c {
+                        '"' => break,
+                        '\\' => match chars.next() {
+                            Some('n') | Some('r') | Some('t') => value.push(' '),
+                            Some(escaped) => value.push(escaped),
+                            None => break,
+                        },
+                        c => value.push(c),
+                    }
+                }
+                values.push(value);
+            }
+            _ => {}
+        }
+    }
+    values
+}
+
+/// Whether the text of a TOML array has reached its closing bracket, strings aside.
+fn closed_array(body: &str) -> bool {
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for c in body.chars() {
+        match quote {
+            Some('"') if escaped => escaped = false,
+            Some('"') if c == '\\' => escaped = true,
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None if c == '"' || c == '\'' => quote = Some(c),
+            None if c == ']' => return true,
+            None => {}
+        }
+    }
+    false
+}
+
 /// The folders the emulator `id`, installed in `exe_dir`, lists as holding its games.
 /// Only folders that exist are returned, each once; a path relative to the emulator is
 /// resolved against its folder. An emulator without such a list gives none.
@@ -280,6 +356,32 @@ pub fn game_folders(id: &str, exe_dir: &Path, places: &Places) -> Vec<PathBuf> {
                 .iter()
                 .filter_map(|dir| dir.as_str().map(str::to_string))
                 .collect()
+        }
+        "shadps4" => {
+            // A `user` folder where the emulator (or its launcher) is started, else %APPDATA%;
+            // config.json since version 0.16, config.toml before
+            let user_dir = Some(exe_dir.join("user"))
+                .filter(|dir| dir.is_dir())
+                .or_else(|| places.appdata.as_ref().map(|appdata| appdata.join("shadPS4")));
+            let from_json = user_dir.as_ref().and_then(|dir| {
+                let text = fs::read_to_string(dir.join("config.json")).ok()?;
+                let json = serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')).ok()?;
+                let dirs = json.get("General")?.get("install_dirs")?.as_array()?;
+                Some(
+                    dirs.iter()
+                        // A folder switched off in shadPS4 is not one of its games folders
+                        .filter(|dir| dir.get("enabled").and_then(serde_json::Value::as_bool) != Some(false))
+                        .filter_map(|dir| dir.get("path").and_then(serde_json::Value::as_str).or_else(|| dir.as_str()))
+                        .map(str::to_string)
+                        .collect::<Vec<String>>(),
+                )
+            });
+            from_json.unwrap_or_else(|| {
+                user_dir
+                    .and_then(|dir| fs::read_to_string(dir.join("config.toml")).ok())
+                    .map(|text| toml_string_array(&text, "GUI", "installDirs"))
+                    .unwrap_or_default()
+            })
         }
         "yuzu" | "suyu" | "eden" | "citron" | "sudachi" => qt_config(exe_dir, places, &[id])
             .map(|config| qt_game_dirs(&config))
@@ -460,6 +562,35 @@ pub(crate) mod tests {
         s.dir("Roms/Wii U & more");
         s.file("AppData/Roaming/Cemu/settings.xml", &format!("<?xml version=\"1.0\"?>\n<content>\n  <GamePaths>\n    <Entry>{}</Entry>\n    <Entry>{}</Entry>\n  </GamePaths>\n  <GameCache><Entry>x</Entry></GameCache>\n</content>", at("Roms/WiiU"), at("Roms/Wii U &amp; more")));
         assert_eq!(names(&game_folders("cemu", &cemu, &places), &s.root), ["Roms/WiiU", "Roms/Wii U & more"]);
+
+        // shadPS4: a list of folders that can each be switched off; the old file before 0.16
+        let shad = s.dir("Emu/shadPS4");
+        s.dir("Roms/PS4 off");
+        s.file(
+            "AppData/Roaming/shadPS4/config.json",
+            &serde_json::json!({"General": {"install_dirs": [
+                {"path": at("Roms/PS4"), "enabled": true},
+                {"path": at("Roms/PS4 off"), "enabled": false},
+                {"path": at("Roms/gone"), "enabled": true}
+            ], "addon_install_dir": ""}, "GPU": {}})
+            .to_string(),
+        );
+        s.dir("Roms/PS4");
+        assert_eq!(names(&game_folders("shadps4", &shad, &places), &s.root), ["Roms/PS4"]);
+        // A `user` folder next to the executable is the one read; there, the old settings
+        s.dir("Roms/PS4 old");
+        s.dir("Roms/PS4 more");
+        s.file(
+            "Emu/shadPS4/user/config.toml",
+            &format!(
+                "[General]\nisPS4Pro = false\n\n[GUI]\ninstallDirs = [\n  {},\n  '{}',\n]\ninstallDirsEnabled = [true, true]\naddonInstallDir = \"\"\n\n[Settings]\nconsoleLanguage = 1\n",
+                serde_json::to_string(&at("Roms/PS4 old")).unwrap(),
+                at("Roms/PS4 more"),
+            ),
+        );
+        assert_eq!(names(&game_folders("shadps4", &shad, &places), &s.root), ["Roms/PS4 old", "Roms/PS4 more"]);
+        assert_eq!(toml_string_array("[GUI]\ninstallDirs = [\"D:\\\\Giochi PS4\", 'E:\\PS4 [1]', \"a]b\"]\nother = [\"x\"]\n", "GUI", "installDirs"), [r"D:\Giochi PS4", r"E:\PS4 [1]", "a]b"]);
+        assert!(toml_string_array("[Other]\ninstallDirs = [\"x\"]\n[GUI]\ninstallDirs = \"not a list\"\n", "GUI", "installDirs").is_empty());
 
         // Ryujinx: JSON
         let ryujinx = s.dir("Emu/Ryujinx");
