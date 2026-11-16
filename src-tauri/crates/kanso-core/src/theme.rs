@@ -370,6 +370,24 @@ pub struct ThemeDetail {
     pub tiles: DetailTiles,
     /// Space between tiles, in pixels.
     pub tile_gap: u32,
+    /// How the cards after the figures and the achievements (description, activity, what the
+    /// plugins add, files) are laid out.
+    pub cards: DetailCards,
+    /// Color of the titles of what the sheet shows first: the figures, the achievements.
+    pub key_titles: NavColor,
+    /// Color of the titles of the other cards, and of the edge of the ones kept in sight.
+    pub card_titles: NavColor,
+}
+
+/// How the cards of a game's sheet that come after its figures are laid out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DetailCards {
+    /// Side by side in a box that moves on by itself; a card can be kept in sight.
+    #[default]
+    Rail,
+    /// One under the other, all in sight.
+    Stack,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -598,6 +616,9 @@ impl Default for ThemeDetail {
             backdrop_dim: 0.62,
             tiles: DetailTiles::Filled,
             tile_gap: 12,
+            cards: DetailCards::Rail,
+            key_titles: NavColor::Accent,
+            card_titles: NavColor::Secondary,
         }
     }
 }
@@ -1038,6 +1059,9 @@ impl Theme {
             backdrop_dim: g.decimal("backdropDim", d.backdrop_dim, 0.35, 0.95)?,
             tiles: g.choice("tiles", d.tiles)?,
             tile_gap: g.int("tileGap", d.tile_gap, 0, 28)?,
+            cards: g.choice("cards", d.cards)?,
+            key_titles: g.choice("keyTitles", d.key_titles)?,
+            card_titles: g.choice("cardTitles", d.card_titles)?,
         };
 
         let m = Fields::section(&root, "motion")?;
@@ -1485,12 +1509,21 @@ mod tests {
         assert!(exported.contains("\"accentSecondary\": \"#00aaff\"") && exported.contains("\"navHeadings\": \"secondary\""));
         assert_eq!(Theme::from_json(&exported).unwrap().layout, own.layout);
 
+        // The sheet of a game: its titles take two of the theme's colors, its cards scroll
+        assert_eq!((plain.detail.cards, plain.detail.key_titles, plain.detail.card_titles), (DetailCards::Rail, NavColor::Accent, NavColor::Secondary));
+        let sheet = Theme::from_json(r##"{"name":"X","colors":{},"detail":{"cards":"stack","keyTitles":"text","cardTitles":"accent"}}"##).unwrap();
+        assert_eq!((sheet.detail.cards, sheet.detail.key_titles, sheet.detail.card_titles), (DetailCards::Stack, NavColor::Text, NavColor::Accent));
+        assert_eq!(Theme::from_json(&sheet.to_json()).unwrap().detail, sheet.detail);
+
         // Names from the list and colors only: anything else is refused, never passed on
         for (raw, expected) in [
             (r##"{"name":"X","colors":{"accentSecondary":"red"}}"##, "colors.accentSecondary"),
             (r##"{"name":"X","colors":{"accentSecondary":"var(--x)"}}"##, "colors.accentSecondary"),
             (r##"{"name":"X","colors":{},"layout":{"navHeadings":"#ff0000"}}"##, "layout.navHeadings"),
             (r##"{"name":"X","colors":{},"layout":{"navPages":"url(x)"}}"##, "layout.navPages"),
+            (r##"{"name":"X","colors":{},"detail":{"cards":"marquee"}}"##, "detail.cards"),
+            (r##"{"name":"X","colors":{},"detail":{"keyTitles":"red"}}"##, "detail.keyTitles"),
+            (r##"{"name":"X","colors":{},"detail":{"cardTitles":"#fff"}}"##, "detail.cardTitles"),
         ] {
             let err = Theme::from_json(raw).expect_err(raw);
             assert!(err.contains(expected), "{raw} -> {err}");

@@ -28,6 +28,9 @@
   /* What the side panel colors its headings and its pages with: two of the colors above */
   --nav-heading-color: var(--accent-color);
   --nav-page-color: var(--accent-secondary);
+  /* The titles of a game's sheet: what it shows first, and its other cards */
+  --detail-key-title: var(--accent-color);
+  --detail-card-title: var(--accent-secondary);
 
   /* Typography */
   --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;

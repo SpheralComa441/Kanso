@@ -68,6 +68,9 @@ const DEFAULT_DETAIL: ThemeDetail = {
   backdropDim: 0.62,
   tiles: "filled",
   tileGap: 12,
+  cards: "rail",
+  keyTitles: "accent",
+  cardTitles: "secondary",
 };
 
 const DEFAULT_MOTION: ThemeMotion = { level: "smooth", sheet: "rise", view: "rise", stagger: true };
@@ -522,6 +525,8 @@ export function applyTheme(
   set("--detail-blur", `${detail.backdropBlur}px`);
   set("--detail-dim", `${Math.round(detail.backdropDim * 100)}%`);
   set("--detail-gap", px(detail.tileGap));
+  set("--detail-key-title", NAV_COLORS[detail.keyTitles] ?? NAV_COLORS.accent);
+  set("--detail-card-title", NAV_COLORS[detail.cardTitles] ?? NAV_COLORS.secondary);
 
   // Icons
   const sharp = icons.corners === "sharp";

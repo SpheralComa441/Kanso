@@ -205,33 +205,102 @@ export function AchievementsSection({ game }: { game: DetectedGame }) {
 
 type PanelState = { phase: "loading" } | { phase: "done"; answer: GameDataAnswer };
 
-function PluginPanel({ plugin, game }: { plugin: PluginInfo; game: DetectedGame }) {
-  const { t, shortDate } = useI18n();
-  const [state, setState] = useState<PanelState>({ phase: "loading" });
-  const [attempt, setAttempt] = useState(0);
+/** What one plugin has to say about a game, and how to ask it again. */
+export interface PluginPanelData {
+  plugin: PluginInfo;
+  state: PanelState;
+  /** Asks the plugin again, past its cache. */
+  refresh: () => void;
+}
+
+/**
+ * What every enabled plugin says about a game. Each plugin loads on its own: one that is slow
+ * or fails does not hold the others back.
+ */
+export function usePluginPanels(game: DetectedGame, plugins: PluginInfo[]): PluginPanelData[] {
+  const { t } = useI18n();
+  const [states, setStates] = useState<Record<string, PanelState>>({});
+  const gameRef = useRef(game);
+  gameRef.current = game;
   const gameId = game.id;
+  const pluginIds = plugins.map((plugin) => plugin.id).join("\n");
+  // Which answers still belong on screen: those of this game and of these plugins
+  const loadRef = useRef(0);
+
+  const load = (plugin: PluginInfo, force: boolean, generation: number) => {
+    const settle = (answer: GameDataAnswer) => {
+      if (loadRef.current === generation) {
+        setStates((current) => ({ ...current, [plugin.id]: { phase: "done", answer } }));
+      }
+    };
+    setStates((current) => ({ ...current, [plugin.id]: { phase: "loading" } }));
+    // The first load may use the cache; "try again" and "refresh" always ask the plugin
+    pluginGameData(plugin.id, gameRef.current, force)
+      .then(settle)
+      .catch((error) =>
+        settle({
+          pluginId: plugin.id,
+          pluginName: plugin.name,
+          data: null,
+          error: typeof error === "string" ? error : t("plugins.actionError"),
+          logs: [],
+          fetchedAt: Date.now(),
+        })
+      );
+  };
 
   useEffect(() => {
-    let alive = true;
-    setState({ phase: "loading" });
-    const failed = (error: unknown): GameDataAnswer => ({
-      pluginId: plugin.id,
-      pluginName: plugin.name,
-      data: null,
-      error: typeof error === "string" ? error : t("plugins.actionError"),
-      logs: [],
-      fetchedAt: Date.now(),
-    });
-    // The first load may use the cache; "try again" and "refresh" always ask the plugin
-    pluginGameData(plugin.id, game, attempt > 0)
-      .then((answer) => alive && setState({ phase: "done", answer }))
-      .catch((error) => alive && setState({ phase: "done", answer: failed(error) }));
-    return () => {
-      alive = false;
-    };
-    // `game` and `t` change identity on every library update; the id is what matters
+    const generation = loadRef.current + 1;
+    loadRef.current = generation;
+    setStates({});
+    for (const plugin of plugins) load(plugin, false, generation);
+    // `game`, `plugins` and `t` change identity on every library update; ids are what matter
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plugin.id, gameId, attempt]);
+  }, [gameId, pluginIds]);
+
+  return plugins.map((plugin) => ({
+    plugin,
+    state: states[plugin.id] ?? { phase: "loading" },
+    refresh: () => load(plugin, true, loadRef.current),
+  }));
+}
+
+/** Whether the plugin has something to show for this game: sections, or an error to report. */
+export function panelHasContent(panel: PluginPanelData): boolean {
+  if (panel.state.phase !== "done") return false;
+  const { answer } = panel.state;
+  return (answer.data?.sections ?? []).length > 0 || Boolean(answer.error);
+}
+
+/** What a plugin's card is called: its first section's title, or the plugin's own name. */
+export function panelTitle(panel: PluginPanelData): string {
+  const first = panel.state.phase === "done" ? panel.state.answer.data?.sections?.[0] : undefined;
+  return first?.title ?? panel.plugin.name;
+}
+
+/** The button that asks a plugin again for what it shows. */
+export function PluginRefreshButton({ panel }: { panel: PluginPanelData }) {
+  const { t } = useI18n();
+  return (
+    <button
+      type="button"
+      onClick={panel.refresh}
+      title={t("plugins.refresh", { name: panel.plugin.name })}
+      aria-label={t("plugins.refresh", { name: panel.plugin.name })}
+      className="rounded p-1 text-zinc-500 transition-colors hover:text-zinc-100"
+    >
+      <RefreshCw className="h-3 w-3" />
+    </button>
+  );
+}
+
+/**
+ * What a plugin shows for a game. `titled` leaves out the heading of the first section: the
+ * card around it already carries it.
+ */
+export function PluginPanelBody({ panel, titled = false }: { panel: PluginPanelData; titled?: boolean }) {
+  const { t, shortDate } = useI18n();
+  const { plugin, state } = panel;
 
   if (state.phase === "loading") {
     return (
@@ -246,26 +315,16 @@ function PluginPanel({ plugin, game }: { plugin: PluginInfo; game: DetectedGame 
   // Nothing to say about this game: the plugin stays out of the way
   if (sections.length === 0 && !answer.error) return null;
 
-  const refreshButton = (
-    <button
-      type="button"
-      onClick={() => setAttempt((n) => n + 1)}
-      title={t("plugins.refresh", { name: plugin.name })}
-      aria-label={t("plugins.refresh", { name: plugin.name })}
-      className="rounded p-0.5 text-zinc-600 transition-colors hover:text-zinc-200"
-    >
-      <RefreshCw className="h-3 w-3" />
-    </button>
-  );
-
   return (
     <>
       {sections.map((section, index) => (
         <section key={index} className="space-y-2" data-plugin-section={plugin.id}>
-          <div className="flex items-center justify-between gap-3">
-            <SectionHeading>{section.title ?? plugin.name}</SectionHeading>
-            {index === 0 && refreshButton}
-          </div>
+          {!(titled && index === 0) && (
+            <div className="flex items-center justify-between gap-3">
+              <SectionHeading>{section.title ?? plugin.name}</SectionHeading>
+              {index === 0 && <PluginRefreshButton panel={panel} />}
+            </div>
+          )}
           <PluginBlocks blocks={section.blocks} />
         </section>
       ))}
@@ -280,7 +339,7 @@ function PluginPanel({ plugin, game }: { plugin: PluginInfo; game: DetectedGame 
             </span>{" "}
             <button
               type="button"
-              onClick={() => setAttempt((n) => n + 1)}
+              onClick={panel.refresh}
               className="text-zinc-300 underline-offset-2 hover:text-zinc-100 hover:underline"
             >
               {t("plugins.retry")}
@@ -308,12 +367,13 @@ interface GamePluginSectionsProps {
   plugins: PluginInfo[];
 }
 
-/** What each enabled plugin has to say about a game; every plugin loads on its own. */
+/** What each enabled plugin has to say about a game, one under the other. */
 export function GamePluginSections({ game, plugins }: GamePluginSectionsProps) {
+  const panels = usePluginPanels(game, plugins);
   return (
     <>
-      {plugins.map((plugin) => (
-        <PluginPanel key={plugin.id} plugin={plugin} game={game} />
+      {panels.map((panel) => (
+        <PluginPanelBody key={panel.plugin.id} panel={panel} />
       ))}
     </>
   );

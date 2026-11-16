@@ -120,7 +120,10 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
     "backdropBlur": 18,
     "backdropDim": 0.62,
     "tiles": "filled",
-    "tileGap": 12
+    "tileGap": 12,
+    "cards": "rail",
+    "keyTitles": "accent",
+    "cardTitles": "secondary"
   },
   "motion": { "level": "smooth", "sheet": "rise", "view": "rise", "stagger": true },
   "fontFiles": []
@@ -276,12 +279,20 @@ how its tiles look.*
 
 | Chiave / Key | Valori / Values | Significato / Meaning |
 | --- | --- | --- |
-| `layout` | `bento`, `sheet` | `bento`: riquadri separati (copertina e azioni a sinistra; titolo, ore di gioco con l'attività recente, obiettivi, descrizione a destra). `sheet`: una scheda unica con la copertina a lato e il resto in colonna |
+| `layout` | `bento`, `sheet` | `bento`: riquadri separati (copertina e azioni a sinistra; a destra, subito in vista, titolo, cifre e obiettivi, poi le altre schede). `sheet`: una scheda unica con la copertina a lato e il resto in colonna |
 | `backdrop` | `art`, `dim` | Dietro la scheda: l'immagine del gioco sfocata e velata, oppure un velo scuro sopra la libreria |
 | `backdropBlur` | 0 – 48 | Sfocatura dell'immagine, in pixel |
 | `backdropDim` | 0.35 – 0.95 | Quanto del colore `background` vela ciò che sta dietro. Non scende sotto 0.35: il testo deve restare leggibile sopra qualunque copertina |
 | `tiles` | `filled`, `glass`, `outlined` | Riquadri pieni (`surface`); traslucidi, con lo sfondo che traspare sfocato; del colore di sfondo con bordo marcato |
 | `tileGap` | 0 – 28 | Spazio tra i riquadri |
+| `cards` | `rail`, `stack` | Le schede dopo le cifre e gli obiettivi (descrizione, attività, ciò che aggiungono i plugin, file). `rail`: affiancate in un riquadro che avanza da solo di una scheda alla volta, dove un clic ne fissa una. `stack`: tutte in vista, una sotto l'altra. Vale per `layout: bento` |
+| `keyTitles` | `accent`, `secondary`, `text`, `muted` | Colore dei titoli di ciò che la scheda mostra per primo (cifre, obiettivi) |
+| `cardTitles` | `accent`, `secondary`, `text`, `muted` | Colore dei titoli delle altre schede e del bordo di quelle fissate |
+
+Come nel pannello laterale, `keyTitles` e `cardTitles` sono **nomi di colori del tema**, non
+colori. Il riquadro che scorre segue le animazioni: quanto resta una scheda (9, 7 o 5 secondi
+con animazioni leggere, fluide o vivaci), quanto dura il passo e con quale curva. Con le
+animazioni spente non si muove da solo e restano le frecce.
 
 L'immagine dietro la scheda è sempre e solo la copertina del gioco che Kanso ha già in libreria:
 un tema sceglie *come* mostrarla, non *quale* immagine. *The image behind the sheet is always the

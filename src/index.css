@@ -130,6 +130,18 @@
   letter-spacing: var(--heading-spacing);
 }
 
+/* So are the titles of the cards of a game's sheet */
+:root :is(h1, h2, h3, h4).card-title {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+:root[data-label-uppercase] :is(h1, h2, h3, h4).card-title {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
 /* The headings of the side panel are labels, not titles: a theme's title rules pass them by */
 :root :is(h1, h2, h3).nav-heading {
   font-weight: 700;
@@ -622,6 +634,125 @@
 
   .detail-side {
     width: clamp(15.5rem, 21%, 25rem);
+  }
+
+  /* ---------------------------------------- the cards of a game's sheet */
+
+  /* The figures: time played a little wider than the two beside it */
+  .detail-figures {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  /*
+   * Three ranks, told apart by the theme's own colors. What the sheet shows first (figures,
+   * achievements) is titled in one color; the cards the user keeps in sight in another, with
+   * an edge and a breath of it; the cards that scroll sit in a recess and are titled quietly
+   * until the pointer is on them.
+   */
+  .tile[data-rank="key"] .micro-label {
+    color: var(--detail-key-title);
+  }
+
+  .card-title {
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    line-height: 1.2;
+    color: var(--detail-card-title);
+  }
+
+  .pinned-card {
+    animation: card-in var(--motion-base) var(--motion-ease) both;
+  }
+
+  .pinned-card[data-rank="pinned"] {
+    border-color: color-mix(in srgb, var(--detail-card-title) 40%, var(--border-subtle));
+    background-color: color-mix(in srgb, var(--detail-card-title) 5%, var(--bg-surface));
+  }
+
+  :root[data-detail-tiles="glass"] .pinned-card[data-rank="pinned"] {
+    background-color: color-mix(in srgb, color-mix(in srgb, var(--detail-card-title) 8%, var(--bg-surface)) 64%, transparent);
+  }
+
+  :root[data-panel-shape="cut"] .pinned-card[data-rank="pinned"] {
+    --ring-color: color-mix(in srgb, var(--detail-card-title) 40%, var(--border-subtle));
+  }
+
+  /* The box the other cards move in */
+  .card-rail {
+    padding: 0.75rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-panel);
+    background-color: color-mix(in srgb, var(--bg-primary) 70%, transparent);
+  }
+
+  :root[data-detail-tiles="glass"] .card-rail {
+    background-color: color-mix(in srgb, var(--bg-primary) 45%, transparent);
+    backdrop-filter: blur(24px) saturate(1.25);
+  }
+
+  .rail-viewport {
+    overflow: hidden;
+    border-radius: calc(var(--radius-panel) * 0.7);
+  }
+
+  /* One step at a time, as long and as soft as the animations chosen in Settings */
+  .rail-track {
+    display: flex;
+    align-items: stretch;
+    height: clamp(11.5rem, 25vh, 17rem);
+    transition: transform calc(var(--motion-slow) * 2) var(--motion-ease);
+  }
+
+  .rail-card {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 0.625rem;
+    min-width: 0;
+    padding: 0.875rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: calc(var(--radius-panel) * 0.7);
+    background-color: var(--bg-surface);
+    cursor: pointer;
+    transition:
+      border-color var(--motion-fast) ease,
+      background-color var(--motion-fast) ease;
+  }
+
+  :root[data-detail-tiles="glass"] .rail-card {
+    background-color: color-mix(in srgb, var(--bg-surface) 64%, transparent);
+  }
+
+  .rail-card .card-title {
+    color: var(--text-muted);
+    transition: color var(--motion-fast) ease;
+  }
+
+  .rail-card:hover,
+  .rail-card:focus-within {
+    border-color: color-mix(in srgb, var(--detail-card-title) 55%, var(--border-subtle));
+  }
+
+  .rail-card:hover .card-title,
+  .rail-card:focus-within .card-title {
+    color: var(--detail-card-title);
+  }
+
+  /* What a card holds scrolls inside it when it is longer than the box */
+  .rail-card-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .rail-pin {
+    opacity: 0.45;
+  }
+
+  .rail-card:hover .rail-pin,
+  .rail-pin:focus-visible {
+    opacity: 1;
+    color: var(--detail-card-title);
   }
 
   /*
