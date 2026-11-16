@@ -7,6 +7,7 @@ const TEXT = {
   steam: { en: "Steam users", it: "Utenti di Steam", es: "Usuarios de Steam", ru: "Пользователи Steam" },
   positive: { en: "positive", it: "positive", es: "positivas", ru: "положительных" },
   reviews: { en: "reviews", it: "recensioni", es: "reseñas", ru: "отзывов" },
+  badgeLabel: { en: "Steam rating", it: "Gradimento Steam", es: "Valoración Steam", ru: "Рейтинг Steam" },
   badgeTip: { en: "Positive reviews on Steam", it: "Recensioni positive su Steam", es: "Reseñas positivas en Steam", ru: "Положительные отзывы в Steam" },
   metacritic: { en: "Metacritic", it: "Metacritic", es: "Metacritic", ru: "Metacritic" },
   openSteam: { en: "Reviews on Steam", it: "Recensioni su Steam", es: "Reseñas en Steam", ru: "Отзывы в Steam" },
@@ -71,7 +72,7 @@ kanso.plugin({
     blocks.push({ type: "links", items: links });
 
     return {
-      badge: summary ? { text: summary.percent_positive + "%", tooltip: kanso.t(TEXT.badgeTip) + ": " + summary.review_score_label } : undefined,
+      badge: summary ? { text: summary.percent_positive + "%", label: kanso.t(TEXT.badgeLabel), tooltip: kanso.t(TEXT.badgeTip) + ": " + summary.review_score_label } : undefined,
       sections: [{ title: kanso.t(TEXT.section), blocks }],
     };
   },

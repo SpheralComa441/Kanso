@@ -65,6 +65,7 @@ import {
   type LibraryFilters,
 } from "./lib/library";
 import { platformLabel } from "./lib/platforms";
+import { CARD_INFO_DEFAULT } from "./lib/cardInfo";
 import { DEFAULT_ACCESSIBILITY, applyTheme, resolveTheme } from "./lib/themes";
 import type {
   AccessibilityConfig,
@@ -88,6 +89,7 @@ const INITIAL_CONFIG: AppConfig = {
   trackPlaytime: true,
   plugins: {},
   animations: "theme",
+  cardInfo: [...CARD_INFO_DEFAULT],
   hasGamePass: false,
   gamePassCatalog: false,
 };
@@ -926,6 +928,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                 onOpenSettings={() => setIsSettingsOpen(true)}
                 badges={badges}
                 runningIds={runningIds}
+                cardInfo={config.cardInfo}
               />
             </>
           )}

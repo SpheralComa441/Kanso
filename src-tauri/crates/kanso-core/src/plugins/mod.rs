@@ -225,6 +225,8 @@ pub struct BadgeEntry {
     pub plugin_id: String,
     pub plugin_name: String,
     pub text: String,
+    /// What the figure is, as the plugin says; `None` when it does not.
+    pub label: Option<String>,
     pub tooltip: Option<String>,
 }
 
@@ -449,6 +451,7 @@ impl PluginEngine {
                         plugin_id: plugin.manifest.id.clone(),
                         plugin_name: plugin.manifest.name.get(lang).to_string(),
                         text: badge.text,
+                        label: badge.label,
                         tooltip: badge.tooltip,
                     });
                 }

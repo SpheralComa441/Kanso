@@ -50,6 +50,7 @@ import type {
   PluginState,
   Theme,
 } from "../types/game";
+import { CARD_INFO_CHOICES } from "../lib/cardInfo";
 import { PluginsSettings } from "./PluginsSettings";
 import { StoreAccountsSettings } from "./StoreAccountsSettings";
 
@@ -112,6 +113,7 @@ export function SettingsModal({
   );
   const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
   const [animations, setAnimations] = useState(initialConfig.animations);
+  const [cardInfo, setCardInfo] = useState(initialConfig.cardInfo);
   const [hasGamePass, setHasGamePass] = useState(initialConfig.hasGamePass);
   const [gamePassCatalog, setGamePassCatalog] = useState(initialConfig.gamePassCatalog);
   const [pluginStates, setPluginStates] = useState<Record<string, PluginState>>(
@@ -134,6 +136,7 @@ export function SettingsModal({
       setAccessibility(initialConfig.accessibility);
       setTrackPlaytime(initialConfig.trackPlaytime);
       setAnimations(initialConfig.animations);
+      setCardInfo(initialConfig.cardInfo);
       setHasGamePass(initialConfig.hasGamePass);
       setGamePassCatalog(initialConfig.gamePassCatalog);
       setPluginStates(initialConfig.plugins);
@@ -277,6 +280,8 @@ export function SettingsModal({
         trackPlaytime,
         plugins: pluginStates,
         animations,
+        // Kept in Kanso's order, whatever order they were ticked in
+        cardInfo: CARD_INFO_CHOICES.filter((item) => cardInfo.includes(item)),
         hasGamePass,
         gamePassCatalog,
       });
@@ -525,6 +530,40 @@ export function SettingsModal({
               </div>
             </div>
             <p className="text-2xs leading-relaxed text-zinc-500">{t("motion.help")}</p>
+          </section>
+
+          {/* What a cover tells under the pointer, besides the title */}
+          <section id="settings-card-info" className="space-y-2">
+            <span id="card-info-label" className="block text-xs font-medium text-zinc-200">
+              {t("cardInfo.title")}
+            </span>
+            <div role="group" aria-labelledby="card-info-label" className="flex flex-wrap gap-1.5">
+              {CARD_INFO_CHOICES.map((item) => {
+                const on = cardInfo.includes(item);
+                return (
+                  <button
+                    key={item}
+                    id={`card-info-${item}`}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() =>
+                      setCardInfo((current) =>
+                        on ? current.filter((entry) => entry !== item) : [...current, item]
+                      )
+                    }
+                    className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors ${
+                      on
+                        ? "border-accent/60 bg-accent/10 text-zinc-100"
+                        : "border-oled-border bg-oled-bg text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    <Check className={`h-3 w-3 ${on ? "text-accent" : "opacity-0"}`} aria-hidden="true" />
+                    <span>{t(`cardInfo.${item}`)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-2xs leading-relaxed text-zinc-500">{t("cardInfo.help")}</p>
           </section>
 
           {/* Accessibility: applies on top of any theme */}

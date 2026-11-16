@@ -6,10 +6,10 @@ const DAY = 24 * 60 * 60 * 1000;
 const TEXT = {
   title: { en: "Tonight you could play…", it: "Stasera potresti giocare a…", es: "Esta noche podrías jugar a…", ru: "Сегодня можно сыграть в…" },
   intro: {
-    en: "One to continue, one from your backlog and one to rediscover. Run it again for other ideas.",
-    it: "Uno da continuare, uno dal backlog e uno da riscoprire. Riprova per avere altre idee.",
-    es: "Uno para continuar, uno pendiente y uno para redescubrir. Repite para tener otras ideas.",
-    ru: "Одна, чтобы продолжить, одна из отложенных и одна давняя. Запустите ещё раз — будут другие идеи.",
+    en: "Three face-down cards: one to continue, one from your backlog and one to rediscover. Turn them over, or deal again for other ideas.",
+    it: "Tre carte coperte: una da continuare, una dal backlog e una da riscoprire. Scoprile, oppure ridistribuisci per avere altre idee.",
+    es: "Tres cartas boca abajo: una para continuar, una pendiente y una para redescubrir. Descúbrelas, o reparte de nuevo para tener otras ideas.",
+    ru: "Три закрытые карты: продолжить, начать из отложенных и вспомнить давнюю. Откройте их или раздайте заново — будут другие идеи.",
   },
   empty: {
     en: "There is nothing to suggest yet: the library is empty or every game is finished or abandoned.",
@@ -80,7 +80,8 @@ kanso.plugin({
         if (!game) return;
         taken.add(game.id);
         const extra = detail(game);
-        picks.push({ id: game.id, note: extra ? kanso.t(label) + " · " + extra : kanso.t(label) });
+        // The hint is what the card says while it is still face down
+        picks.push({ id: game.id, hint: kanso.t(label), note: extra ? kanso.t(label) + " · " + extra : kanso.t(label) });
       };
 
       add(continuing, TEXT.continuing, (game) => (game.playtimeMinutes ? played(game.playtimeMinutes) : ""));
@@ -99,6 +100,8 @@ kanso.plugin({
       return {
         title: kanso.t(TEXT.title),
         sections: [{ blocks: [{ type: "text", text: kanso.t(TEXT.intro) }] }],
+        // Whole covers, face down until each one is turned
+        gamesStyle: "mystery",
         games: picks,
       };
     },

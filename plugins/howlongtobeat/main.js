@@ -21,6 +21,7 @@ const TEXT = {
   all: { en: "All styles", it: "Tutti gli stili", es: "Todos los estilos", ru: "Все стили" },
   open: { en: "Open on HowLongToBeat", it: "Apri su HowLongToBeat", es: "Abrir en HowLongToBeat", ru: "Открыть на HowLongToBeat" },
   badgeTip: { en: "HowLongToBeat", it: "HowLongToBeat", es: "HowLongToBeat", ru: "HowLongToBeat" },
+  badgeLabel: { en: "To finish", it: "Per finirlo", es: "Para terminarlo", ru: "Прохождение" },
   matched: { en: "Matched with", it: "Abbinato a", es: "Emparejado con", ru: "Сопоставлено с" },
 };
 
@@ -193,7 +194,7 @@ kanso.plugin({
     blocks.push({ type: "links", items: [{ label: kanso.t(TEXT.open), url: SITE + "/game/" + entry.game_id }] });
 
     return {
-      badge: { text: rows[0].value, tooltip: kanso.t(TEXT.badgeTip) + " · " + rows[0].label },
+      badge: { text: rows[0].value, label: kanso.t(TEXT.badgeLabel), tooltip: kanso.t(TEXT.badgeTip) + " · " + rows[0].label },
       sections: [{ title: "HowLongToBeat", blocks: blocks }],
     };
   },

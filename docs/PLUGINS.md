@@ -167,15 +167,26 @@ Requests are refused (the call throws) when the address is not `https`, its host
 ### What a hook returns
 
 `gameDetails` returns `{ badge?, sections?, cacheHours? }`; a command returns
-`{ title?, sections?, games? }`.
+`{ title?, sections?, games?, gamesStyle? }`.
 
 - **`cacheHours`** (`gameDetails` only): keep *this* answer for less than the manifest's
   `cacheHours` — for a game whose data is not out yet, or when the service could only be reached
   in part. It can shorten the time, never extend it.
 
-- **`badge`**: `{ text, tooltip? }` — at most 14 characters, shown on the game card.
-- **`games`** (commands only): up to 12 `{ id, note? }` entries pointing at library games; Kanso
-  shows each with its cover and *Open sheet* / *Play* buttons.
+- **`badge`**: `{ text, label?, tooltip? }` — `text` is the figure, at most 14 characters, shown
+  on the game card. `label` (at most 24 characters) says what the figure is — "To finish",
+  "Steam rating" — and is written next to it where the card has room for lines; without it the
+  plugin's name stands in. `tooltip` is the longer explanation.
+- **`games`** (commands only): up to 12 `{ id, note?, hint? }` entries pointing at library games.
+  `note` is one line about the game ("From your backlog · never played").
+- **`gamesStyle`** (commands only): how those games are laid out. One of three names; anything
+  else is read as `list`.
+  - `list` (default): rows with a small cover, the note and *Open sheet* / *Play*.
+  - `cards`: whole covers, as in the library, with the note and the same buttons on them.
+  - `mystery`: whole covers dealt face down. Each shows a question mark and its `hint` (at most
+    40 characters: say what kind of suggestion it is, not which game) until the user turns it
+    over; *Reveal all* turns the rest. Until then neither the title nor the cover is shown or
+    read out. Running the command again deals new covered cards.
 - **`sections`**: up to 6 `{ title?, blocks }`, each with up to 12 blocks of these kinds:
 
 | Block | Shape |

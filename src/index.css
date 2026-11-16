@@ -773,6 +773,135 @@
     font-synthesis-weight: none;
   }
 
+  /* ------------------------------------------------- games a plugin suggests */
+
+  /*
+   * The games of a plugin command as whole covers (`gamesStyle: "cards"`), or as covers dealt
+   * face down that the user turns one at a time (`"mystery"`). A card is two faces back to
+   * back on a plate that turns; while it is covered a question mark floats on its back. The
+   * theme gives the corners, the border and the timings; with animations off the cards are
+   * simply there, and a click shows the game at once.
+   */
+  .pick-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--picks, 3), minmax(0, 13.5rem));
+    justify-content: center;
+    gap: 1rem;
+    padding-block: 0.25rem;
+  }
+
+  .pick-card {
+    aspect-ratio: 2 / 3;
+    perspective: 60rem;
+    animation: pick-deal calc(var(--motion-slow) * 1.2) var(--motion-ease) backwards;
+    animation-delay: calc(var(--i, 0) * var(--motion-base) * 0.45);
+  }
+
+  .pick-card-inner {
+    position: relative;
+    height: 100%;
+    transform-style: preserve-3d;
+    transition: transform calc(var(--motion-slow) * 1.7) var(--motion-ease);
+  }
+
+  .pick-card[data-revealed="false"] .pick-card-inner {
+    transform: rotateY(180deg);
+  }
+
+  .pick-face {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border: var(--card-border-width) solid var(--border-subtle);
+    border-radius: var(--card-radius);
+    background-color: var(--bg-elevated);
+    box-shadow: var(--card-shadow);
+    backface-visibility: hidden;
+  }
+
+  .pick-back {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    transform: rotateY(180deg);
+    cursor: pointer;
+    background-image:
+      radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent-color) 26%, transparent), transparent 62%),
+      repeating-linear-gradient(135deg, transparent 0 11px, color-mix(in srgb, var(--text-primary) 4%, transparent) 11px 12px);
+    transition:
+      border-color var(--motion-fast) ease,
+      box-shadow var(--motion-base) ease;
+  }
+
+  .pick-back:hover:not(:disabled),
+  .pick-back:focus-visible {
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 1px var(--accent-color), 0 12px 32px -12px var(--accent-color);
+    outline: none;
+  }
+
+  /* Turned away: no longer something to click */
+  .pick-back:disabled {
+    cursor: default;
+  }
+
+  .pick-mark {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-family: var(--font-heading);
+    font-size: 5rem;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--accent-color);
+    text-shadow: 0 0 28px color-mix(in srgb, var(--accent-color) 55%, transparent);
+    animation: pick-float 2.6s ease-in-out infinite;
+    /* Out of step with its neighbours */
+    animation-delay: calc(var(--i, 0) * -0.85s);
+  }
+
+  .pick-back:hover:not(:disabled) .pick-mark,
+  .pick-back:focus-visible .pick-mark {
+    animation-name: pick-shake;
+    animation-duration: 0.7s;
+  }
+
+  :root[data-motion="none"] .pick-card,
+  :root[data-motion="none"] .pick-mark {
+    animation: none;
+  }
+
+  @keyframes pick-deal {
+    from {
+      opacity: 0;
+      transform: translateY(calc(var(--motion-distance) * 2)) rotate(-5deg) scale(0.9);
+    }
+  }
+
+  @keyframes pick-float {
+    0%,
+    100% {
+      transform: translateY(0.25rem) rotate(-7deg);
+    }
+
+    50% {
+      transform: translateY(-0.5rem) rotate(7deg);
+    }
+  }
+
+  @keyframes pick-shake {
+    0%,
+    100% {
+      transform: rotate(-10deg) scale(1.12);
+    }
+
+    50% {
+      transform: rotate(10deg) scale(1.12);
+    }
+  }
+
   /* --------------------------------------------------------- category tiles */
 
   /*
