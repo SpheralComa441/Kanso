@@ -179,7 +179,7 @@ function sampleData(pluginId: string, game: DetectedGame): PluginGameData {
   if (pluginId === "howlongtobeat") {
     const main = Math.round(6 + roll * 50);
     return {
-      badge: { text: `${main} h`, tooltip: "HowLongToBeat · Storia principale" },
+      badge: { text: `${main} h`, label: "Per finirlo", tooltip: "HowLongToBeat · Storia principale" },
       sections: [
         {
           title: "HowLongToBeat",
@@ -205,7 +205,7 @@ function sampleData(pluginId: string, game: DetectedGame): PluginGameData {
     if (game.platform !== "steam" && !game.steamStoreAppid) return { sections: [] };
     const percent = Math.round(72 + roll * 26);
     return {
-      badge: { text: `${percent}%`, tooltip: "Recensioni positive su Steam: Molto positive" },
+      badge: { text: `${percent}%`, label: "Gradimento Steam", tooltip: "Recensioni positive su Steam: Molto positive" },
       sections: [
         {
           title: "Recensioni",
@@ -312,13 +312,13 @@ export function previewGameData(pluginId: string, game: DetectedGame): GameDataA
 export function previewCommand(games: DetectedGame[]): PluginView {
   const visible = games.filter((game) => !game.isHidden);
   const notes = [
-    "Continua · 12 h giocate",
-    "Dal backlog · mai giocato",
-    "Riscopri · non lo apri da 3 mesi",
+    { hint: "Continua", note: "Continua · 12 h di gioco" },
+    { hint: "Dal backlog", note: "Dal backlog · mai giocato" },
+    { hint: "Riscopri", note: "Riscopri · non lo apri da 3 mesi" },
   ];
   const start = Math.floor(Math.random() * Math.max(1, visible.length));
   const picks = notes
-    .map((note, index) => ({ game: visible[(start + index * 2) % visible.length], note }))
+    .map((entry, index) => ({ game: visible[(start + index * 2) % visible.length], ...entry }))
     .filter((pick, index, all) => pick.game && all.findIndex((p) => p.game === pick.game) === index);
   return {
     title: "Stasera potresti giocare a…",
@@ -327,12 +327,13 @@ export function previewCommand(games: DetectedGame[]): PluginView {
         blocks: [
           {
             type: "text",
-            text: "Uno da continuare, uno dal backlog e uno da riscoprire. Riprova per avere altre idee.",
+            text: "Tre carte coperte: una da continuare, una dal backlog e una da riscoprire. Scoprile, oppure ridistribuisci per avere altre idee.",
           },
         ],
       },
     ],
-    games: picks.map((pick) => ({ id: pick.game.id, note: pick.note })),
+    gamesStyle: "mystery",
+    games: picks.map((pick) => ({ id: pick.game.id, note: pick.note, hint: pick.hint })),
   };
 }
 

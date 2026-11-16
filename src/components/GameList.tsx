@@ -11,7 +11,7 @@ import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
 import { PLATFORM_META, canInstall, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
-import type { BadgeEntry, DetectedGame } from "../types/game";
+import type { BadgeEntry, CardInfoItem, DetectedGame } from "../types/game";
 import { Cover } from "./Cover";
 import type { ViewMode } from "./Header";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
@@ -31,6 +31,18 @@ interface GameListProps {
   badges: Record<string, BadgeEntry[]>;
   /** Games Kanso sees running right now. */
   runningIds: ReadonlySet<string>;
+  /** What a cover tells under the pointer besides the title, as the user chose. */
+  cardInfo: readonly CardInfoItem[];
+}
+
+/** One line of what a cover tells: what the figure is, and the figure. */
+interface CardFact {
+  key: string;
+  label: string;
+  value: string;
+  /** The plugin behind the figure, when it is a plugin's. */
+  pluginId?: string;
+  title?: string;
 }
 
 /** The plugins' labels for a game, e.g. "27 h · 89%", each explained by its tooltip. */
@@ -93,8 +105,59 @@ export function GameList({
   onOpenSettings,
   badges,
   runningIds,
+  cardInfo,
 }: GameListProps) {
-  const { t, duration } = useI18n();
+  const { t, duration, relativePast } = useI18n();
+
+  /** The lines a cover shows under the pointer for this game, of those the user asked for. */
+  const factsOf = (game: DetectedGame): CardFact[] => {
+    const facts: CardFact[] = [];
+    // A game that is not on disk and was never played has no play time worth a line
+    if (cardInfo.includes("playtime") && (game.isInstalled || game.playtimeMinutes)) {
+      facts.push({
+        key: "playtime",
+        label: t("cardInfo.playtime"),
+        value: game.playtimeMinutes ? duration(game.playtimeMinutes) : t("detail.never"),
+      });
+    }
+    if (cardInfo.includes("lastPlayed") && game.lastPlayedAt !== null) {
+      facts.push({
+        key: "lastPlayed",
+        label: t("cardInfo.lastPlayed"),
+        value: relativePast(game.lastPlayedAt),
+      });
+    }
+    if (cardInfo.includes("status") && game.status) {
+      facts.push({
+        key: "status",
+        label: t("cardInfo.status"),
+        value: t(STATUS_LABEL_KEYS[game.status]),
+      });
+    }
+    if (cardInfo.includes("achievements") && game.achievementsTotal) {
+      facts.push({
+        key: "achievements",
+        label: t("cardInfo.achievements"),
+        value: t("achievements.count", {
+          unlocked: game.achievementsUnlocked ?? 0,
+          total: game.achievementsTotal,
+        }),
+      });
+    }
+    if (cardInfo.includes("badges")) {
+      for (const entry of badges[game.id] ?? []) {
+        facts.push({
+          key: `badge-${entry.pluginId}`,
+          // A plugin that does not say what its figure is goes by its own name
+          label: entry.label ?? entry.pluginName,
+          value: entry.text,
+          pluginId: entry.pluginId,
+          title: entry.tooltip ?? entry.pluginName,
+        });
+      }
+    }
+    return facts;
+  };
   const { usableCover, markBroken } = useBrokenCovers();
 
   if (isScanning && totalDetected === 0) {
@@ -156,6 +219,7 @@ export function GameList({
               resolveCoverUrl(game.coverPath, game.updatedAt)
             );
             const actionable = game.isInstalled || canInstall(game);
+            const facts = factsOf(game);
 
             return (
               <article
@@ -244,28 +308,41 @@ export function GameList({
                   <div className="game-card-hover pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/90 via-black/55 to-transparent p-3 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     <div className="game-card-info space-y-1.5 text-white">
                       <h3 className="line-clamp-3 text-sm font-semibold leading-snug">{game.title}</h3>
-                      <p className="truncate text-2xs text-white/75">
-                        {game.genres.length > 0 ? game.genres.slice(0, 3).join(" · ") : label}
-                      </p>
-                      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-white/85">
-                        <span data-card-playtime={game.id}>
-                          {!game.isInstalled
-                            ? t("game.notInstalled")
-                            : game.playtimeMinutes
-                              ? t("card.played", { time: duration(game.playtimeMinutes) })
-                              : t("card.neverPlayed")}
-                        </span>
-                        {(badges[game.id] ?? []).map((entry) => (
-                          <span
-                            key={entry.pluginId}
-                            data-badge={entry.pluginId}
-                            title={entry.tooltip ?? entry.pluginName}
-                            className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 tabular-nums"
-                          >
-                            {entry.text}
-                          </span>
-                        ))}
-                      </p>
+                      {!game.isInstalled && (
+                        <p data-card-absent={game.id} className="text-2xs text-white/70">
+                          {t("game.notInstalled")}
+                        </p>
+                      )}
+                      {cardInfo.includes("genres") && (
+                        <p data-card-info="genres" className="truncate text-2xs text-white/75">
+                          {game.genres.length > 0 ? game.genres.slice(0, 3).join(" · ") : label}
+                        </p>
+                      )}
+                      {cardInfo.includes("tags") && game.tags.length > 0 && (
+                        <p data-card-info="tags" className="line-clamp-2 text-2xs text-white/60">
+                          {game.tags.slice(0, 4).join(" · ")}
+                        </p>
+                      )}
+                      {facts.length > 0 && (
+                        <dl className="game-card-facts space-y-1 pt-0.5 text-2xs">
+                          {facts.map((fact) => (
+                            <div
+                              key={fact.key}
+                              data-card-info={fact.key}
+                              title={fact.title}
+                              className="flex items-baseline justify-between gap-3"
+                            >
+                              <dt className="min-w-0 truncate text-white/60">{fact.label}</dt>
+                              <dd
+                                data-badge={fact.pluginId}
+                                className="shrink-0 font-medium tabular-nums text-white"
+                              >
+                                {fact.value}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      )}
                     </div>
                     {actionable && (
                       <button

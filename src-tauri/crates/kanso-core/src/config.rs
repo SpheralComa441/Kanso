@@ -55,6 +55,13 @@ impl AccessibilityConfig {
 /// What the user may choose for the animations; the first is the default.
 const ANIMATION_CHOICES: [&str; 5] = ["theme", "off", "subtle", "smooth", "lively"];
 
+/// What the cover of a game can tell under the pointer, besides its title, in the order it
+/// is shown. Anything else in `config.json` is dropped.
+pub const CARD_INFO_CHOICES: [&str; 7] =
+    ["genres", "tags", "playtime", "lastPlayed", "status", "achievements", "badges"];
+/// What it tells until the user chooses.
+const CARD_INFO_DEFAULT: [&str; 3] = ["genres", "playtime", "badges"];
+
 /// Most plugins whose state is remembered.
 const MAX_PLUGIN_STATES: usize = 64;
 /// Longest value of a plugin setting (an API key, a country code, ...).
@@ -111,12 +118,15 @@ pub struct AppConfig {
     pub track_playtime: bool,
     /// Per-plugin choices, by plugin id. A plugin without an entry uses its own default.
     pub plugins: BTreeMap<String, PluginState>,
-    /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
-    /// the games it makes installable there are listed (see
-    /// [`crate::battlenet_account::game_pass_games`]). Kanso cannot find this out by itself.
     /// How much the interface moves: `theme` (as the active theme says), `off`, `subtle`,
     /// `smooth` or `lively`.
     pub animations: String,
+    /// What a cover tells about its game under the pointer, from [`CARD_INFO_CHOICES`]. An
+    /// empty list is a choice too: the title alone.
+    pub card_info: Vec<String>,
+    /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
+    /// the games it makes installable there are listed (see
+    /// [`crate::battlenet_account::game_pass_games`]). Kanso cannot find this out by itself.
     pub has_game_pass: bool,
     /// The user asked for the games of the Game Pass catalog for PC to be listed as not
     /// installed (see [`crate::gamepass`]): a few hundred games, from Microsoft's public
@@ -136,6 +146,7 @@ impl Default for AppConfig {
             track_playtime: true,
             plugins: BTreeMap::new(),
             animations: ANIMATION_CHOICES[0].to_string(),
+            card_info: CARD_INFO_DEFAULT.iter().map(|item| item.to_string()).collect(),
             has_game_pass: false,
             game_pass_catalog: false,
         }
@@ -188,6 +199,12 @@ impl AppConfig {
             animations: Some(self.animations.trim().to_ascii_lowercase())
                 .filter(|choice| ANIMATION_CHOICES.contains(&choice.as_str()))
                 .unwrap_or_else(|| ANIMATION_CHOICES[0].to_string()),
+            // Known names only, once each, in the order Kanso shows them
+            card_info: CARD_INFO_CHOICES
+                .iter()
+                .filter(|choice| self.card_info.iter().any(|item| item.trim() == **choice))
+                .map(|choice| choice.to_string())
+                .collect(),
             has_game_pass: self.has_game_pass,
             game_pass_catalog: self.game_pass_catalog,
             plugins: self
@@ -286,6 +303,12 @@ mod tests {
             has_game_pass: true,
             game_pass_catalog: true,
             animations: " Lively ".to_string(),
+            card_info: vec![
+                "badges".to_string(),
+                " genres ".to_string(),
+                "badges".to_string(),
+                "<b>".to_string(),
+            ],
             plugins: BTreeMap::from([
                 (
                     "price-history".to_string(),
@@ -314,6 +337,7 @@ mod tests {
         assert_eq!(saved.accessibility.readable_font.as_deref(), Some("opendyslexic"));
 
         assert!(!saved.track_playtime);
+        assert_eq!(saved.card_info, ["genres", "badges"], "known names, once, in Kanso's order");
         assert_eq!(saved.plugins.len(), 1, "ids that are not plain names are dropped");
         let plugin = &saved.plugins["price-history"];
         assert!(plugin.enabled && !plugin.show_badge);
@@ -343,4 +367,19 @@ mod tests {
         assert_eq!(odd.accessibility.text_scale, 80);
         assert_eq!(odd.accessibility.readable_font, None);
     }
+    #[test]
+    fn the_cover_tells_the_usual_three_things_until_the_user_chooses() {
+        // A config.json written before the setting existed
+        let old: AppConfig = serde_json::from_str("{}").expect("old config");
+        assert_eq!(old.sanitized().card_info, ["genres", "playtime", "badges"]);
+        // Nothing at all is a choice, not a missing value
+        let bare: AppConfig = serde_json::from_str(r#"{"cardInfo": []}"#).expect("bare config");
+        assert!(bare.sanitized().card_info.is_empty());
+        let all: AppConfig = serde_json::from_str(
+            r#"{"cardInfo": ["badges", "achievements", "status", "lastPlayed", "playtime", "tags", "genres", "url(x)"]}"#,
+        )
+        .expect("full config");
+        assert_eq!(all.sanitized().card_info, CARD_INFO_CHOICES);
+    }
+
 }

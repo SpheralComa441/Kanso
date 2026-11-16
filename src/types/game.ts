@@ -136,12 +136,14 @@ export interface AppConfig {
   trackPlaytime: boolean;
   /** Per-plugin choices, by plugin id; a plugin without an entry uses its own default. */
   plugins: Record<string, PluginState>;
+  /** How much the interface moves: as the theme says, not at all, or a level of the user's. */
+  animations: AnimationsChoice;
+  /** What a cover tells about its game under the pointer, besides the title. */
+  cardInfo: CardInfoItem[];
   /**
    * The user says they have Xbox Game Pass for PC linked to Battle.net: the games it makes
    * installable there are listed. Kanso cannot find this out by itself.
    */
-  /** How much the interface moves: as the theme says, not at all, or a level of the user's. */
-  animations: AnimationsChoice;
   hasGamePass: boolean;
   /** List the games of the Game Pass catalog for PC (Microsoft's public catalog). */
   gamePassCatalog: boolean;
@@ -205,7 +207,7 @@ export interface PluginSection {
 }
 
 export interface PluginGameData {
-  badge?: { text: string; tooltip?: string };
+  badge?: { text: string; label?: string; tooltip?: string };
   sections: PluginSection[];
 }
 
@@ -223,6 +225,8 @@ export interface BadgeEntry {
   pluginId: string;
   pluginName: string;
   text: string;
+  /** What the figure is ("To finish"), as the plugin says. */
+  label: string | null;
   tooltip: string | null;
 }
 
@@ -230,7 +234,9 @@ export interface BadgeEntry {
 export interface PluginView {
   title: string | null;
   sections: PluginSection[];
-  games: { id: string; note: string | null }[];
+  games: { id: string; note: string | null; hint: string | null }[];
+  /** Rows, whole covers, or whole covers face down until the user turns each one. */
+  gamesStyle: "list" | "cards" | "mystery";
 }
 
 export type DealStore = "steam" | "epic" | "gog";
@@ -335,6 +341,16 @@ export interface ThemeMotion {
 }
 
 export type MotionLevel = "none" | "subtle" | "smooth" | "lively";
+
+/** One thing a cover can tell about its game under the pointer. */
+export type CardInfoItem =
+  | "genres"
+  | "tags"
+  | "playtime"
+  | "lastPlayed"
+  | "status"
+  | "achievements"
+  | "badges";
 
 /** The user's choice for the animations: what the theme says, off, or a level of their own. */
 export type AnimationsChoice = "theme" | "off" | "subtle" | "smooth" | "lively";

@@ -2,7 +2,7 @@
   "kansoPlugin": 1,
   "id": "howlongtobeat",
   "name": "HowLongToBeat",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Kanso",
   "description": {
     "en": "How long a game takes: main story, main + extras, completionist. Data from howlongtobeat.com, which has no official API: if the site changes, this plugin may need an update.",

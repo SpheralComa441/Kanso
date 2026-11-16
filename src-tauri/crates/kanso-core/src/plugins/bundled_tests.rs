@@ -5,7 +5,7 @@
 //! documentation. None of the three could be reached from the build environment.
 
 use super::http::{HttpRequest, HttpResponse};
-use super::output::{Block, PluginGameData, PluginView};
+use super::output::{Block, GamesStyle, PluginGameData, PluginView};
 use super::registry::{bundled_plugins, Plugin};
 use super::runtime::tests::{ok_json, FakeTransport};
 use super::*;
@@ -150,6 +150,9 @@ fn play_tonight_suggests_one_to_continue_one_from_the_backlog_and_one_to_redisco
     for _ in 0..5 {
         let view = bench.command(&plugin, &config, &games, now);
         assert_eq!(view.title.as_deref(), Some("Stasera potresti giocare a…"));
+        assert_eq!(view.games_style, GamesStyle::Mystery, "three cards to turn over");
+        let hints: Vec<&str> = view.games.iter().filter_map(|pick| pick.hint.as_deref()).collect();
+        assert_eq!(hints, ["Continua", "Dal backlog", "Riscopri"], "what each card says face down");
         let picks: Vec<(&str, &str)> = view
             .games
             .iter()
@@ -218,6 +221,7 @@ fn steam_reviews_show_the_user_score_and_metacritic() {
     let badge = data.badge.as_ref().expect("badge");
     assert_eq!(badge.text, "89%");
     assert_eq!(badge.tooltip.as_deref(), Some("Recensioni positive su Steam: Molto positive"));
+    assert_eq!(badge.label.as_deref(), Some("Gradimento Steam"), "what the figure is");
     assert_eq!(data.sections[0].title.as_deref(), Some("Recensioni"));
     assert_eq!(
         data.sections[0].blocks[0],
@@ -345,6 +349,7 @@ fn howlongtobeat_finds_the_search_endpoint_gets_a_token_and_reads_the_times() {
     assert_eq!(stat(&data, "Tutti gli stili"), Some("45 h"));
     let badge = data.badge.as_ref().expect("badge");
     assert_eq!((badge.text.as_str(), badge.tooltip.as_deref()), ("27 h", Some("HowLongToBeat · Storia principale")));
+    assert_eq!(badge.label.as_deref(), Some("Per finirlo"), "what the figure is");
     assert_eq!(links(&data), ["https://howlongtobeat.com/game/80368"]);
 
     // Homepage, the two scripts, the token, the search: five requests for the first game

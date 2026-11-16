@@ -12,6 +12,8 @@ const MAX_BLOCKS: usize = 12;
 const MAX_ITEMS: usize = 24;
 const MAX_GAMES: usize = 12;
 const BADGE_CHARS: usize = 14;
+const BADGE_LABEL_CHARS: usize = 24;
+const HINT_CHARS: usize = 40;
 const LABEL_CHARS: usize = 80;
 const LINE_CHARS: usize = 240;
 const TEXT_CHARS: usize = 1200;
@@ -22,6 +24,9 @@ const URL_CHARS: usize = 600;
 #[serde(rename_all = "camelCase")]
 pub struct Badge {
     pub text: String,
+    /// What the figure is ("To finish", "Steam reviews"), shown next to it where there is room.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tooltip: Option<String>,
 }
@@ -107,6 +112,32 @@ impl PluginGameData {
 pub struct GamePick {
     pub id: String,
     pub note: Option<String>,
+    /// Shown on the card while it is still covered ([`GamesStyle::Mystery`]).
+    pub hint: Option<String>,
+}
+
+/// How the games of a command are laid out. A name from this list, nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GamesStyle {
+    /// Rows: small cover, title, note, buttons.
+    #[default]
+    List,
+    /// Whole covers, as in the library.
+    Cards,
+    /// Whole covers, face down until the user turns each one.
+    Mystery,
+}
+
+impl GamesStyle {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "list" => Some(Self::List),
+            "cards" => Some(Self::Cards),
+            "mystery" => Some(Self::Mystery),
+            _ => None,
+        }
+    }
 }
 
 /// Answer of a command: what the dialog shows.
@@ -116,6 +147,7 @@ pub struct PluginView {
     pub title: Option<String>,
     pub sections: Vec<Section>,
     pub games: Vec<GamePick>,
+    pub games_style: GamesStyle,
 }
 
 /// Reads what `gameDetails` returned. `null`/`undefined` mean "nothing for this game".
@@ -138,10 +170,12 @@ pub fn parse_view(value: &Value) -> PluginView {
                     Value::String(id) => Some(GamePick {
                         id: line(id, LINE_CHARS)?,
                         note: None,
+                        hint: None,
                     }),
                     other => Some(GamePick {
                         id: text_of(other, "id", LINE_CHARS)?,
                         note: text_of(other, "note", LINE_CHARS),
+                        hint: text_of(other, "hint", HINT_CHARS),
                     }),
                 })
                 .take(MAX_GAMES)
@@ -152,18 +186,25 @@ pub fn parse_view(value: &Value) -> PluginView {
         title: text_of(value, "title", LABEL_CHARS),
         sections: parse_sections(value.get("sections")),
         games,
+        // An unknown name is not a layout: the plain list
+        games_style: value
+            .get("gamesStyle")
+            .and_then(Value::as_str)
+            .and_then(GamesStyle::from_name)
+            .unwrap_or_default(),
     }
 }
 
 fn parse_badge(value: &Value) -> Option<Badge> {
-    let (text, tooltip) = match value {
-        Value::String(text) => (line(text, BADGE_CHARS)?, None),
+    let (text, label, tooltip) = match value {
+        Value::String(text) => (line(text, BADGE_CHARS)?, None, None),
         other => (
             text_of(other, "text", BADGE_CHARS)?,
+            text_of(other, "label", BADGE_LABEL_CHARS),
             text_of(other, "tooltip", LINE_CHARS),
         ),
     };
-    Some(Badge { text, tooltip })
+    Some(Badge { text, label, tooltip })
 }
 
 fn parse_sections(value: Option<&Value>) -> Vec<Section> {
@@ -309,7 +350,7 @@ mod tests {
     #[test]
     fn reads_every_kind_of_block() {
         let data = parse_game_data(&json!({
-            "badge": {"text": "12 h", "tooltip": "Main story"},
+            "badge": {"text": "12 h", "label": "To finish, and a good deal more than fits", "tooltip": "Main story"},
             "sections": [{
                 "title": "HowLongToBeat",
                 "blocks": [
@@ -337,7 +378,11 @@ mod tests {
             }]
         }));
 
-        assert_eq!(data.badge, Some(Badge { text: "12 h".into(), tooltip: Some("Main story".into()) }));
+        assert_eq!(data.badge, Some(Badge {
+                text: "12 h".into(),
+                label: Some("To finish, and a good de".into()),
+                tooltip: Some("Main story".into())
+            }));
         let blocks = &data.sections[0].blocks;
         assert_eq!(blocks.len(), 7, "unknown and invalid blocks are dropped: {blocks:?}");
         assert_eq!(
@@ -387,17 +432,24 @@ mod tests {
         let view = parse_view(&json!({
             "title": "Tonight",
             "sections": [{"blocks": [{"type": "text", "text": "Try this."}]}],
-            "games": ["steam:1", {"id": "epic:x", "note": "Never played"}, {"note": "no id"}, 7]
+            "gamesStyle": "mystery",
+            "games": ["steam:1", {"id": "epic:x", "note": "Never played", "hint": "Backlog"}, {"note": "no id"}, 7]
         }));
         assert_eq!(view.title.as_deref(), Some("Tonight"));
         assert_eq!(view.sections.len(), 1);
         assert_eq!(
             view.games,
             vec![
-                GamePick { id: "steam:1".into(), note: None },
-                GamePick { id: "epic:x".into(), note: Some("Never played".into()) },
+                GamePick { id: "steam:1".into(), note: None, hint: None },
+                GamePick { id: "epic:x".into(), note: Some("Never played".into()), hint: Some("Backlog".into()) },
             ]
         );
+        assert_eq!(view.games_style, GamesStyle::Mystery);
+        assert_eq!(parse_view(&json!({"gamesStyle": "cards"})).games_style, GamesStyle::Cards);
+        // A layout is a name from the list, never anything a plugin makes up
+        for other in [json!("carousel"), json!("<style>"), json!(3), json!({"css": "x"})] {
+            assert_eq!(parse_view(&json!({"gamesStyle": other})).games_style, GamesStyle::List);
+        }
         assert_eq!(parse_view(&json!(null)), PluginView::default());
     }
 

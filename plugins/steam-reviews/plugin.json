@@ -7,7 +7,7 @@
     "es": "Reseñas",
     "ru": "Оценки"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Kanso",
   "description": {
     "en": "Steam user reviews and the Metacritic score, also for games from other stores that have a Steam page.",

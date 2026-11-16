@@ -38,6 +38,7 @@ import {
   withThemeDefaults,
   type ThemeInput,
 } from "./themes";
+import { CARD_INFO_DEFAULT, withCardInfo } from "./cardInfo";
 
 const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
 
@@ -53,6 +54,7 @@ const DEFAULT_CONFIG: AppConfig = {
   trackPlaytime: true,
   plugins: {},
   animations: "theme",
+  cardInfo: [...CARD_INFO_DEFAULT],
   hasGamePass: false,
   gamePassCatalog: false,
 };
@@ -137,6 +139,7 @@ export async function getSettings(): Promise<AppConfig> {
       trackPlaytime: parsed.trackPlaytime !== false,
       plugins: withPluginDefaults(parsed.plugins),
       animations: withAnimationsChoice(parsed.animations),
+      cardInfo: withCardInfo(parsed.cardInfo),
       hasGamePass: parsed.hasGamePass === true,
       gamePassCatalog: parsed.gamePassCatalog === true,
     };
@@ -158,6 +161,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     trackPlaytime: config.trackPlaytime,
     plugins: withPluginDefaults(config.plugins),
     animations: withAnimationsChoice(config.animations),
+    cardInfo: withCardInfo(config.cardInfo),
     hasGamePass: config.hasGamePass === true,
     gamePassCatalog: config.gamePassCatalog === true,
   };
@@ -885,6 +889,7 @@ export async function pluginBadges(): Promise<Record<string, BadgeEntry[]>> {
               pluginId: plugin.id,
               pluginName: plugin.name,
               text: badge.text,
+              label: badge.label ?? null,
               tooltip: badge.tooltip ?? null,
             },
           ]
