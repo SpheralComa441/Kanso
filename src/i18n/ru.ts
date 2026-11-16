@@ -306,6 +306,8 @@ export const ru: Dictionary = {
   "achievements.count": "{unlocked} из {total}",
   "achievements.show": "Показать достижения",
   "achievements.hide": "Скрыть достижения",
+  "achievements.showAll": "Показать все достижения: {total}",
+  "achievements.showLatest": "Показать только последние полученные",
   "achievements.loading": "Чтение кэша Steam…",
   "achievements.unavailable": "Список недоступен: откройте страницу игры в библиотеке Steam и повторите.",
   "achievements.partial": "Steam хранит в кэше только часть списка ({shown} из {total}); счётчики полные.",

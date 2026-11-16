@@ -306,6 +306,8 @@ export const en: Dictionary = {
   "achievements.count": "{unlocked} of {total}",
   "achievements.show": "Show achievements",
   "achievements.hide": "Hide achievements",
+  "achievements.showAll": "Show all {total} achievements",
+  "achievements.showLatest": "Show only the latest unlocked",
   "achievements.loading": "Reading Steam's cache…",
   "achievements.unavailable": "List not available: open the game's page in your Steam library and try again.",
   "achievements.partial": "Steam caches only part of the list ({shown} of {total}); the counts are complete.",

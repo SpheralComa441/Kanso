@@ -397,6 +397,11 @@
     animation-delay: calc(min(var(--i, 0), 24) * var(--motion-stagger));
   }
 
+  /* A card that scrolling brings in was not part of the entrance */
+  .motion-view .game-card[data-arrived] {
+    animation: none;
+  }
+
   /* A list that unfolds in the side panel */
   .motion-list {
     animation: list-unfold var(--motion-base) var(--motion-ease) both;
@@ -564,6 +569,29 @@
 
   .detail-grid {
     gap: var(--detail-gap);
+  }
+
+  /*
+   * The sheet grows with the window: on a large or maximised one it takes most of the
+   * width instead of sitting small in the middle, and its cover column grows with it.
+   */
+  .detail-sheet[data-detail-layout="bento"] {
+    max-width: clamp(64rem, 84vw, 120rem);
+  }
+
+  .detail-sheet[data-detail-layout="sheet"] {
+    max-width: clamp(48rem, 62vw, 80rem);
+  }
+
+  .detail-side {
+    width: clamp(15.5rem, 21%, 25rem);
+  }
+
+  /* Achievements side by side where the sheet is wide enough for more than one column */
+  .achievement-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 17.5rem), 1fr));
+    column-gap: 1.75rem;
   }
 
   /* A tile of the sheet */
@@ -925,6 +953,8 @@
   .category-card {
     display: block;
     aspect-ratio: 16 / 10;
+    /* A tile out of sight is not drawn, and its strips do not run */
+    content-visibility: auto;
     container-type: inline-size;
     isolation: isolate;
     cursor: pointer;
