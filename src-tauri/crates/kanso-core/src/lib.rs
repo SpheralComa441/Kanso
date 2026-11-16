@@ -1,5 +1,6 @@
 pub mod accounts;
 pub mod achievements;
+pub mod authenticode;
 pub mod battlenet_account;
 pub mod cleaner;
 pub mod config;

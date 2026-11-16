@@ -53,6 +53,9 @@ interface HeaderProps {
   settingsDisabled: boolean;
   onScan: () => void;
   onOpenSettings: () => void;
+  /** How many games carry a DLSS older than NVIDIA's newest; the mark shows only above zero. */
+  dlssUpdates: number;
+  onOpenDlss: () => void;
   /** Commands of the enabled plugins; the menu is hidden when there are none. */
   pluginCommands: PluginCommandEntry[];
   onRunPluginCommand: (command: PluginCommandEntry) => void;
@@ -233,6 +236,8 @@ export function Header({
   settingsDisabled,
   onScan,
   onOpenSettings,
+  dlssUpdates,
+  onOpenDlss,
   pluginCommands,
   onRunPluginCommand,
 }: HeaderProps) {
@@ -369,6 +374,21 @@ export function Header({
             />
             <span>{isScanning ? t("header.scanning") : t("header.scan")}</span>
           </button>
+
+          {dlssUpdates > 0 && (
+            <button
+              id="dlss-updates-button"
+              type="button"
+              onClick={onOpenDlss}
+              disabled={settingsDisabled}
+              title={t("header.dlssUpdates", { count: dlssUpdates })}
+              aria-label={t("header.dlssUpdates", { count: dlssUpdates })}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-amber-400/40 bg-amber-400/10 px-2.5 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-400/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <span>DLSS</span>
+              <span className="rounded-full bg-amber-400 px-1.5 text-2xs font-semibold tabular-nums text-zinc-950">{dlssUpdates}</span>
+            </button>
+          )}
 
           <button
             id="open-settings-button"

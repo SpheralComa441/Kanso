@@ -373,6 +373,10 @@ pub struct AppConfig {
     pub home: HomeConfig,
     /// How the user wants the Store page.
     pub store: StoreConfig,
+    /// Whether Kanso may ask NVIDIA's public repository which version of DLSS is the newest
+    /// and download its libraries from there. Off until the user turns it on: with it off
+    /// Kanso only reads the versions in the games' folders and contacts nobody about DLSS.
+    pub dlss_updates: bool,
     /// Emulators added by the user, and folders added to the ones Kanso found.
     pub emulators: Vec<EmulatorSetting>,
     /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
@@ -401,6 +405,7 @@ impl Default for AppConfig {
             hidden_sections: Vec::new(),
             home: HomeConfig::default(),
             store: StoreConfig::default(),
+            dlss_updates: false,
             emulators: Vec::new(),
             has_game_pass: false,
             game_pass_catalog: false,
@@ -467,6 +472,7 @@ impl AppConfig {
                 .collect(),
             home: self.home.sanitized(),
             store: self.store.sanitized(),
+            dlss_updates: self.dlss_updates,
             emulators: {
                 // One entry per emulator: a later one with the same id is a leftover
                 let mut seen = HashSet::new();
@@ -556,6 +562,7 @@ mod tests {
 
         let input = AppConfig {
             store: StoreConfig::default(),
+            dlss_updates: true,
             steamgriddb_api_key: "  sgdb_secret_key_123  ".to_string(),
             custom_folders: vec![
                 r"D:\Games\".to_string(),
@@ -637,6 +644,8 @@ mod tests {
         };
 
         let saved = input.save_to_file(&cfg_path).expect("save config");
+        assert!(!initial.dlss_updates, "asking NVIDIA about DLSS is off until the user turns it on");
+        assert!(saved.dlss_updates);
         assert_eq!(saved.steamgriddb_api_key, "sgdb_secret_key_123");
         assert_eq!(saved.custom_folders, vec![r"D:\Games\", r"E:\IndieGames"]);
         assert!(saved.has_api_key());

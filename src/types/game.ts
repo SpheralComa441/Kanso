@@ -135,7 +135,40 @@ export interface DlssLibrary {
   version: string;
   /** How many copies at this version the game carries. */
   copies: number;
+  /** Kanso replaced a copy at this version and keeps the game's original beside it. */
+  replaced: boolean;
 }
+
+/** A game that carries DLSS, with what it carries. */
+export interface GameDlss {
+  gameId: string;
+  title: string;
+  libraries: DlssLibrary[];
+}
+
+/** DLSS across the library. */
+export interface DlssStatus {
+  /** Whether the user lets Kanso ask NVIDIA's repository. */
+  online: boolean;
+  /** NVIDIA's newest version, when known: "310.9.16". */
+  latest: string | null;
+  checkedAt: number | null;
+  /** The parts of the newest version already downloaded on this PC. */
+  downloaded: DlssPart[];
+  games: GameDlss[];
+  /** Why the newest version could not be asked, when it could not. */
+  error: string | null;
+}
+
+/** What changing a game's libraries did. */
+export interface DlssChange {
+  /** How many files were replaced, or put back. */
+  changed: number;
+  libraries: DlssLibrary[];
+}
+
+/** Where a newer library comes from. */
+export type DlssSource = { kind: "nvidia" } | { kind: "game"; gameId: string } | { kind: "file"; path: string };
 
 /** What Steam's own cache says about a game's achievements. `items` may be shorter than `total`. */
 export interface GameAchievements {
@@ -199,6 +232,11 @@ export interface AppConfig {
   hiddenSections: HideableSection[];
   home: HomeConfig;
   store: StoreConfig;
+  /**
+   * Whether Kanso may ask NVIDIA's public repository for the newest DLSS and download its
+   * libraries from there. Off until the user turns it on.
+   */
+  dlssUpdates: boolean;
   /** Emulators added by the user, and folders added to the ones Kanso found. */
   emulators: EmulatorSetting[];
   /**

@@ -30,12 +30,16 @@ import type {
   HomeSection,
   PlaceMatch,
   DealStore,
+  DlssChange,
   DlssLibrary,
+  DlssSource,
+  DlssStatus,
   LikedDeal,
   StoreConfig,
 } from "../types/game";
 import {
   PREVIEW_DLSS,
+  PREVIEW_DLSS_LATEST,
   PREVIEW_MOCK_DEALS,
   PREVIEW_MOCK_EMULATED_GAMES,
   PREVIEW_MOCK_EMULATORS,
@@ -76,6 +80,7 @@ const DEFAULT_CONFIG: AppConfig = {
   hiddenSections: [],
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   store: { hiddenStores: [], hiddenDeals: [], liked: [] },
+  dlssUpdates: false,
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
@@ -167,6 +172,7 @@ export async function getSettings(): Promise<AppConfig> {
       hiddenSections: withHiddenSections(parsed.hiddenSections),
       home: withHomeConfig(parsed.home),
       store: withStoreConfig(parsed.store),
+      dlssUpdates: parsed.dlssUpdates === true,
       emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
       gamePassCatalog: parsed.gamePassCatalog === true,
@@ -193,6 +199,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     hiddenSections: withHiddenSections(config.hiddenSections),
     home: withHomeConfig(config.home),
     store: withStoreConfig(config.store),
+    dlssUpdates: config.dlssUpdates === true,
     emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
     gamePassCatalog: config.gamePassCatalog === true,
@@ -1052,6 +1059,35 @@ export async function getPlaySessions(sinceMs: number): Promise<PlaySession[]> {
 }
 
 /** The achievements Steam lists for a game; `null` when there is nothing to show. */
+/* ------------------------------------------------------------------- DLSS */
+
+/** The browser preview's own games with DLSS: changed by the buttons, forgotten on reload. */
+const previewDlss: Record<string, DlssLibrary[]> = JSON.parse(JSON.stringify(PREVIEW_DLSS));
+
+function previewDlssOnline(): boolean {
+  try {
+    return JSON.parse(localStorage.getItem(BROWSER_STORAGE_KEY) ?? "{}").dlssUpdates === true;
+  } catch {
+    return false;
+  }
+}
+
+function previewDlssStatus(): DlssStatus {
+  const online = previewDlssOnline();
+  return {
+    online,
+    latest: online ? PREVIEW_DLSS_LATEST : null,
+    checkedAt: online ? Date.now() : null,
+    downloaded: [],
+    games: Object.entries(previewDlss).map(([gameId, libraries]) => ({
+      gameId,
+      title: PREVIEW_MOCK_GAMES.find((game) => game.id === gameId)?.title ?? gameId,
+      libraries,
+    })),
+    error: null,
+  };
+}
+
 /**
  * The versions of the DLSS libraries a game carries, read from the files in its folder.
  * Nothing is downloaded or changed. Empty for a game without DLSS or not on disk.
@@ -1060,7 +1096,102 @@ export async function gameDlss(game: DetectedGame): Promise<DlssLibrary[]> {
   if (isTauri()) {
     return invoke<DlssLibrary[]>("game_dlss", { gameId: game.id });
   }
-  return PREVIEW_DLSS[game.id] ?? [];
+  return previewDlss[game.id] ?? [];
+}
+
+/**
+ * DLSS across the library: the games that carry it and, when the user turned the setting on,
+ * NVIDIA's newest version. With the setting off nobody is contacted.
+ */
+export async function dlssStatus(refresh = false): Promise<DlssStatus> {
+  if (isTauri()) {
+    return invoke<DlssStatus>("dlss_status", { refresh });
+  }
+  return previewDlssStatus();
+}
+
+/** Downloads the libraries of NVIDIA's newest version to this PC (only with the setting on). */
+export async function dlssDownload(): Promise<DlssStatus> {
+  if (isTauri()) {
+    return invoke<DlssStatus>("dlss_download");
+  }
+  return { ...previewDlssStatus(), downloaded: ["superResolution", "frameGeneration", "rayReconstruction"] };
+}
+
+/** Brings a game's DLSS libraries up to date from a source, keeping the originals. */
+export async function dlssUpdate(game: { id: string }, source: DlssSource): Promise<DlssChange> {
+  if (isTauri()) {
+    return invoke<DlssChange>("dlss_update", { gameId: game.id, source });
+  }
+  const own = previewDlss[game.id] ?? [];
+  const donor = source.kind === "game" ? (previewDlss[source.gameId] ?? []) : [];
+  let changed = 0;
+  const libraries = own.map((library) => {
+    const offered =
+      source.kind === "nvidia"
+        ? PREVIEW_DLSS_LATEST
+        : source.kind === "game"
+          ? donor.filter((entry) => entry.part === library.part).map((entry) => entry.version).sort(compareDotted).pop()
+          : PREVIEW_DLSS_LATEST;
+    if (!offered || compareDotted(offered, library.version) <= 0) return library;
+    changed += library.copies;
+    return { ...library, version: offered, replaced: true };
+  });
+  if (changed === 0) throw "Nessuna libreria da aggiornare: il gioco ha già questa versione o una più recente";
+  // Copies that are now at the same version are one line, as the real reader lists them
+  const merged: DlssLibrary[] = [];
+  for (const library of libraries) {
+    const same = merged.find((entry) => entry.part === library.part && entry.version === library.version);
+    if (same) {
+      same.copies += library.copies;
+      same.replaced = same.replaced || library.replaced;
+    } else {
+      merged.push({ ...library });
+    }
+  }
+  previewDlss[game.id] = merged;
+  return { changed, libraries: merged };
+}
+
+/** Puts back the libraries a game shipped with. */
+export async function dlssRestore(game: { id: string }): Promise<DlssChange> {
+  if (isTauri()) {
+    return invoke<DlssChange>("dlss_restore", { gameId: game.id });
+  }
+  const before = previewDlss[game.id] ?? [];
+  previewDlss[game.id] = JSON.parse(JSON.stringify(PREVIEW_DLSS[game.id] ?? []));
+  return { changed: before.filter((library) => library.replaced).length, libraries: previewDlss[game.id] };
+}
+
+/** Lets the user choose a DLSS library they downloaded themselves. */
+export async function pickDlssLibrary(): Promise<string | null> {
+  if (!isTauri()) return "C:\\Anteprima\\nvngx_dlss.dll";
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    filters: [{ name: "NVIDIA DLSS", extensions: ["dll"] }],
+  });
+  return typeof selected === "string" && selected.trim().length > 0 ? selected : null;
+}
+
+/** Opens NVIDIA's page of the DLSS libraries, credited where they are downloaded from. */
+export async function openDlssSource(): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_dlss_source");
+    return;
+  }
+  window.open("https://github.com/NVIDIA/DLSS", "_blank", "noopener,noreferrer");
+}
+
+/** Compares two versions written as numbers and dots: "3.7.10" comes before "310.2.1". */
+export function compareDotted(a: string, b: string): number {
+  const left = a.split(".").map(Number);
+  const right = b.split(".").map(Number);
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] || 0) - (right[index] || 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
 }
 
 export async function getGameAchievements(

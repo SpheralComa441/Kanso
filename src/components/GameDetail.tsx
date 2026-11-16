@@ -14,12 +14,13 @@ import {
   X,
 } from "lucide-react";
 import { useI18n, type I18n } from "../i18n";
-import { gameDlss, getPlaySessions, resolveCoverUrl } from "../lib/backend";
+import { getPlaySessions, resolveCoverUrl } from "../lib/backend";
 import { GAME_STATUSES, genreKey } from "../lib/library";
 import { PLATFORM_META, canInstall, platformLabel, uninstallMode } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
-import type { DetectedGame, DlssLibrary, DlssPart, GameStatus, PlaySession, PluginInfo, ThemeDetail } from "../types/game";
+import type { DetectedGame, GameStatus, PlaySession, PluginInfo, ThemeDetail } from "../types/game";
 import { Cover } from "./Cover";
+import { DlssTile } from "./DlssTile";
 import { CardRail, PinnedCard, readPinnedCards, writePinnedCards, type DetailCard } from "./CardRail";
 import {
   AchievementsSection,
@@ -294,63 +295,6 @@ function StatusPicker({ game, onSetStatus }: Pick<Piece, "game" | "onSetStatus">
       })}
     </div>
   );
-}
-
-const DLSS_PARTS: DlssPart[] = ["superResolution", "frameGeneration", "rayReconstruction"];
-
-/**
- * The versions of DLSS the game carries: Super Resolution, Frame Generation, Ray
- * Reconstruction, each as its library in the game's folder declares it. Read when the sheet
- * opens; a game without DLSS shows nothing. With `tile`, it is a tile of its own.
- */
-function DlssVersions({ game, tile = false }: { game: DetectedGame; tile?: boolean }) {
-  const { t } = useI18n();
-  const [libraries, setLibraries] = useState<DlssLibrary[]>([]);
-  useEffect(() => {
-    let current = true;
-    setLibraries([]);
-    if (game.isInstalled && game.platform !== "emulator") {
-      gameDlss(game)
-        .then((found) => current && setLibraries(found))
-        // Not being able to read them is the same as not having them
-        .catch(() => {});
-    }
-    return () => {
-      current = false;
-    };
-    // The folder is the game's: another game, or the same one installed since, reads again
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game.id, game.isInstalled, game.installDir]);
-
-  if (libraries.length === 0) return null;
-  const rows = DLSS_PARTS.map((part) => ({ part, found: libraries.filter((library) => library.part === part) })).filter(
-    (row) => row.found.length > 0
-  );
-  const list = (
-    <div id="detail-dlss" className="space-y-2" title={t("dlss.help")}>
-      <span className="micro-label">{t("dlss.title")}</span>
-      <dl className="space-y-1">
-        {rows.map(({ part, found }) => (
-          <div key={part} data-dlss={part} className="flex items-baseline justify-between gap-3 text-xs">
-            <dt className="min-w-0 truncate text-zinc-400">{t(`dlss.${part}`)}</dt>
-            <dd
-              className="shrink-0 select-text font-medium tabular-nums text-zinc-100"
-              title={
-                found.length > 1
-                  ? t("dlss.mixed")
-                  : found[0].copies > 1
-                    ? t("dlss.copies", { count: found[0].copies })
-                    : undefined
-              }
-            >
-              {found.map((library) => library.version).join(" · ")}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-  return tile ? <div className="tile shrink-0 p-4">{list}</div> : list;
 }
 
 function CoverArt({ game, coverUrl, onBroken }: { game: DetectedGame; coverUrl: string | null; onBroken: () => void }) {
@@ -866,7 +810,7 @@ function BentoLayout(props: LayoutProps) {
             <StatusPicker game={game} onSetStatus={onSetStatus} />
           </div>
           {/* Right under the status: what DLSS the game carries, when it carries any */}
-          <DlssVersions game={game} tile />
+          <DlssTile game={game} tile />
         </div>
       )}
 
@@ -894,7 +838,7 @@ function BentoLayout(props: LayoutProps) {
           <div className="tile shrink-0 space-y-3 p-4">
             <Actions {...props} />
             <StatusPicker game={game} onSetStatus={onSetStatus} />
-            <DlssVersions game={game} />
+            <DlssTile game={game} />
           </div>
         )}
 
@@ -984,7 +928,7 @@ function SheetLayout(props: LayoutProps) {
           </div>
 
           <StatusPicker game={game} onSetStatus={onSetStatus} />
-          <DlssVersions game={game} />
+          <DlssTile game={game} />
 
           <p
             className={`select-text text-sm leading-relaxed ${
