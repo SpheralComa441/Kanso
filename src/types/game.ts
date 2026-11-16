@@ -6,7 +6,9 @@ export type GamePlatform =
   | "ubisoft"
   | "xbox"
   | "Battle.net"
-  | "standalone";
+  | "standalone"
+  /** A game file run by one of the user's emulators, named by `platformAppId`. */
+  | "emulator";
 
 /** Where the user stands with a game; set by hand in the game's sheet. */
 export type GameStatus = "backlog" | "playing" | "finished" | "abandoned";
@@ -140,6 +142,8 @@ export interface AppConfig {
   animations: AnimationsChoice;
   /** What a cover tells about its game under the pointer, besides the title. */
   cardInfo: CardInfoItem[];
+  /** Emulators added by the user, and folders added to the ones Kanso found. */
+  emulators: EmulatorSetting[];
   /**
    * The user says they have Xbox Game Pass for PC linked to Battle.net: the games it makes
    * installable there are listed. Kanso cannot find this out by itself.
@@ -341,6 +345,46 @@ export interface ThemeMotion {
 }
 
 export type MotionLevel = "none" | "subtle" | "smooth" | "lively";
+
+/** An emulator on this PC: one Kanso found, or one the user added in Settings. */
+export interface EmulatorInfo {
+  /** `dolphin`, `retroarch`…, or `custom-…` for one Kanso does not know. */
+  id: string;
+  name: string;
+  /** What it emulates: "GameCube · Wii". Empty for an emulator Kanso does not know. */
+  systems: string;
+  exePath: string;
+  /** Where its games are read from: the folders its own settings list, and the user's. */
+  folders: { path: string; fromEmulator: boolean }[];
+  /** Added in Settings rather than found by Kanso. */
+  addedByUser: boolean;
+}
+
+/** What Settings keeps about an emulator (`emulators` in `config.json`). */
+export interface EmulatorSetting {
+  id: string;
+  /** Name of an emulator Kanso does not know. */
+  name: string;
+  /** Empty for a known emulator that Kanso found by itself. */
+  exePath: string;
+  /** Folders with its games, besides those its own settings list. */
+  folders: string[];
+  /** File extensions of its games; a known emulator has its own list. */
+  extensions: string[];
+  /** Arguments that start a game, `{rom}` being the game file; empty for the usual ones. */
+  args: string;
+}
+
+/** What Kanso recognises an executable as, when the user picks one in Settings. */
+export interface EmulatorIdentity {
+  id: string;
+  name: string;
+  systems: string;
+  /** Extensions of the game files it opens. */
+  extensions: string[];
+  /** The arguments Kanso starts a game with. */
+  args: string;
+}
 
 /** One thing a cover can tell about its game under the pointer. */
 export type CardInfoItem =

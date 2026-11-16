@@ -39,11 +39,12 @@ macro_rules! bundled {
 }
 
 /// The official plugins, from the repository's `plugins/` folder, in the order they are listed.
-const BUNDLED: [(&str, &str); 6] = [
+const BUNDLED: [(&str, &str); 7] = [
     bundled!("howlongtobeat"),
     bundled!("steam-reviews"),
     bundled!("steam-news"),
     bundled!("pcgamingwiki"),
+    bundled!("nexus-mods"),
     bundled!("price-history"),
     bundled!("play-tonight"),
 ];
@@ -207,7 +208,7 @@ mod tests {
         let ids: Vec<&str> = plugins.iter().map(|p| p.manifest.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["howlongtobeat", "steam-reviews", "steam-news", "pcgamingwiki", "price-history", "play-tonight"]
+            ["howlongtobeat", "steam-reviews", "steam-news", "pcgamingwiki", "nexus-mods", "price-history", "play-tonight"]
         );
         for plugin in &plugins {
             assert_eq!(plugin.source, PluginSource::Bundled);

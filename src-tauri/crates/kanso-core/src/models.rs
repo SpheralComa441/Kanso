@@ -25,6 +25,10 @@ pub enum GamePlatform {
     BattleNet,
     #[serde(rename = "standalone", alias = "Standalone", alias = "locale")]
     Standalone,
+    /// A game file (a ROM, a disc image) that one of the user's emulators runs. The emulator
+    /// is named by `platform_app_id` (see [`crate::emulators`]).
+    #[serde(rename = "emulator", alias = "Emulator")]
+    Emulator,
 }
 
 impl GamePlatform {
@@ -38,6 +42,7 @@ impl GamePlatform {
             GamePlatform::Xbox => "xbox",
             GamePlatform::BattleNet => "Battle.net",
             GamePlatform::Standalone => "standalone",
+            GamePlatform::Emulator => "emulator",
         }
     }
 
@@ -52,6 +57,7 @@ impl GamePlatform {
             GamePlatform::Xbox,
             GamePlatform::BattleNet,
             GamePlatform::Standalone,
+            GamePlatform::Emulator,
         ]
         .into_iter()
         .find(|platform| platform.as_str().eq_ignore_ascii_case(raw.trim()))
@@ -129,7 +135,8 @@ pub struct DetectedGame {
     pub title: String,
     /// Normalized title stripped of edition suffixes and trademark symbols for metadata APIs.
     pub clean_title: String,
-    /// Platform source (`steam`, `epic`, `gog`, `ea`, `ubisoft`, `xbox`, `Battle.net`, or `standalone`).
+    /// Platform source (`steam`, `epic`, `gog`, `ea`, `ubisoft`, `xbox`, `Battle.net`,
+    /// `standalone`, or `emulator`).
     pub platform: GamePlatform,
     /// Platform-specific identifier (`appid` for Steam, `AppName` for Epic, registry key for Battle.net).
     pub platform_app_id: Option<String>,
@@ -305,7 +312,7 @@ impl DetectedGame {
                 .launch_uri
                 .clone()
                 .filter(|uri| uri.starts_with("msxbox://game/?productId=") || uri.starts_with("ms-windows-store://pdp/?PFN=")),
-            GamePlatform::Ea | GamePlatform::Standalone => None,
+            GamePlatform::Ea | GamePlatform::Standalone | GamePlatform::Emulator => None,
         }
     }
 

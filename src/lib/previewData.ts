@@ -1,4 +1,4 @@
-import type { Deal, DetectedGame } from "../types/game";
+import type { Deal, DetectedGame, EmulatorInfo } from "../types/game";
 
 /**
  * Sample library shown only in the browser preview (`npm run dev` outside Tauri),
@@ -279,6 +279,77 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
       "Forgia il tuo cammino in Hollow Knight! Un'epica avventura d'azione in un vasto regno in rovina.",
     colors: ["#3b4a78", "#12162b"],
   }),
+];
+
+/** Emulators of the browser preview, as the desktop backend would report them. */
+export const PREVIEW_MOCK_EMULATORS: EmulatorInfo[] = [
+  {
+    id: "dolphin",
+    name: "Dolphin",
+    systems: "GameCube · Wii",
+    exePath: "D:\\Emulatori\\Dolphin\\Dolphin.exe",
+    folders: [{ path: "D:\\Roms\\GameCube", fromEmulator: true }],
+    addedByUser: false,
+  },
+  {
+    id: "duckstation",
+    name: "DuckStation",
+    systems: "PlayStation",
+    exePath: "D:\\Emulatori\\DuckStation\\duckstation-qt-x64-ReleaseLTCG.exe",
+    folders: [{ path: "D:\\Roms\\PSX", fromEmulator: true }],
+    addedByUser: false,
+  },
+  {
+    id: "pcsx2",
+    name: "PCSX2",
+    systems: "PlayStation 2",
+    exePath: "C:\\Program Files\\PCSX2\\pcsx2-qt.exe",
+    folders: [],
+    addedByUser: false,
+  },
+];
+
+function emulated(
+  emulator: string,
+  file: string,
+  title: string,
+  colors: [string, string],
+  more: Partial<DetectedGame> = {}
+): DetectedGame {
+  const folder = emulator === "dolphin" ? "D:\\Roms\\GameCube" : "D:\\Roms\\PSX";
+  return seed({
+    id: `emu:${emulator}:${file.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+    title,
+    platform: "emulator",
+    platformAppId: emulator,
+    installDir: folder,
+    executablePath: `${folder}\\${file}`,
+    genres: [],
+    shortDescription: null,
+    colors,
+    ...more,
+  });
+}
+
+/** The game files those emulators run: kept apart from the library, in their own section. */
+export const PREVIEW_MOCK_EMULATED_GAMES: DetectedGame[] = [
+  emulated("dolphin", "Metroid Prime (Europe).rvz", "Metroid Prime", ["#b3541e", "#2a1206"], {
+    playtimeMinutes: 540,
+    lastPlayedAt: Date.now() - 6 * 24 * 60 * 60 * 1000,
+    playCount: 9,
+    genres: ["Azione", "Avventura"],
+  }),
+  emulated("dolphin", "Super Mario Sunshine (Europe).iso", "Super Mario Sunshine", ["#1f8fd6", "#0b2f52"]),
+  emulated("dolphin", "Legend of Zelda, The - The Wind Waker (Europe).rvz", "The Legend of Zelda: The Wind Waker", ["#2f9d6b", "#0c3324"], {
+    isFavorite: true,
+    status: "playing",
+  }),
+  emulated("duckstation", "Final Fantasy VII (Italy) (Disc 1).chd", "Final Fantasy VII", ["#3a4f9c", "#10162e"], {
+    playtimeMinutes: 1980,
+    lastPlayedAt: Date.now() - 70 * 24 * 60 * 60 * 1000,
+    playCount: 30,
+  }),
+  emulated("duckstation", "Crash Bandicoot (Europe).cue", "Crash Bandicoot", ["#d9731a", "#40200a"]),
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;

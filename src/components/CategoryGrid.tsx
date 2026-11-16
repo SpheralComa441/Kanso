@@ -98,9 +98,13 @@ function useNearViewport<T extends Element>(): [RefObject<T>, boolean] {
   return [ref, near];
 }
 
-interface CategoryTileProps {
-  category: GenreSummary;
-  /** Covers of the category's games, the ones to show first. */
+interface CoverTileProps {
+  /** What the tile stands for: a genre's key, an emulator's id. */
+  id: string;
+  name: string;
+  /** A second, smaller line under the name. */
+  detail?: string;
+  /** Covers of the tile's games, the ones to show first. */
   covers: string[];
   label: string;
   countLabel: string;
@@ -109,19 +113,21 @@ interface CategoryTileProps {
 }
 
 /**
- * One category: a strip of its games' covers drifting slowly across the tile, in the light
+ * One tile: a strip of its games' covers drifting slowly across the tile, in the light
  * of the cover that is passing through the middle. The light is the same strip, enlarged
  * until one cover fills the tile and blurred, moving in step with the covers: whatever
  * passes, the tile takes its colors, with nothing computed and nothing to keep in sync.
  */
-function CategoryTile({
-  category,
+export function CoverTile({
+  id,
+  name,
+  detail,
   covers,
   label,
   countLabel,
   onOpen,
   onBrokenCover,
-}: CategoryTileProps) {
+}: CoverTileProps) {
   const [ref, near] = useNearViewport<HTMLButtonElement>();
 
   // The strip holds the sequence twice, so that it can loop without a seam
@@ -135,7 +141,7 @@ function CategoryTile({
   // Tiles start at different points of their loop: a wall moving in step looks mechanical
   const period = sequence.length * SECONDS_PER_COVER;
   let hash = 0;
-  for (const char of category.key) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) >>> 0;
+  for (const char of id) hash = (hash * 31 + (char.codePointAt(0) ?? 0)) >>> 0;
   const motion = {
     "--strip-duration": `${period}s`,
     "--strip-delay": `-${period > 0 ? hash % period : 0}s`,
@@ -145,7 +151,7 @@ function CategoryTile({
     <button
       ref={ref}
       type="button"
-      data-category={category.key}
+      data-category={id}
       onClick={onOpen}
       aria-label={label}
       className="game-card category-card"
@@ -178,7 +184,10 @@ function CategoryTile({
         </>
       )}
       <span className="category-card-text">
-        <span className="category-card-name">{category.label}</span>
+        <span className="min-w-0">
+          <span className="category-card-name">{name}</span>
+          {detail && <span className="category-card-detail">{detail}</span>}
+        </span>
         <span className="category-card-count">{countLabel}</span>
       </span>
     </button>
@@ -222,9 +231,10 @@ export function CategoryGrid({ kind, categories, games, onOpen }: CategoryGridPr
           {categories.map((category) => {
             const countLabel = plural("games", category.count);
             return (
-              <CategoryTile
+              <CoverTile
                 key={category.key}
-                category={category}
+                id={category.key}
+                name={category.label}
                 covers={(covers.get(category.key) ?? [])
                   .filter((url) => usableCover(url) !== null)
                   .slice(0, COVERS_IN_STRIP)}

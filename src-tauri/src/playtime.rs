@@ -1,9 +1,10 @@
 //! Play time, achievements and what is running right now.
 
+use crate::emulators::EmulatedSessions;
 use crate::{game_not_found, load_config, lock_db, AppState, SharedDb, GAME_UPDATED_EVENT};
 use kanso_core::achievements::read_achievements_from_config_dir;
 use kanso_core::playtime::{
-    ProcessLister, ProcessMatcher, SessionTracker, TrackerEvent, POLL_INTERVAL_SECS, SOURCE_KANSO,
+    path_key, ProcessLister, ProcessMatcher, SessionTracker, TrackerEvent, POLL_INTERVAL_SECS, SOURCE_KANSO,
 };
 use kanso_core::scanner::steam::{detect_steam_root, steam_account_config_dir};
 use kanso_core::{now_timestamp_ms, GameAchievements, GamePlatform, PlaySession};
@@ -53,7 +54,16 @@ pub(crate) fn get_running_games(state: State<'_, AppState>) -> Vec<String> {
 }
 
 /// Starts the thread that measures play time for as long as Kanso runs (the tray counts).
-pub(crate) fn spawn_tracker(app: AppHandle, db: SharedDb, running: Arc<Mutex<Vec<String>>>) {
+///
+/// A store game is recognised by the folder its process runs from. An emulated game is not a
+/// process of its own: it is credited while the emulator Kanso started it with keeps running
+/// (`emulated`), and no longer once that emulator has closed.
+pub(crate) fn spawn_tracker(
+    app: AppHandle,
+    db: SharedDb,
+    running: Arc<Mutex<Vec<String>>>,
+    emulated: EmulatedSessions,
+) {
     let spawned = std::thread::Builder::new()
         .name("kanso-playtime".to_string())
         .spawn(move || {
@@ -68,11 +78,15 @@ pub(crate) fn spawn_tracker(app: AppHandle, db: SharedDb, running: Arc<Mutex<Vec
                 let events = if load_config(&app).track_playtime {
                     let games = lock_db(&db).load_games().unwrap_or_default();
                     let matcher = ProcessMatcher::new(&games);
-                    let seen = if matcher.is_empty() {
-                        BTreeSet::new()
-                    } else {
-                        matcher.running_games(lister.executables())
-                    };
+                    let watching_emulators = emulated.lock().map(|e| !e.is_empty()).unwrap_or(false);
+                    let mut seen = BTreeSet::new();
+                    if !matcher.is_empty() || watching_emulators {
+                        let executables = lister.executables();
+                        if watching_emulators {
+                            seen.extend(emulated_running(&emulated, &executables, now));
+                        }
+                        seen.extend(matcher.running_games(executables));
+                    }
                     tracker.observe(now, &seen)
                 } else {
                     tracker.finish_all()
@@ -99,6 +113,24 @@ pub(crate) fn spawn_tracker(app: AppHandle, db: SharedDb, running: Arc<Mutex<Vec
     if let Err(err) = spawned {
         eprintln!("Kanso: play time will not be measured: {err}");
     }
+}
+
+/// How long after starting an emulator its process may still be missing from the list.
+const EMULATOR_START_GRACE_MS: u64 = 90_000;
+
+/// The emulated games whose emulator is running. A game whose emulator has closed is
+/// forgotten: opening the emulator by hand later is not playing that game.
+fn emulated_running(emulated: &EmulatedSessions, executables: &[String], now: u64) -> Vec<String> {
+    let running: std::collections::HashSet<String> = executables.iter().map(|exe| path_key(exe)).collect();
+    let Ok(mut sessions) = emulated.lock() else {
+        return Vec::new();
+    };
+    sessions.retain(|exe, (_, started)| running.contains(exe) || now.saturating_sub(*started) < EMULATOR_START_GRACE_MS);
+    sessions
+        .iter()
+        .filter(|(exe, _)| running.contains(*exe))
+        .map(|(_, (game_id, _))| game_id.clone())
+        .collect()
 }
 
 /// Writes what a tracker event means to the database and tells the interface.

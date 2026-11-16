@@ -1,4 +1,5 @@
 mod accounts;
+mod emulators;
 mod playtime;
 mod plugins;
 mod browser_signin;
@@ -10,8 +11,8 @@ use kanso_core::theme::{
     delete_user_theme, export_theme_file, import_theme_file, list_user_themes, save_user_theme,
 };
 use kanso_core::{
-    current_language, is_absent_cover_due, is_metadata_sync_due, now_timestamp_ms, scan_all_installed_games,
-    set_language, AppConfig, DealsClient, DealsReport, DetectedGame, GameManualUpdate, GameStatus,
+    current_language, is_absent_cover_due, is_metadata_sync_due, now_timestamp_ms, scan_library,
+    set_language, AppConfig, DealsClient, DealsReport, DetectedGame, GameManualUpdate, GamePlatform, GameStatus,
     Lang, LibraryDb, LibraryStore, MetadataClient, ScanReport, SgdbGameMatch, Theme, T,
 };
 use serde::Serialize;
@@ -58,6 +59,10 @@ pub(crate) struct AppState {
     /// It was asked for again while under way (someone just signed in to a store): once done,
     /// it starts over.
     complete_library_again: Arc<std::sync::atomic::AtomicBool>,
+    /// The emulators the last scan found.
+    pub(crate) emulators: emulators::SharedEmulators,
+    /// Emulated games started from Kanso, for the play time tracker.
+    pub(crate) emulated_sessions: emulators::EmulatedSessions,
 }
 
 /// Language used when none is configured yet (the UI picks one from the OS on first run).
@@ -156,8 +161,13 @@ async fn scan_games(app: AppHandle, state: State<'_, AppState>) -> Result<ScanRe
         .map(|mut pending| std::mem::take(&mut *pending))
         .unwrap_or_default();
 
+    let emulators = Arc::clone(&state.emulators);
+
     tauri::async_runtime::spawn_blocking(move || {
-        let raw_report = scan_all_installed_games(&config);
+        let (raw_report, found_emulators) = scan_library(&config);
+        if let Ok(mut known) = emulators.lock() {
+            *known = found_emulators;
+        }
 
         let mut db = lock_db(&db);
         let mut store = LibraryStore::load(&db)?;
@@ -596,7 +606,11 @@ fn launch_game(
         return Err(format!("{}: {}", T::GameNotInstalled.s(), game.title));
     }
 
-    launch_game_inner(&app, &game)?;
+    if game.platform == GamePlatform::Emulator {
+        emulators::launch_emulated_game(&app, &state, &game)?;
+    } else {
+        launch_game_inner(&app, &game)?;
+    }
 
     // Play history is a nicety: failing to record it must not turn a good launch into an error
     let _ = update_stored_game(&app, &state, &game_id, |store| {
@@ -869,6 +883,7 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
     let (db, startup_warnings) = LibraryDb::open_or_recover(&data_dir);
     let db: SharedDb = Arc::new(Mutex::new(db));
     let running_games = Arc::new(Mutex::new(Vec::new()));
+    let emulated_sessions: emulators::EmulatedSessions = Arc::default();
     let plugin_host = Arc::new(plugins::PluginHost::new(
         &app.package_info().version.to_string(),
         data_dir.join("plugins"),
@@ -881,12 +896,14 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         plugins: Arc::clone(&plugin_host),
         completing_library: Arc::default(),
         complete_library_again: Arc::default(),
+        emulators: Arc::default(),
+        emulated_sessions: Arc::clone(&emulated_sessions),
     });
     remove_legacy_sql_mirror(app);
     accounts::remove_unused_window_profiles(app);
     #[cfg(debug_assertions)]
     accounts::run_self_test_if_asked(app, &db);
-    playtime::spawn_tracker(app.clone(), Arc::clone(&db), running_games);
+    playtime::spawn_tracker(app.clone(), Arc::clone(&db), running_games, emulated_sessions);
     plugins::spawn_background_fill(app.clone(), db, plugin_host);
 
     // The webview may load local files from the covers folder only. The folder must exist
@@ -927,6 +944,9 @@ pub fn run() {
             get_settings,
             save_settings,
             scan_games,
+            emulators::list_emulators,
+            emulators::identify_emulator,
+            emulators::launch_emulator,
             sync_library_metadata,
             complete_game_details,
             complete_library,

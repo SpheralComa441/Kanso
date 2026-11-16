@@ -5,6 +5,7 @@ pub mod cleaner;
 pub mod config;
 pub mod db;
 pub mod deals;
+pub mod emulators;
 pub mod ea_account;
 pub mod epic_account;
 pub mod gamepass;
@@ -40,6 +41,6 @@ pub use models::{
     now_timestamp_ms, DetectedGame, GameManualUpdate, GamePlatform, GameStatus, PlaySession,
     ScanReport, SgdbGameMatch, SourceScanOutput,
 };
-pub use scanner::scan_all_installed_games;
+pub use scanner::{find_emulators, scan_all_installed_games, scan_library};
 pub use store::LibraryStore;
 pub use theme::Theme;

@@ -62,6 +62,73 @@ pub const CARD_INFO_CHOICES: [&str; 7] =
 /// What it tells until the user chooses.
 const CARD_INFO_DEFAULT: [&str; 3] = ["genres", "playtime", "badges"];
 
+/// Most emulators remembered, folders per emulator and extensions per emulator.
+const MAX_EMULATORS: usize = 48;
+const MAX_EMULATOR_FOLDERS: usize = 16;
+const MAX_EMULATOR_EXTENSIONS: usize = 32;
+/// Longest command line for starting a game in an emulator.
+const MAX_EMULATOR_ARGS_CHARS: usize = 400;
+
+/// An emulator the user told Kanso about, or what they added to one Kanso found by itself
+/// (see [`crate::emulators`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct EmulatorSetting {
+    /// Id of an emulator Kanso knows (`dolphin`), or `custom-…` for one it does not.
+    pub id: String,
+    /// Name of an emulator Kanso does not know. A known one keeps its own.
+    pub name: String,
+    /// Its executable. Empty for a known emulator that Kanso found by itself.
+    pub exe_path: String,
+    /// Folders with its games, besides those the emulator's own settings list.
+    pub folders: Vec<String>,
+    /// File extensions of its games, without the dot. A known emulator has its own list.
+    pub extensions: Vec<String>,
+    /// Arguments that start a game, `{rom}` standing for the game file. Empty: the usual
+    /// ones of that emulator.
+    pub args: String,
+}
+
+impl EmulatorSetting {
+    fn sanitized(self) -> Option<Self> {
+        let id = self.id.trim().to_ascii_lowercase();
+        if !is_valid_plugin_id(&id) {
+            return None;
+        }
+        let plain = |text: &str, max: usize| -> String {
+            text.trim().chars().filter(|c| !c.is_control()).take(max).collect()
+        };
+        let mut seen = HashSet::new();
+        let folders: Vec<String> = self
+            .folders
+            .iter()
+            .map(|folder| folder.trim().to_string())
+            .filter(|folder| !folder.is_empty() && seen.insert(normalize_folder_key(folder)))
+            .take(MAX_EMULATOR_FOLDERS)
+            .collect();
+        let mut seen = HashSet::new();
+        let extensions: Vec<String> = self
+            .extensions
+            .iter()
+            .map(|extension| extension.trim().trim_start_matches('.').to_ascii_lowercase())
+            .filter(|extension| {
+                (1..=10).contains(&extension.len())
+                    && extension.bytes().all(|b| b.is_ascii_alphanumeric())
+                    && seen.insert(extension.clone())
+            })
+            .take(MAX_EMULATOR_EXTENSIONS)
+            .collect();
+        Some(Self {
+            id,
+            name: plain(&self.name, 60),
+            exe_path: plain(&self.exe_path, 1000),
+            folders,
+            extensions,
+            args: plain(&self.args, MAX_EMULATOR_ARGS_CHARS),
+        })
+    }
+}
+
 /// Most plugins whose state is remembered.
 const MAX_PLUGIN_STATES: usize = 64;
 /// Longest value of a plugin setting (an API key, a country code, ...).
@@ -124,6 +191,8 @@ pub struct AppConfig {
     /// What a cover tells about its game under the pointer, from [`CARD_INFO_CHOICES`]. An
     /// empty list is a choice too: the title alone.
     pub card_info: Vec<String>,
+    /// Emulators added by the user, and folders added to the ones Kanso found.
+    pub emulators: Vec<EmulatorSetting>,
     /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
     /// the games it makes installable there are listed (see
     /// [`crate::battlenet_account::game_pass_games`]). Kanso cannot find this out by itself.
@@ -147,6 +216,7 @@ impl Default for AppConfig {
             plugins: BTreeMap::new(),
             animations: ANIMATION_CHOICES[0].to_string(),
             card_info: CARD_INFO_DEFAULT.iter().map(|item| item.to_string()).collect(),
+            emulators: Vec::new(),
             has_game_pass: false,
             game_pass_catalog: false,
         }
@@ -205,6 +275,16 @@ impl AppConfig {
                 .filter(|choice| self.card_info.iter().any(|item| item.trim() == **choice))
                 .map(|choice| choice.to_string())
                 .collect(),
+            emulators: {
+                // One entry per emulator: a later one with the same id is a leftover
+                let mut seen = HashSet::new();
+                self.emulators
+                    .into_iter()
+                    .filter_map(EmulatorSetting::sanitized)
+                    .filter(|emulator| seen.insert(emulator.id.clone()))
+                    .take(MAX_EMULATORS)
+                    .collect()
+            },
             has_game_pass: self.has_game_pass,
             game_pass_catalog: self.game_pass_catalog,
             plugins: self
@@ -303,6 +383,19 @@ mod tests {
             has_game_pass: true,
             game_pass_catalog: true,
             animations: " Lively ".to_string(),
+            emulators: vec![
+                EmulatorSetting {
+                    id: " Dolphin ".to_string(),
+                    exe_path: r" D:\Emu\Dolphin\Dolphin.exe ".to_string(),
+                    folders: vec![r"D:\Roms\Wii".to_string(), r"d:/roms/wii/".to_string(), " ".to_string()],
+                    extensions: vec![".ISO".to_string(), "rvz".to_string(), "iso".to_string(), "a b".to_string()],
+                    args: " -b -e {rom}\n ".to_string(),
+                    ..EmulatorSetting::default()
+                },
+                // The same emulator again, and an id that is not one
+                EmulatorSetting { id: "dolphin".to_string(), ..EmulatorSetting::default() },
+                EmulatorSetting { id: "../escape".to_string(), ..EmulatorSetting::default() },
+            ],
             card_info: vec![
                 "badges".to_string(),
                 " genres ".to_string(),
@@ -338,6 +431,17 @@ mod tests {
 
         assert!(!saved.track_playtime);
         assert_eq!(saved.card_info, ["genres", "badges"], "known names, once, in Kanso's order");
+        assert_eq!(
+            saved.emulators,
+            [EmulatorSetting {
+                id: "dolphin".to_string(),
+                name: String::new(),
+                exe_path: r"D:\Emu\Dolphin\Dolphin.exe".to_string(),
+                folders: vec![r"D:\Roms\Wii".to_string()],
+                extensions: vec!["iso".to_string(), "rvz".to_string()],
+                args: "-b -e {rom}".to_string(),
+            }]
+        );
         assert_eq!(saved.plugins.len(), 1, "ids that are not plain names are dropped");
         let plugin = &saved.plugins["price-history"];
         assert!(plugin.enabled && !plugin.show_badge);

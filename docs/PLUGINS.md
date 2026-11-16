@@ -129,7 +129,8 @@ when the answer arrived), so plain sequential code is all you need.
   id: "steam:990080",        // stable id inside Kanso
   title: "Hogwarts Legacy",
   cleanTitle: "Hogwarts Legacy",   // without edition suffixes and ® ™, better for searches
-  platform: "steam",         // steam, epic, gog, ea, ubisoft, xbox, Battle.net, standalone
+  platform: "steam",         // steam, epic, gog, ea, ubisoft, xbox, Battle.net, standalone,
+                             // or emulator for a game file run by one of the user's emulators
   steamAppId: "990080",      // Steam store page: the game's own, or the one matched to a game
                              // from another store; null when there is none
   description: "…",          // may be null

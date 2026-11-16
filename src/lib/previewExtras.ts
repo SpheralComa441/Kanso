@@ -125,6 +125,22 @@ const PLUGINS: PluginSeed[] = [
     enabledByDefault: false,
   },
   {
+    id: "nexus-mods",
+    name: "Mod su Nexus Mods",
+    version: "1.0.0",
+    author: "Kanso",
+    description:
+      "Quante mod ha un gioco su Nexus Mods, con il link alla sua pagina delle mod nel browser. Scarica l'elenco pubblico dei giochi di Nexus Mods e vi cerca il gioco su questo PC: nessun account, e nulla della tua libreria viene inviato.",
+    homepage: "https://www.nexusmods.com",
+    hosts: ["data.nexusmods.com"],
+    gameDetails: true,
+    badge: false,
+    background: false,
+    commands: [],
+    settings: [],
+    enabledByDefault: false,
+  },
+  {
     id: "play-tonight",
     name: "Cosa gioco stasera?",
     version: "1.0.0",
@@ -254,6 +270,26 @@ function sampleData(pluginId: string, game: DetectedGame): PluginGameData {
       ],
     };
   }
+  if (pluginId === "nexus-mods") {
+    // Not for game files run by an emulator, and only for games Nexus Mods lists
+    if (game.platform === "emulator" || roll < 0.25) return { sections: [] };
+    const mods = Math.round(40 + roll * 26000);
+    const slug = game.title.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return {
+      sections: [
+        {
+          title: "Nexus Mods",
+          blocks: [
+            { type: "stats", items: [{ label: "Mod disponibili", value: mods.toLocaleString("it-IT") }] },
+            {
+              type: "links",
+              items: [{ label: "Sfoglia le mod su Nexus Mods", url: `https://www.nexusmods.com/games/${slug}/mods` }],
+            },
+          ],
+        },
+      ],
+    };
+  }
   if (pluginId === "pcgamingwiki") {
     return {
       sections: [
@@ -339,7 +375,11 @@ export function previewCommand(games: DetectedGame[]): PluginView {
 
 /** Twelve weeks of sample play history spread over the games that have play time. */
 export function previewSessions(games: DetectedGame[]): PlaySession[] {
-  const played = games.filter((game) => !game.isHidden && (game.playtimeMinutes ?? 0) > 0);
+  // The sample history is spread over the library's games: the emulated ones are left out
+  // so that it stays what the interface tests were written against
+  const played = games.filter(
+    (game) => !game.isHidden && game.platform !== "emulator" && (game.playtimeMinutes ?? 0) > 0
+  );
   if (played.length === 0) return [];
   const sessions: PlaySession[] = [];
   const now = Date.now();

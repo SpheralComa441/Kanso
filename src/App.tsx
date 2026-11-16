@@ -3,6 +3,7 @@ import { CloudDownload, EyeOff, History, LayoutGrid, Star, X } from "lucide-reac
 import { ApiKeyBanner } from "./components/ApiKeyBanner";
 import { CategoryGrid, type CategoryKind } from "./components/CategoryGrid";
 import { DealsView } from "./components/DealsView";
+import { EmulatorsView } from "./components/EmulatorsView";
 import { EditGameModal } from "./components/EditGameModal";
 import { GameDetail } from "./components/GameDetail";
 import { GameList } from "./components/GameList";
@@ -30,7 +31,9 @@ import {
   getSettings,
   installGame,
   isRunningInTauri,
+  launchEmulator,
   launchGame,
+  listEmulators,
   listPlugins,
   listThemes,
   pluginBadges,
@@ -64,7 +67,7 @@ import {
   type LibraryCollection,
   type LibraryFilters,
 } from "./lib/library";
-import { platformLabel } from "./lib/platforms";
+import { isEmulated, platformLabel } from "./lib/platforms";
 import { CARD_INFO_DEFAULT } from "./lib/cardInfo";
 import { DEFAULT_ACCESSIBILITY, applyTheme, resolveTheme } from "./lib/themes";
 import type {
@@ -73,6 +76,7 @@ import type {
   AppConfig,
   BadgeEntry,
   DetectedGame,
+  EmulatorInfo,
   GameStatus,
   PluginInfo,
   ScanReport,
@@ -90,6 +94,7 @@ const INITIAL_CONFIG: AppConfig = {
   plugins: {},
   animations: "theme",
   cardInfo: [...CARD_INFO_DEFAULT],
+  emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
 };
@@ -191,11 +196,15 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  /** The emulators of this PC, as the last scan found them. */
+  const [emulators, setEmulators] = useState<EmulatorInfo[]>([]);
+  /** The emulator whose page is open in the Emulators section. */
+  const [openEmulatorId, setOpenEmulatorId] = useState<string | null>(null);
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY_FILTERS);
   const [mainView, setMainView] = useState<MainView>(() =>
     readUiPreference(
       MAIN_VIEW_PREF_KEY,
-      ["home", "library", "stats", "genres", "tags"],
+      ["home", "library", "stats", "emulators", "genres", "tags"],
       "library"
     )
   );
@@ -408,6 +417,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       try {
         const res = await scanGames();
         setReport(res);
+        // The scan is what finds the emulators kept in the user's games folders
+        void listEmulators().then(setEmulators).catch(() => {});
         void runMetadataSync(userRequested);
       } catch (err) {
         setStatusMessage(typeof err === "string" ? err : t("app.scanError"));
@@ -458,7 +469,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
   const handleSaveSettings = async (updated: AppConfig) => {
     const foldersChanged =
-      JSON.stringify(updated.customFolders) !== JSON.stringify(config.customFolders);
+      JSON.stringify(updated.customFolders) !== JSON.stringify(config.customFolders) ||
+      // An emulator added, or a folder of games for one: the scan reads them
+      JSON.stringify(updated.emulators) !== JSON.stringify(config.emulators);
     const apiKeyChanged =
       Boolean(updated.steamgriddbApiKey.trim()) &&
       updated.steamgriddbApiKey.trim() !== config.steamgriddbApiKey.trim();
@@ -557,6 +570,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     filters.genre ?? "",
     filters.tag ?? "",
     filters.status ?? "",
+    mainView === "emulators" ? (openEmulatorId ?? "") : "",
   ].join("|");
 
   const showView = (view: MainView) => {
@@ -571,8 +585,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
   const changeSearch = (value: string) => {
     setSearchQuery(value);
-    // The search box searches the library, wherever it is typed from
-    if (value.trim() && mainView !== "library") showView("library");
+    // The search box searches the library, wherever it is typed from; on an emulator's
+    // page it searches that emulator's games
+    const onEmulatorPage = mainView === "emulators" && openEmulatorId !== null;
+    if (value.trim() && mainView !== "library" && !onEmulatorPage) showView("library");
   };
 
   const toggleSidebar = () => {
@@ -614,7 +630,15 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
   /* --------------------------------------------------------------- derived */
 
-  const games = report.games;
+  // Emulated games have their own section: the library, its counts, genres and tags are
+  const allGames = report.games;
+  // about everything else. A hidden emulated game is the exception: "Nascosti" is the one
+  // place hidden games can be brought back from, whatever they are.
+  const games = useMemo(
+    () => allGames.filter((game) => !isEmulated(game) || game.isHidden),
+    [allGames]
+  );
+  const emulatedGames = useMemo(() => allGames.filter(isEmulated), [allGames]);
   // What genres, tags, platforms and statuses are counted on: everything, what is on disk
   // ("installed only") or, inside the "not installed" collection, what is not
   const scope = libraryScope(filters.collection, installedOnly);
@@ -692,12 +716,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   }, [filters.collection, counts.notInstalled, games.length]);
 
   const detailGame = useMemo(
-    () => games.find((g) => g.id === detailGameId) ?? null,
-    [games, detailGameId]
+    () => allGames.find((g) => g.id === detailGameId) ?? null,
+    [allGames, detailGameId]
   );
   const editingGame = useMemo(
-    () => games.find((g) => g.id === editingGameId) ?? null,
-    [games, editingGameId]
+    () => allGames.find((g) => g.id === editingGameId) ?? null,
+    [allGames, editingGameId]
   );
 
   // A game that is not on disk arrives with name and cover only: the rest is looked up the
@@ -759,7 +783,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         activeFilterCount={mainView === "library" ? filterCount : 0}
         viewMode={viewMode}
         onViewModeChange={changeViewMode}
-        showViewMode={mainView === "library"}
+        showViewMode={mainView === "library" || (mainView === "emulators" && openEmulatorId !== null)}
         isScanning={isScanning}
         isSyncingMetadata={isSyncingMetadata}
         hasApiKey={hasApiKey}
@@ -790,6 +814,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           view={mainView}
           onOpenHome={() => showView("home")}
           onOpenStats={() => showView("stats")}
+          onOpenEmulators={() => {
+            // The entry always leads to the wall of emulators, also from an emulator's page
+            setOpenEmulatorId(null);
+            setSearchQuery("");
+            showView("emulators");
+          }}
+          emulatorCount={emulators.length}
           onOpenOverview={showView}
           filters={filters}
           onFiltersChange={changeFilters}
@@ -816,9 +847,42 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
             />
           ) : mainView === "stats" ? (
             <StatsView
-              games={games}
+              games={allGames}
               onOpenGame={(game) => setDetailGameId(game.id)}
               onError={setStatusMessage}
+            />
+          ) : mainView === "emulators" ? (
+            <EmulatorsView
+              emulators={emulators}
+              games={emulatedGames}
+              openId={openEmulatorId}
+              onOpen={(id) => {
+                setSearchQuery("");
+                setOpenEmulatorId(id);
+              }}
+              onLaunchEmulator={(emulator) => {
+                setStatusMessage(null);
+                launchEmulator(emulator).catch((err) =>
+                  setStatusMessage(
+                    isRunningInTauri()
+                      ? typeof err === "string"
+                        ? err
+                        : t("emulators.launchError", { name: emulator.name })
+                      : t("emulators.launchPreview", { name: emulator.name })
+                  )
+                );
+              }}
+              onOpenSettings={() => setIsSettingsOpen(true)}
+              searchQuery={searchQuery}
+              viewMode={viewMode}
+              isScanning={isScanning}
+              launchingId={launchingId}
+              onOpenDetail={(game) => setDetailGameId(game.id)}
+              onLaunch={handleLaunchGame}
+              onToggleFavorite={handleToggleFavorite}
+              badges={badges}
+              runningIds={runningIds}
+              cardInfo={config.cardInfo}
             />
           ) : mainView === "genres" || mainView === "tags" ? (
             <CategoryGrid
@@ -939,6 +1003,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       <GameDetail
         game={detailGame}
         layout={(previewTheme ?? savedTheme).detail.layout}
+        emulatorName={
+          detailGame?.platform === "emulator"
+            ? (emulators.find((emulator) => emulator.id === detailGame.platformAppId)?.name ?? null)
+            : null
+        }
         isLaunching={launchingId !== null && launchingId === detailGameId}
         isTopmost={!editingGame && !isSettingsOpen}
         onClose={closeDetail}
@@ -965,7 +1034,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
       <PluginCommandDialog
         run={commandRun}
-        games={games}
+        games={allGames}
         isTopmost={!detailGame && !editingGame && !isSettingsOpen}
         onClose={closeCommand}
         onRunAgain={() => {

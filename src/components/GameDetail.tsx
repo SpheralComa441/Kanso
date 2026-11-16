@@ -29,6 +29,8 @@ interface GameDetailProps {
   onSetStatus: (game: DetectedGame, status: GameStatus | null) => void;
   /** Enabled plugins that add sections to the sheet. */
   plugins: PluginInfo[];
+  /** For an emulated game, the name of the emulator that runs it. */
+  emulatorName: string | null;
 }
 
 /** Describes how the game will be started, shown as a small technical footnote. */
@@ -47,14 +49,23 @@ type Piece = Pick<GameDetailProps, "onSelectGenre" | "onSelectTag" | "onSetStatu
   game: DetectedGame;
 };
 
-function Badges({ game, isRunning }: { game: DetectedGame; isRunning: boolean }) {
+function Badges({
+  game,
+  isRunning,
+  emulatorName,
+}: {
+  game: DetectedGame;
+  isRunning: boolean;
+  emulatorName: string | null;
+}) {
   const { t } = useI18n();
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span
         className={`inline-block rounded-md border px-2 py-0.5 text-3xs font-medium ${PLATFORM_META[game.platform].badgeClass}`}
       >
-        {platformLabel(game.platform, t)}
+        {/* An emulated game says which emulator runs it, where a store game names its store */}
+        {(game.platform === "emulator" && emulatorName) || platformLabel(game.platform, t)}
       </span>
       {!game.isInstalled && (
         <span
@@ -274,7 +285,7 @@ function TechnicalNotes({ game, withPlayFacts }: { game: DetectedGame; withPlayF
             </dd>
           </div>
           <div className={row}>
-            <dt className={term}>{t("detail.launch")}</dt>
+            <dt className={term}>{t(game.platform === "emulator" ? "detail.gameFile" : "detail.launch")}</dt>
             <dd className="min-w-0 select-text truncate font-mono text-zinc-400" title={launchTarget(game, t)}>
               {launchTarget(game, t)}
             </dd>
@@ -565,7 +576,7 @@ function BentoLayout(props: LayoutProps) {
       <div className="detail-grid scroll-area flex min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="tile shrink-0 space-y-3 p-5 pr-12">
           <CloseButton onClose={onClose} />
-          <Badges game={game} isRunning={isRunning} />
+          <Badges game={game} isRunning={isRunning} emulatorName={props.emulatorName} />
           <h2
             id="game-detail-title"
             className="select-text text-3xl font-semibold leading-tight tracking-tight text-zinc-50"
@@ -664,7 +675,7 @@ function SheetLayout(props: LayoutProps) {
       <div className="relative flex min-w-0 flex-1 flex-col">
         <div className="scroll-area flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-7 pb-5">
           <div className="space-y-3 pr-8">
-            <Badges game={game} isRunning={isRunning} />
+            <Badges game={game} isRunning={isRunning} emulatorName={props.emulatorName} />
             <h2
               id="game-detail-title"
               className="select-text text-2xl font-semibold leading-tight tracking-tight text-zinc-50"

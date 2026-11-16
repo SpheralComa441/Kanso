@@ -51,6 +51,7 @@ import type {
   Theme,
 } from "../types/game";
 import { CARD_INFO_CHOICES } from "../lib/cardInfo";
+import { EmulatorsSettings } from "./EmulatorsSettings";
 import { PluginsSettings } from "./PluginsSettings";
 import { StoreAccountsSettings } from "./StoreAccountsSettings";
 
@@ -114,6 +115,7 @@ export function SettingsModal({
   const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
   const [animations, setAnimations] = useState(initialConfig.animations);
   const [cardInfo, setCardInfo] = useState(initialConfig.cardInfo);
+  const [emulators, setEmulators] = useState(initialConfig.emulators);
   const [hasGamePass, setHasGamePass] = useState(initialConfig.hasGamePass);
   const [gamePassCatalog, setGamePassCatalog] = useState(initialConfig.gamePassCatalog);
   const [pluginStates, setPluginStates] = useState<Record<string, PluginState>>(
@@ -137,6 +139,7 @@ export function SettingsModal({
       setTrackPlaytime(initialConfig.trackPlaytime);
       setAnimations(initialConfig.animations);
       setCardInfo(initialConfig.cardInfo);
+      setEmulators(initialConfig.emulators);
       setHasGamePass(initialConfig.hasGamePass);
       setGamePassCatalog(initialConfig.gamePassCatalog);
       setPluginStates(initialConfig.plugins);
@@ -282,6 +285,10 @@ export function SettingsModal({
         animations,
         // Kept in Kanso's order, whatever order they were ticked in
         cardInfo: CARD_INFO_CHOICES.filter((item) => cardInfo.includes(item)),
+        // An entry that says nothing (no executable, folder or argument) is not kept
+        emulators: emulators.filter(
+          (emulator) => emulator.exePath.trim() || emulator.folders.length > 0 || emulator.args.trim()
+        ),
         hasGamePass,
         gamePassCatalog,
       });
@@ -848,6 +855,9 @@ export function SettingsModal({
               {t("settings.foldersHelp", { list: SKIPPED_EXE_PATTERNS })}
             </p>
           </section>
+
+          {/* Emulators and the folders of their games */}
+          <EmulatorsSettings settings={emulators} onChange={setEmulators} onError={setErrorMsg} />
 
           {/* Launch behavior */}
           <section className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">

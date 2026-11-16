@@ -52,16 +52,28 @@ export const PLATFORM_META: Record<
     label: "Locale",
     badgeClass: "border-emerald-500/30 bg-emerald-500/15 text-emerald-300",
   },
+  // Not a store: these games live in the Emulators section, not among the platforms
+  emulator: {
+    label: "Emulatore",
+    badgeClass: "border-amber-500/30 bg-amber-500/15 text-amber-300",
+  },
 };
 
 /** Display name of a platform in the current language. */
 export function platformLabel(
   platform: GamePlatform,
-  t: (key: "platform.local") => string
+  t: (key: "platform.local" | "platform.emulator") => string
 ): string {
   return platform === "standalone"
     ? t("platform.local")
-    : PLATFORM_META[platform].label;
+    : platform === "emulator"
+      ? t("platform.emulator")
+      : PLATFORM_META[platform].label;
+}
+
+/** A game file run by an emulator: it lives in the Emulators section, not in the library. */
+export function isEmulated(game: DetectedGame): boolean {
+  return game.platform === "emulator";
 }
 
 /**

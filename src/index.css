@@ -1074,6 +1074,18 @@
     overflow-wrap: anywhere;
   }
 
+  /* What an emulator's tile adds under its name: the systems it runs */
+  .category-card-detail {
+    display: block;
+    overflow: hidden;
+    margin-top: 0.2em;
+    font-size: clamp(0.625rem, 3.4cqw, 0.75rem);
+    line-height: 1.35;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    opacity: 0.82;
+  }
+
   /* A pane of the tile's own light */
   .category-card-count {
     flex: none;
