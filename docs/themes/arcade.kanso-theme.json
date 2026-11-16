@@ -73,7 +73,10 @@
     "backdropBlur": 0,
     "backdropDim": 0.8,
     "tiles": "filled",
-    "tileGap": 12
+    "tileGap": 12,
+    "cards": "rail",
+    "keyTitles": "accent",
+    "cardTitles": "secondary"
   },
   "motion": {
     "level": "lively",

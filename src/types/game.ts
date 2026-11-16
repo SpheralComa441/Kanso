@@ -421,6 +421,12 @@ export interface ThemeDetail {
   tiles: "filled" | "glass" | "outlined";
   /** Space between tiles, in pixels. */
   tileGap: number;
+  /** The cards after the figures: in a box that moves on by itself, or one under the other. */
+  cards: "rail" | "stack";
+  /** Color of the titles of what the sheet shows first (figures, achievements). */
+  keyTitles: NavColor;
+  /** Color of the titles of the other cards, and of the edge of the ones kept in sight. */
+  cardTitles: NavColor;
 }
 
 export interface ThemeIcons {

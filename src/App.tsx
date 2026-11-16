@@ -1011,6 +1011,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       <GameDetail
         game={detailGame}
         layout={(previewTheme ?? savedTheme).detail.layout}
+        cards={(previewTheme ?? savedTheme).detail.cards}
         emulatorName={
           detailGame?.platform === "emulator"
             ? (emulators.find((emulator) => emulator.id === detailGame.platformAppId)?.name ?? null)

@@ -77,7 +77,10 @@
     "backdropBlur": 32,
     "backdropDim": 0.45,
     "tiles": "glass",
-    "tileGap": 16
+    "tileGap": 16,
+    "cards": "stack",
+    "keyTitles": "secondary",
+    "cardTitles": "accent"
   },
   "motion": {
     "level": "smooth",

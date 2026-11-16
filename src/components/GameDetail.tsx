@@ -7,13 +7,24 @@ import { PLATFORM_META, canInstall, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame, GameStatus, PlaySession, PluginInfo, ThemeDetail } from "../types/game";
 import { Cover } from "./Cover";
-import { AchievementsSection, GamePluginSections } from "./GameExtras";
+import { CardRail, PinnedCard, readPinnedCards, writePinnedCards, type DetailCard } from "./CardRail";
+import {
+  AchievementsSection,
+  GamePluginSections,
+  PluginPanelBody,
+  PluginRefreshButton,
+  panelHasContent,
+  panelTitle,
+  usePluginPanels,
+} from "./GameExtras";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
 interface GameDetailProps {
   game: DetectedGame | null;
   /** How the active theme lays the sheet out: separate tiles, or one sheet. */
   layout: ThemeDetail["layout"];
+  /** How the active theme lays out the cards after the figures: scrolling, or all in sight. */
+  cards: ThemeDetail["cards"];
   isLaunching: boolean;
   /** `false` while another dialog is stacked on top, so Escape closes only that one. */
   isTopmost: boolean;
@@ -330,8 +341,8 @@ function TechnicalNotes({ game, withPlayFacts }: { game: DetectedGame; withPlayF
 
 /* ----------------------------------------------------------------- figures */
 
-/** Days the activity chart looks back on, today included. */
-const ACTIVITY_DAYS = 14;
+/** Days the activity chart looks back on, today included: a month. */
+const ACTIVITY_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function startOfDay(timestampMs: number): number {
@@ -346,7 +357,7 @@ interface ActivityDay {
   minutes: number;
 }
 
-/** The game's play sessions of the last two weeks, as minutes per day. */
+/** The game's play sessions of the last month, as minutes per day. */
 function useActivity(gameId: string | null): ActivityDay[] | null {
   const [sessions, setSessions] = useState<PlaySession[] | null>(null);
   const firstDay = useMemo(
@@ -389,7 +400,7 @@ function useActivity(gameId: string | null): ActivityDay[] | null {
 }
 
 /**
- * Minutes played per day over the last two weeks: one thin bar per day, on one baseline.
+ * Minutes played per day over the last month: one thin bar per day, on one baseline.
  * Shown only when there is something to show. Every value is in the hover/focus label of its
  * bar and in a table for screen readers.
  */
@@ -452,7 +463,7 @@ function ActivityChart({ days }: { days: ActivityDay[] }) {
 /** A small figure with its label: the label above, the value, a line of context. */
 function Stat({ id, label, value, note }: { id?: string; label: string; value: string; note?: string }) {
   return (
-    <div className="tile flex min-w-0 flex-col justify-between gap-2 p-4">
+    <div className="tile flex min-w-0 flex-col justify-between gap-2 p-4" data-rank="key">
       <span className="micro-label">{label}</span>
       <div className="min-w-0">
         <p id={id} className="truncate text-xl font-semibold leading-tight text-zinc-50">
@@ -464,11 +475,14 @@ function Stat({ id, label, value, note }: { id?: string; label: string; value: s
   );
 }
 
-/** Time played: the one big figure of the sheet, with the last two weeks under it. */
+/**
+ * Time played: the figure, who counted it, and how much of it was in the last month. The
+ * month comes from the sessions Kanso logged: when the game was played in that time and
+ * nothing was logged (Kanso was not there to see), the line is left out rather than say zero.
+ */
 function PlaytimeTile({ game, activity }: { game: DetectedGame; activity: ActivityDay[] | null }) {
-  const { t, number } = useI18n();
+  const { t, number, duration } = useI18n();
   const minutes = game.playtimeMinutes;
-  const hasActivity = activity !== null && activity.some((day) => day.minutes > 0);
   // Hours once there is at least one; minutes before
   const [value, unit] =
     minutes === null
@@ -482,18 +496,34 @@ function PlaytimeTile({ game, activity }: { game: DetectedGame; activity: Activi
       : minutes === 0
         ? t("detail.neverPlayed")
         : t(game.platform === "steam" ? "detail.playtimeSteam" : "detail.playtimeMeasured");
+  const recent = activity === null ? null : activity.reduce((sum, day) => sum + day.minutes, 0);
+  const playedThisMonth =
+    game.lastPlayedAt !== null && game.lastPlayedAt >= Date.now() - ACTIVITY_DAYS * DAY_MS;
+  const showRecent = recent !== null && (minutes ?? 0) > 0 && (recent > 0 || !playedThisMonth);
 
   return (
-    <div className="tile col-span-2 row-span-2 flex min-w-0 flex-col justify-between gap-4 p-4">
-      <div>
-        <span className="micro-label">{t("detail.playtime")}</span>
-        <p id="detail-playtime" className="mt-2 flex items-baseline gap-2 text-zinc-50">
-          <span className="text-5xl font-semibold leading-none tracking-tight">{value}</span>{" "}
-          {unit && <span className="text-base font-medium text-zinc-400">{unit}</span>}
+    <div className="tile flex min-w-0 flex-col justify-between gap-2 p-4" data-rank="key">
+      <span className="micro-label">{t("detail.playtime")}</span>
+      <div className="min-w-0">
+        <p id="detail-playtime" className="flex items-baseline gap-1.5 text-zinc-50">
+          <span className="text-3xl font-semibold leading-none tracking-tight">{value}</span>{" "}
+          {unit && <span className="text-sm font-medium text-zinc-400">{unit}</span>}
         </p>
-        <p className="mt-1.5 text-2xs text-zinc-500">{note}</p>
+        <p className="mt-1 truncate text-2xs text-zinc-500" title={note}>
+          {note}
+        </p>
       </div>
-      {hasActivity && activity && <ActivityChart days={activity} />}
+      {showRecent && (
+        <p
+          id="detail-playtime-recent"
+          className="flex items-baseline justify-between gap-3 border-t border-oled-border pt-2 text-2xs"
+        >
+          <span className="truncate text-zinc-500">{t("detail.activity", { days: ACTIVITY_DAYS })}</span>
+          <span className="shrink-0 font-medium tabular-nums text-zinc-100">
+            {recent > 0 ? duration(Math.max(1, Math.round(recent))) : t("detail.recentNone")}
+          </span>
+        </p>
+      )}
     </div>
   );
 }
@@ -539,8 +569,9 @@ function CloseButton({ onClose }: { onClose: () => void }) {
 
 /**
  * Separate tiles over the game's artwork. On the left, always within reach: the cover, the
- * actions and where the user stands with the game. On the right, scrolling: the title, the
- * figures, the description and what Steam and the plugins add.
+ * actions and where the user stands with the game. On the right, in sight at once: the title,
+ * the figures and the achievements; then the cards the user keeps in sight, and the other
+ * cards (description, activity, what the plugins add, files) in a box that moves on by itself.
  */
 function BentoLayout(props: LayoutProps) {
   const { game, coverUrl, onCoverBroken, isRunning, onClose, onSelectGenre, onSelectTag, onSetStatus, plugins } = props;
@@ -549,6 +580,49 @@ function BentoLayout(props: LayoutProps) {
   const hasAchievements = (game.achievementsTotal ?? 0) > 0;
   // The actions exist once: in the cover column, or under the title where there is none
   const wide = useWideSheet();
+  const panels = usePluginPanels(game, plugins);
+  // The cards kept in sight are the same on every game: the choice is about the kind of card
+  const [pinned, setPinned] = useState<string[]>(readPinnedCards);
+  const keepPinned = (next: string[]) => {
+    setPinned(next);
+    writePinnedCards(next);
+  };
+
+  const cards: DetailCard[] = [
+    {
+      key: "about",
+      title: t("detail.about"),
+      content: (
+        <p
+          className={`select-text text-sm leading-relaxed ${
+            game.shortDescription ? "text-zinc-300" : "text-zinc-500"
+          }`}
+        >
+          {game.shortDescription ?? t("detail.noDescription")}
+        </p>
+      ),
+    },
+    ...(activity !== null && activity.some((day) => day.minutes > 0)
+      ? [{ key: "activity", title: t("detail.activityTitle"), content: <ActivityChart days={activity} /> }]
+      : []),
+    // A plugin with nothing to say about this game has no card
+    ...panels.filter(panelHasContent).map((panel) => ({
+      key: `plugin:${panel.plugin.id}`,
+      title: panelTitle(panel),
+      action: <PluginRefreshButton panel={panel} />,
+      content: (
+        <div className="space-y-4" data-detail-plugin={panel.plugin.id}>
+          <PluginPanelBody panel={panel} titled />
+        </div>
+      ),
+    })),
+    { key: "files", title: t("detail.files"), content: <TechnicalNotes game={game} withPlayFacts={false} /> },
+  ];
+  const scrolling = props.cards === "rail";
+  const kept = scrolling
+    ? pinned.flatMap((key) => cards.filter((card) => card.key === key))
+    : cards;
+  const moving = scrolling ? cards.filter((card) => !pinned.includes(card.key)) : [];
 
   return (
     <div
@@ -594,7 +668,7 @@ function BentoLayout(props: LayoutProps) {
           </div>
         )}
 
-        <div className="detail-grid grid shrink-0 grid-cols-3">
+        <div className="detail-figures detail-grid grid shrink-0">
           <PlaytimeTile game={game} activity={activity} />
           <Stat
             id="detail-last-played"
@@ -611,32 +685,20 @@ function BentoLayout(props: LayoutProps) {
         </div>
 
         {hasAchievements && (
-          <div className="tile shrink-0 p-4">
+          <div className="tile shrink-0 p-4" data-rank="key">
             <AchievementsSection game={game} />
           </div>
         )}
 
-        <div className="tile shrink-0 space-y-2 p-4">
-          <span className="micro-label">{t("detail.about")}</span>
-          <p
-            className={`select-text text-sm leading-relaxed ${
-              game.shortDescription ? "text-zinc-300" : "text-zinc-500"
-            }`}
-          >
-            {game.shortDescription ?? t("detail.noDescription")}
-          </p>
-        </div>
+        {kept.map((card) => (
+          <PinnedCard
+            key={card.key}
+            card={card}
+            onUnpin={scrolling ? (key) => keepPinned(pinned.filter((entry) => entry !== key)) : undefined}
+          />
+        ))}
 
-        {plugins.length > 0 && (
-          <div className="tile shrink-0 space-y-4 p-4 empty:hidden" data-detail-plugins>
-            <GamePluginSections game={game} plugins={plugins} />
-          </div>
-        )}
-
-        <div className="tile shrink-0 space-y-2 p-4">
-          <span className="micro-label">{t("detail.files")}</span>
-          <TechnicalNotes game={game} withPlayFacts={false} />
-        </div>
+        <CardRail key={game.id} cards={moving} onPin={(key) => keepPinned([...pinned.filter((entry) => entry !== key), key])} />
       </div>
     </div>
   );
