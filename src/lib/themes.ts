@@ -10,6 +10,7 @@ import type {
   ThemeDetail,
   ThemeEffects,
   ThemeFontFile,
+  NavColor,
   ThemeIcons,
   ThemeLayout,
   ThemeMotion,
@@ -41,6 +42,8 @@ const DEFAULT_LAYOUT: ThemeLayout = {
   dividers: false,
   scrollbars: "auto",
   windowControls: "bars",
+  navHeadings: "accent",
+  navPages: "secondary",
 };
 const DEFAULT_CARDS: ThemeCards = {
   shape: "rounded",
@@ -150,7 +153,8 @@ function slate(
   description: string,
   accent: string,
   accentHover: string,
-  onAccent: string
+  onAccent: string,
+  accentSecondary: string
 ): Theme {
   return withThemeDefaults({
     ...LOGO_STYLE,
@@ -159,7 +163,7 @@ function slate(
     author: "Kanso",
     description,
     colorScheme: "dark",
-    colors: { ...SLATE, accent, accentHover, onAccent },
+    colors: { ...SLATE, accent, accentHover, onAccent, accentSecondary },
   });
 }
 
@@ -169,12 +173,12 @@ function slate(
  * `docs/themes/` and show how far an imported theme can reshape the interface.
  */
 export const BUILTIN_THEMES: Theme[] = [
-  slate("ember", "Kanso Brace", "Slate and ember orange: the logo's own colors.", "#ff4500", "#ff6a33", "#0d0d10"),
-  slate("amber", "Kanso Ambra", "Slate with an amber accent.", "#f6ba1b", "#ffcf4d", "#17140a"),
-  slate("cyan", "Kanso Ciano", "Slate with a cyan accent.", "#00ffff", "#8affff", "#041a1c"),
+  slate("ember", "Kanso Brace", "Slate and ember orange: the logo's own colors.", "#ff4500", "#ff6a33", "#0d0d10", "#3ecbe0"),
+  slate("amber", "Kanso Ambra", "Slate with an amber accent.", "#f6ba1b", "#ffcf4d", "#17140a", "#62b0ff"),
+  slate("cyan", "Kanso Ciano", "Slate with a cyan accent.", "#00ffff", "#8affff", "#041a1c", "#ff8a5c"),
   // The logo's violet (#8a2be1) is too dark to read as text on slate: a lighter step of it
-  slate("violet", "Kanso Viola", "Slate with a violet accent.", "#a968f5", "#bd8af8", "#120621"),
-  slate("mint", "Kanso Menta", "Slate with a mint green accent.", "#50fb7b", "#86fda3", "#06210f"),
+  slate("violet", "Kanso Viola", "Slate with a violet accent.", "#a968f5", "#bd8af8", "#120621", "#f6c443"),
+  slate("mint", "Kanso Menta", "Slate with a mint green accent.", "#50fb7b", "#86fda3", "#06210f", "#b98cff"),
   withThemeDefaults({
     ...LOGO_STYLE,
     id: `${BUILTIN_PREFIX}ink`,
@@ -195,6 +199,7 @@ export const BUILTIN_THEMES: Theme[] = [
       accent: "#1e1e1e",
       accentHover: "#000000",
       onAccent: "#ffffff",
+      accentSecondary: "#c43c00",
     },
   }),
   withThemeDefaults({ ...arcadeTheme, id: `${BUILTIN_PREFIX}arcade` }),
@@ -229,7 +234,16 @@ export const THEME_COLOR_TOKENS: [keyof ThemeColors, string][] = [
   ["accent", "--accent-color"],
   ["accentHover", "--accent-hover"],
   ["onAccent", "--accent-contrast"],
+  ["accentSecondary", "--accent-secondary"],
 ];
+
+/** The theme color each choice for the side panel stands for. */
+const NAV_COLORS: Record<NavColor, string> = {
+  accent: "var(--accent-color)",
+  secondary: "var(--accent-secondary)",
+  text: "var(--text-primary)",
+  muted: "var(--text-faint)",
+};
 
 /* ------------------------------------------------------------------ fonts */
 
@@ -470,6 +484,9 @@ export function applyTheme(
   root.dataset.sidebarSide = layout.sidebarSide;
   root.dataset.scrollbars = accessibility.alwaysShowScrollbars ? "always" : layout.scrollbars;
   root.dataset.windowControls = layout.windowControls;
+  // Names from a closed list, each standing for one of the theme's own colors
+  set("--nav-heading-color", NAV_COLORS[layout.navHeadings] ?? NAV_COLORS.accent);
+  set("--nav-page-color", NAV_COLORS[layout.navPages] ?? NAV_COLORS.secondary);
 
   // Cards
   const restShadow = CARD_SHADOWS[cards.shadow];

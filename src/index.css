@@ -130,6 +130,13 @@
   letter-spacing: var(--heading-spacing);
 }
 
+/* The headings of the side panel are labels, not titles: a theme's title rules pass them by */
+:root :is(h1, h2, h3).nav-heading {
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
 @layer components {
   /* ------------------------------------------------------------ app frame */
 
@@ -431,8 +438,38 @@
   }
 
   .nav-item[aria-current="page"]::before,
+  .nav-item[aria-selected="true"]::before,
   .nav-item[aria-pressed="true"]::before {
     height: 60%;
+  }
+
+  /*
+   * Headings of the side panel (Library, Status, Platform, Genres, Tags): in one of the
+   * theme's colors, so that the groups of the panel can be told apart at a glance.
+   */
+  .nav-heading {
+    color: var(--nav-heading-color);
+    font-family: var(--font-label);
+  }
+
+  /* A heading that is also a button keeps its color; pressed or under the pointer it is lit */
+  .nav-heading.nav-item:hover,
+  .nav-heading.nav-item[aria-current="page"] {
+    color: color-mix(in srgb, var(--nav-heading-color) 70%, var(--text-primary));
+  }
+
+  /* The pages beside the library (Home, Statistics, Emulators) have a color of their own */
+  .nav-page {
+    color: color-mix(in srgb, var(--nav-page-color) 82%, var(--text-secondary));
+  }
+
+  .nav-page:hover,
+  .nav-page[aria-pressed="true"] {
+    color: var(--nav-page-color);
+  }
+
+  .nav-page.nav-item::before {
+    background-color: var(--nav-page-color);
   }
 
   @keyframes motion-fade {
@@ -585,6 +622,27 @@
 
   .detail-side {
     width: clamp(15.5rem, 21%, 25rem);
+  }
+
+  /*
+   * Settings: a list of categories and the settings of the chosen one. The dialog takes a
+   * share of the window, so it is not a small column in the middle of a maximised one, and
+   * keeps its height while categories of different length are looked at.
+   */
+  .settings-sheet {
+    max-width: clamp(46rem, 74vw, 96rem);
+    height: clamp(30rem, 86%, 62rem);
+    max-height: 100%;
+  }
+
+  /* Explanations stay a comfortable line long however wide the dialog is */
+  .settings-panel p {
+    max-width: 52rem;
+  }
+
+  .settings-nav {
+    width: clamp(12.5rem, 22%, 16rem);
+    background-color: color-mix(in srgb, var(--bg-primary) 45%, transparent);
   }
 
   /* Achievements side by side where the sheet is wide enough for more than one column */

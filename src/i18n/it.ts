@@ -162,6 +162,15 @@ export const it = {
   "edit.saving": "Salvataggio...",
   "edit.saveChanges": "Salva modifiche",
 
+  "settings.categories": "Categorie delle impostazioni",
+  "settings.cat.general": "Generale",
+  "settings.cat.generalHelp": "Lingua e comportamento dell'app.",
+  "settings.cat.appearance": "Aspetto",
+  "settings.cat.appearanceHelp": "Tema, animazioni e cosa raccontano le copertine.",
+  "settings.cat.accessibilityHelp": "Valgono sopra qualsiasi tema e si vedono subito, prima ancora di salvare.",
+  "settings.cat.library": "Libreria",
+  "settings.cat.libraryHelp": "Dove cercare i giochi che non vengono da uno store e da dove arrivano le copertine.",
+  "settings.emulatorsList": "Emulatori di questo PC",
   "settings.title": "Impostazioni",
   "settings.subtitle": "Salvate solo su questo PC, nella cartella dati dell'app",
   "settings.close": "Chiudi impostazioni",
@@ -263,6 +272,7 @@ export const it = {
   "theme.color.accent": "Accento",
   "theme.color.accentHover": "Accento al passaggio",
   "theme.color.onAccent": "Testo sull'accento",
+  "theme.color.accentSecondary": "Secondo colore",
   "theme.help":
     "Scegli un tema o creane uno con Personalizza (colori e font). I temi importati possono cambiare anche le forme di card e icone, le misure e lo sfondo: Esporta crea un file .json completo da modificare. Vengono validati e non possono contenere codice.",
   "theme.editorScope":
