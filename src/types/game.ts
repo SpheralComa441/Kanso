@@ -281,6 +281,8 @@ export interface ThemeColors {
   accent: string;
   accentHover: string;
   onAccent: string;
+  /** A second color apart from the accent: by default, the pages beside the library. */
+  accentSecondary: string;
 }
 
 export interface ThemeLayout {
@@ -294,7 +296,14 @@ export interface ThemeLayout {
   dividers: boolean;
   scrollbars: "auto" | "always" | "hidden";
   windowControls: "bars" | "dots";
+  /** Color of the headings of the side panel. */
+  navHeadings: NavColor;
+  /** Color of the pages of the side panel that are not the library. */
+  navPages: NavColor;
 }
+
+/** One of the theme's own colors, by name: its accent, its second color, titles, hints. */
+export type NavColor = "accent" | "secondary" | "text" | "muted";
 
 export interface ThemeTypography {
   /** Font stack of titles; `null` uses the body font. */

@@ -16,7 +16,8 @@
     "textFaint": "#7982b3",
     "accent": "#7ef0c6",
     "accentHover": "#a5f7d9",
-    "onAccent": "#062019"
+    "onAccent": "#062019",
+    "accentSecondary": "#b9a3ff"
   },
   "fontFamily": "Nunito",
   "typography": {
@@ -38,7 +39,9 @@
     "sidebarSide": "left",
     "dividers": false,
     "scrollbars": "auto",
-    "windowControls": "dots"
+    "windowControls": "dots",
+    "navHeadings": "secondary",
+    "navPages": "accent"
   },
   "cards": {
     "shape": "rounded",

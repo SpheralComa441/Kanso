@@ -68,10 +68,12 @@ interface NavRowProps {
   count?: number;
   active: boolean;
   icon?: ReactNode;
+  /** One of the pages beside the library: it wears the color the theme gives to those. */
+  page?: boolean;
   onClick: () => void;
 }
 
-function NavRow({ id, label, count, active, icon, onClick }: NavRowProps) {
+function NavRow({ id, label, count, active, icon, page = false, onClick }: NavRowProps) {
   return (
     <button
       id={id}
@@ -79,9 +81,11 @@ function NavRow({ id, label, count, active, icon, onClick }: NavRowProps) {
       onClick={onClick}
       aria-pressed={active}
       className={`nav-item flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs ${
-        active
-          ? "bg-oled-elevated font-medium text-zinc-100"
-          : "text-zinc-400 hover:bg-oled-surface hover:text-zinc-200"
+        page
+          ? `nav-page font-medium ${active ? "bg-oled-elevated" : "hover:bg-oled-surface"}`
+          : active
+            ? "bg-oled-elevated font-medium text-zinc-100"
+            : "text-zinc-400 hover:bg-oled-surface hover:text-zinc-200"
       }`}
     >
       {icon}
@@ -91,7 +95,7 @@ function NavRow({ id, label, count, active, icon, onClick }: NavRowProps) {
       {count !== undefined && (
         <span
           className={`shrink-0 tabular-nums ${
-            active ? "text-accent" : "text-zinc-500"
+            page ? "opacity-80" : active ? "text-accent" : "text-zinc-500"
           }`}
         >
           {count}
@@ -103,7 +107,7 @@ function NavRow({ id, label, count, active, icon, onClick }: NavRowProps) {
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="px-2.5 pb-1.5 text-3xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
+    <h2 className="nav-heading px-2.5 pb-1.5 text-2xs font-bold uppercase tracking-[0.14em]">
       {children}
     </h2>
   );
@@ -145,15 +149,13 @@ function SectionToggle({
         aria-controls={controls}
         aria-current={active ? "page" : undefined}
         title={hint}
-        className={`nav-item flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-3xs font-semibold uppercase tracking-[0.12em] ${
-          active
-            ? "bg-oled-elevated text-zinc-100"
-            : "text-zinc-500 hover:bg-oled-surface hover:text-zinc-200"
+        className={`nav-heading nav-item flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-2xs font-bold uppercase tracking-[0.14em] ${
+          active ? "bg-oled-elevated" : "hover:bg-oled-surface"
         }`}
       >
-        <LayoutGrid className={`h-3 w-3 shrink-0 ${active ? "text-accent" : ""}`} />
+        <LayoutGrid className="h-3 w-3 shrink-0" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        <span className="shrink-0 font-medium tabular-nums tracking-normal">{count}</span>
+        <span className="shrink-0 font-medium tabular-nums tracking-normal text-zinc-500">{count}</span>
         <ChevronDown
           className={`h-3 w-3 shrink-0 transition-transform duration-200 ${
             expanded ? "" : "-rotate-90"
@@ -303,6 +305,7 @@ export function Sidebar({
         <div className="space-y-0.5">
           <NavRow
             id="nav-home"
+            page
             label={t("sidebar.home")}
             active={view === "home"}
             icon={<Home className="h-3.5 w-3.5 shrink-0" />}
@@ -310,6 +313,7 @@ export function Sidebar({
           />
           <NavRow
             id="nav-stats"
+            page
             label={t("sidebar.stats")}
             active={view === "stats"}
             icon={<ChartNoAxesColumn className="h-3.5 w-3.5 shrink-0" />}
@@ -317,6 +321,7 @@ export function Sidebar({
           />
           <NavRow
             id="nav-emulators"
+            page
             label={t("sidebar.emulators")}
             count={emulatorCount > 0 ? emulatorCount : undefined}
             active={view === "emulators"}

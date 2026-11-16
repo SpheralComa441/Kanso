@@ -35,7 +35,7 @@ pub enum ColorScheme {
     Light,
 }
 
-/// The twelve colors of a theme, as `#rrggbb` (or `#rrggbbaa`) strings.
+/// The thirteen colors of a theme, as `#rrggbb` (or `#rrggbbaa`) strings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThemeColors {
@@ -62,6 +62,11 @@ pub struct ThemeColors {
     pub accent_hover: String,
     /// Text and icons drawn on top of the accent color.
     pub on_accent: String,
+    /// A second color that stands apart from the accent: by default it marks the pages of
+    /// the side panel that are not the library. A theme that does not give one gets the
+    /// accent turned around the color wheel.
+    #[serde(default)]
+    pub accent_secondary: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -92,6 +97,19 @@ pub enum WindowControls {
     Dots,
 }
 
+/// The color of a group of entries of the side panel: one of the theme's own colors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NavColor {
+    Accent,
+    /// The theme's second color.
+    Secondary,
+    /// The color of titles.
+    Text,
+    /// The quiet color of hints and counters.
+    Muted,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ThemeLayout {
@@ -112,6 +130,11 @@ pub struct ThemeLayout {
     pub dividers: bool,
     pub scrollbars: Scrollbars,
     pub window_controls: WindowControls,
+    /// Color of the headings of the side panel (Library, Status, Platform, Genres, Tags).
+    pub nav_headings: NavColor,
+    /// Color of the pages of the side panel that are not the library (Home, Statistics,
+    /// Emulators).
+    pub nav_pages: NavColor,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -443,15 +466,15 @@ impl ThemeColors {
             // The slate and the orange of Kanso's logo
             ColorScheme::Dark => [
                 "#17181f", "#1e2029", "#282a37", "#343747", "#5b5f78", "#f3f4f8", "#d5d7e1",
-                "#a4a8ba", "#868aa1", "#ff4500", "#ff6a33", "#0d0d10",
+                "#a4a8ba", "#868aa1", "#ff4500", "#ff6a33", "#0d0d10", "#3ecbe0",
             ],
             // The logo in ink, on paper
             ColorScheme::Light => [
                 "#f5f5f2", "#ffffff", "#eaeae6", "#d9d9d4", "#9d9d98", "#1e1e1e", "#3a3a3a",
-                "#595959", "#6b6b6b", "#1e1e1e", "#000000", "#ffffff",
+                "#595959", "#6b6b6b", "#1e1e1e", "#000000", "#ffffff", "#c43c00",
             ],
         };
-        let [background, surface, elevated, border, border_strong, text, text_secondary, text_muted, text_faint, accent, accent_hover, on_accent] =
+        let [background, surface, elevated, border, border_strong, text, text_secondary, text_muted, text_faint, accent, accent_hover, on_accent, accent_secondary] =
             colors.map(str::to_string);
         Self {
             background,
@@ -466,8 +489,47 @@ impl ThemeColors {
             accent,
             accent_hover,
             on_accent,
+            accent_secondary,
         }
     }
+}
+
+/// A color that stands apart from `accent` with the same strength: the accent turned 165
+/// degrees around the color wheel, its saturation and lightness kept. A grey stays itself.
+pub fn second_accent(accent: &str) -> String {
+    let channel = |at: usize| -> f64 {
+        accent.get(at..at + 2).and_then(|hex| u8::from_str_radix(hex, 16).ok()).map(f64::from).unwrap_or(0.0) / 255.0
+    };
+    let (r, g, b) = (channel(1), channel(3), channel(5));
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let lightness = (max + min) / 2.0;
+    let spread = max - min;
+    if spread < 1e-6 {
+        return accent.get(..7).unwrap_or(accent).to_string();
+    }
+    let saturation = spread / (1.0 - (2.0 * lightness - 1.0).abs());
+    let hue = if max == r {
+        ((g - b) / spread).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / spread + 2.0
+    } else {
+        (r - g) / spread + 4.0
+    } * 60.0;
+    let hue = (hue + 165.0).rem_euclid(360.0);
+
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let x = chroma * (1.0 - ((hue / 60.0).rem_euclid(2.0) - 1.0).abs());
+    let (r, g, b) = match (hue / 60.0) as u32 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    let lift = lightness - chroma / 2.0;
+    let byte = |value: f64| ((value + lift) * 255.0).round().clamp(0.0, 255.0) as u8;
+    format!("#{:02x}{:02x}{:02x}", byte(r), byte(g), byte(b))
 }
 
 impl Default for ThemeLayout {
@@ -483,6 +545,8 @@ impl Default for ThemeLayout {
             dividers: false,
             scrollbars: Scrollbars::Auto,
             window_controls: WindowControls::Bars,
+            nav_headings: NavColor::Accent,
+            nav_pages: NavColor::Secondary,
         }
     }
 }
@@ -884,6 +948,18 @@ impl Theme {
             return Err(invalid("colors"));
         }
         let base = ThemeColors::defaults(color_scheme);
+        // A theme with its own accent and no second color gets one drawn from that accent;
+        // one that keeps Kanso's accent keeps Kanso's second color too
+        // (an interface older than this color sends none: an empty value is no value)
+        let own_second = match c.get("accentSecondary") {
+            Some(Value::String(text)) if text.trim().is_empty() => None,
+            _ => c.color("accentSecondary")?,
+        };
+        let accent_secondary = match (own_second, c.color("accent")?) {
+            (Some(own), _) => own,
+            (None, Some(accent)) => second_accent(&accent),
+            (None, None) => base.accent_secondary,
+        };
         let colors = ThemeColors {
             background: c.color("background")?.unwrap_or(base.background),
             surface: c.color("surface")?.unwrap_or(base.surface),
@@ -897,6 +973,7 @@ impl Theme {
             accent: c.color("accent")?.unwrap_or(base.accent),
             accent_hover: c.color("accentHover")?.unwrap_or(base.accent_hover),
             on_accent: c.color("onAccent")?.unwrap_or(base.on_accent),
+            accent_secondary,
         };
 
         let t = Fields::section(&root, "typography")?;
@@ -927,6 +1004,8 @@ impl Theme {
             dividers: l.flag("dividers", d.dividers)?,
             scrollbars: l.choice("scrollbars", d.scrollbars)?,
             window_controls: l.choice("windowControls", d.window_controls)?,
+            nav_headings: l.choice("navHeadings", d.nav_headings)?,
+            nav_pages: l.choice("navPages", d.nav_pages)?,
         };
 
         let k = Fields::section(&root, "cards")?;
@@ -1376,6 +1455,49 @@ mod tests {
     }
 
     #[test]
+    fn a_theme_has_a_second_color_and_says_how_the_side_panel_uses_its_colors() {
+        // Kanso's accent kept: Kanso's second color too, and its usual use of both
+        let plain = Theme::from_json(r#"{"name":"X","colors":{}}"#).unwrap();
+        assert_eq!(plain.colors.accent_secondary, ThemeColors::defaults(ColorScheme::Dark).accent_secondary);
+        assert_eq!((plain.layout.nav_headings, plain.layout.nav_pages), (NavColor::Accent, NavColor::Secondary));
+        let light = Theme::from_json(r#"{"name":"X","colorScheme":"light","colors":{}}"#).unwrap();
+        assert_eq!(light.colors.accent_secondary, ThemeColors::defaults(ColorScheme::Light).accent_secondary);
+
+        // Its own accent and no second color: one drawn from the accent, as strong as it is
+        let nord = Theme::from_json(NORD).unwrap();
+        assert_eq!(nord.colors.accent, "#88ccdd");
+        assert_eq!(nord.colors.accent_secondary, second_accent("#88ccdd"));
+        for (accent, second) in [("#ff0000", "#00ffbf"), ("#ff4500", "#00faff"), ("#00ffff", "#ff0040"), ("#50fb7b", "#fb50fb")] {
+            assert_eq!(second_accent(accent), second, "{accent}");
+        }
+        // A grey has no hue to turn; transparency is not carried over
+        assert_eq!(second_accent("#1e1e1e"), "#1e1e1e");
+        assert_eq!(second_accent("#808080cc"), "#808080");
+
+        // Its own second color, and its own use of the colors
+        let own = Theme::from_json(
+            r##"{"name":"X","colors":{"accent":"#f00","accentSecondary":"#0AF"},"layout":{"navHeadings":"secondary","navPages":"muted"}}"##,
+        )
+        .unwrap();
+        assert_eq!(own.colors.accent_secondary, "#00aaff");
+        assert_eq!((own.layout.nav_headings, own.layout.nav_pages), (NavColor::Secondary, NavColor::Muted));
+        let exported = own.to_json();
+        assert!(exported.contains("\"accentSecondary\": \"#00aaff\"") && exported.contains("\"navHeadings\": \"secondary\""));
+        assert_eq!(Theme::from_json(&exported).unwrap().layout, own.layout);
+
+        // Names from the list and colors only: anything else is refused, never passed on
+        for (raw, expected) in [
+            (r##"{"name":"X","colors":{"accentSecondary":"red"}}"##, "colors.accentSecondary"),
+            (r##"{"name":"X","colors":{"accentSecondary":"var(--x)"}}"##, "colors.accentSecondary"),
+            (r##"{"name":"X","colors":{},"layout":{"navHeadings":"#ff0000"}}"##, "layout.navHeadings"),
+            (r##"{"name":"X","colors":{},"layout":{"navPages":"url(x)"}}"##, "layout.navPages"),
+        ] {
+            let err = Theme::from_json(raw).expect_err(raw);
+            assert!(err.contains(expected), "{raw} -> {err}");
+        }
+    }
+
+    #[test]
     fn exported_file_round_trips_and_carries_no_id() {
         let mut theme = Theme::from_json(NORD).unwrap();
         theme.id = "nord-night".to_string();
@@ -1402,6 +1524,7 @@ mod tests {
         )
         .expect("deserializes");
         let validated = from_ui.validated().unwrap();
+        assert_eq!(validated.colors.accent_secondary, "#00ffbf", "drawn from its accent");
         assert_eq!(validated.layout.card_min_width, 200);
         assert_eq!(validated.layout.grid_gap, 16);
         assert_eq!(validated.cards, ThemeCards::default());

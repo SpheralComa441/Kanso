@@ -12,7 +12,7 @@ import {
   PluginCommandDialog,
   type PluginCommandRun,
 } from "./components/PluginCommandDialog";
-import { SettingsModal } from "./components/SettingsModal";
+import { SettingsModal, type SettingsSection } from "./components/SettingsModal";
 import { Sidebar, type MainView } from "./components/Sidebar";
 import { StatsView } from "./components/StatsView";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./components/StatusIcon";
@@ -192,6 +192,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [isScanning, setIsScanning] = useState(true);
   const [isSyncingMetadata, setIsSyncingMetadata] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  // The category Settings opens on when it is opened for something in particular
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | null>(null);
+  const openSettings = (section: SettingsSection | null = null) => {
+    setSettingsSection(section);
+    setIsSettingsOpen(true);
+  };
   const [detailGameId, setDetailGameId] = useState<string | null>(null);
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [bannerDismissed, setBannerDismissed] = useState(false);
@@ -797,14 +803,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         sheetOpen={Boolean(detailGame)}
         settingsDisabled={themeEditorBase !== null}
         onScan={() => void performScan(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => openSettings()}
         pluginCommands={pluginCommands}
         onRunPluginCommand={(command) => void startCommand(command)}
       />
 
       {settingsLoaded && !hasApiKey && !bannerDismissed && (
         <ApiKeyBanner
-          onConfigure={() => setIsSettingsOpen(true)}
+          onConfigure={() => openSettings("library")}
           onDismiss={() => setBannerDismissed(true)}
         />
       )}
@@ -873,7 +879,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                   )
                 );
               }}
-              onOpenSettings={() => setIsSettingsOpen(true)}
+              onOpenSettings={() => openSettings("emulators")}
               onSearch={() => void performScan(true)}
               searchQuery={searchQuery}
               viewMode={viewMode}
@@ -991,7 +997,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                 onOpenDetail={(game) => setDetailGameId(game.id)}
                 onLaunch={handleLaunchGame}
                 onToggleFavorite={handleToggleFavorite}
-                onOpenSettings={() => setIsSettingsOpen(true)}
+                onOpenSettings={() => openSettings("library")}
                 badges={badges}
                 runningIds={runningIds}
                 cardInfo={config.cardInfo}
@@ -1069,6 +1075,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
       <SettingsModal
         isOpen={isSettingsOpen}
+        initialSection={settingsSection}
         initialConfig={config}
         currentLanguage={lang}
         userThemes={userThemes}
@@ -1112,7 +1119,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         hasApiKey={hasApiKey}
         onClose={closeEdit}
         onGameUpdated={upsertSingleGameInState}
-        onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenSettings={() => openSettings("library")}
       />
     </div>
   );

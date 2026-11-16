@@ -120,7 +120,7 @@ export function EmulatorsSettings({ settings, onChange, onError }: EmulatorsSett
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-200">
           <Joystick className="h-3.5 w-3.5 text-accent" />
-          <span>{t("settings.emulators")}</span>
+          <span>{t("settings.emulatorsList")}</span>
         </div>
         <button
           id="add-emulator-button"
@@ -270,7 +270,7 @@ export function EmulatorsSettings({ settings, onChange, onError }: EmulatorsSett
       )}
 
       <p className="text-2xs leading-relaxed text-zinc-500">
-        {t("settings.emulatorsHelp")} {t("settings.emulatorsRescan")}
+        {t("settings.emulatorsRescan")}
         {!isRunningInTauri() && ` ${t("settings.emulatorsDesktopOnly")}`}
       </p>
     </section>

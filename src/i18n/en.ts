@@ -156,6 +156,15 @@ export const en: Dictionary = {
   "edit.saving": "Saving...",
   "edit.saveChanges": "Save changes",
 
+  "settings.categories": "Settings categories",
+  "settings.cat.general": "General",
+  "settings.cat.generalHelp": "Language and how the app behaves.",
+  "settings.cat.appearance": "Appearance",
+  "settings.cat.appearanceHelp": "Theme, animations and what covers tell.",
+  "settings.cat.accessibilityHelp": "They apply on top of any theme and show at once, before you save.",
+  "settings.cat.library": "Library",
+  "settings.cat.libraryHelp": "Where to look for games that do not come from a store, and where covers come from.",
+  "settings.emulatorsList": "Emulators on this PC",
   "settings.title": "Settings",
   "settings.subtitle": "Stored on this PC only, in the app's data folder",
   "settings.close": "Close settings",
@@ -253,6 +262,7 @@ export const en: Dictionary = {
   "theme.color.accent": "Accent",
   "theme.color.accentHover": "Accent on hover",
   "theme.color.onAccent": "Text on accent",
+  "theme.color.accentSecondary": "Second color",
   "theme.help":
     "Pick a theme or make one with Customize (colors and fonts). Imported themes can also change the shapes of cards and icons, sizes and the background: Export creates a complete .json file to edit. They are validated and cannot contain code.",
   "theme.editorScope":

@@ -157,6 +157,15 @@ export const es: Dictionary = {
   "edit.saving": "Guardando...",
   "edit.saveChanges": "Guardar cambios",
 
+  "settings.categories": "Categorías de los ajustes",
+  "settings.cat.general": "General",
+  "settings.cat.generalHelp": "Idioma y comportamiento de la aplicación.",
+  "settings.cat.appearance": "Apariencia",
+  "settings.cat.appearanceHelp": "Tema, animaciones y lo que cuentan las carátulas.",
+  "settings.cat.accessibilityHelp": "Se aplican sobre cualquier tema y se ven al momento, antes de guardar.",
+  "settings.cat.library": "Biblioteca",
+  "settings.cat.libraryHelp": "Dónde buscar los juegos que no vienen de una tienda y de dónde llegan las carátulas.",
+  "settings.emulatorsList": "Emuladores de este PC",
   "settings.title": "Ajustes",
   "settings.subtitle": "Se guardan solo en este PC, en la carpeta de datos de la aplicación",
   "settings.close": "Cerrar ajustes",
@@ -258,6 +267,7 @@ export const es: Dictionary = {
   "theme.color.accent": "Acento",
   "theme.color.accentHover": "Acento al pasar el cursor",
   "theme.color.onAccent": "Texto sobre el acento",
+  "theme.color.accentSecondary": "Segundo color",
   "theme.help":
     "Elige un tema o crea uno con Personalizar (colores y fuentes). Los temas importados también pueden cambiar las formas de tarjetas e iconos, las medidas y el fondo: Exportar crea un archivo .json completo para editar. Se validan y no pueden contener código.",
   "theme.editorScope":

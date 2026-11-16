@@ -24,6 +24,10 @@
   --accent-color: #ff4500;
   --accent-hover: #ff6a33;
   --accent-contrast: #0d0d10;
+  --accent-secondary: #3ecbe0;
+  /* What the side panel colors its headings and its pages with: two of the colors above */
+  --nav-heading-color: var(--accent-color);
+  --nav-page-color: var(--accent-secondary);
 
   /* Typography */
   --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;

@@ -76,7 +76,8 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
     "textFaint": "#868aa1",
     "accent": "#ff4500",
     "accentHover": "#ff6a33",
-    "onAccent": "#0d0d10"
+    "onAccent": "#0d0d10",
+    "accentSecondary": "#3ecbe0"
   },
   "fontFamily": "Rubik",
   "typography": {
@@ -98,7 +99,9 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
     "sidebarSide": "left",
     "dividers": false,
     "scrollbars": "auto",
-    "windowControls": "bars"
+    "windowControls": "bars",
+    "navHeadings": "accent",
+    "navPages": "secondary"
   },
   "cards": {
     "shape": "rounded",
@@ -153,6 +156,12 @@ Valori esadecimali `#rgb`, `#rrggbb` o `#rrggbbaa`.
 | `accent` | Pulsanti principali, evidenziazioni, elementi attivi |
 | `accentHover` | L'accento al passaggio del mouse |
 | `onAccent` | Testo e icone sopra il colore d'accento |
+| `accentSecondary` | Un secondo colore, distinto dall'accento: di norma le pagine del pannello laterale che non sono la libreria (Home, Statistiche, Emulatori) |
+
+Un tema che ha un suo `accent` ma non indica `accentSecondary` (come i file del formato 1) ne
+riceve uno ricavato dall'accento: lo stesso colore girato di 165° sulla ruota dei colori, con la
+stessa saturazione e luminosità. *A theme with its own accent and no second color gets one
+drawn from the accent.*
 
 ### Font
 
@@ -214,6 +223,12 @@ Per usare un font che non è tra quelli inclusi, mettilo dentro il tema: funzion
 | `dividers` | `true` / `false` | Linee sottili sotto la barra superiore e accanto al pannello laterale |
 | `scrollbars` | `auto`, `always`, `hidden` | Barre di scorrimento: al passaggio del mouse, sempre visibili, nascoste |
 | `windowControls` | `bars`, `dots` | Pulsanti della finestra: classici a tutta altezza, o pallini colorati |
+| `navHeadings` | `accent`, `secondary`, `text`, `muted` | Colore delle intestazioni del pannello laterale (Libreria, Stato, Piattaforma, Generi, Tag) |
+| `navPages` | `accent`, `secondary`, `text`, `muted` | Colore delle pagine del pannello laterale che non sono la libreria (Home, Statistiche, Emulatori) |
+
+`navHeadings` e `navPages` non sono colori ma **nomi di colori del tema**: `accent` è
+`colors.accent`, `secondary` è `colors.accentSecondary`, `text` è `colors.text`, `muted` è
+`colors.textFaint`. Di norma le intestazioni usano l'accento e le pagine il secondo colore.
 
 Le misure sono in pixel. *Sizes are in pixels.*
 

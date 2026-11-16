@@ -156,6 +156,15 @@ export const ru: Dictionary = {
   "edit.saving": "Сохранение...",
   "edit.saveChanges": "Сохранить изменения",
 
+  "settings.categories": "Разделы настроек",
+  "settings.cat.general": "Общие",
+  "settings.cat.generalHelp": "Язык и поведение приложения.",
+  "settings.cat.appearance": "Оформление",
+  "settings.cat.appearanceHelp": "Тема, анимации и то, что показывают обложки.",
+  "settings.cat.accessibilityHelp": "Действуют поверх любой темы и видны сразу, ещё до сохранения.",
+  "settings.cat.library": "Библиотека",
+  "settings.cat.libraryHelp": "Где искать игры, которые не из магазинов, и откуда берутся обложки.",
+  "settings.emulatorsList": "Эмуляторы на этом компьютере",
   "settings.title": "Настройки",
   "settings.subtitle": "Хранятся только на этом компьютере, в папке данных приложения",
   "settings.close": "Закрыть настройки",
@@ -253,6 +262,7 @@ export const ru: Dictionary = {
   "theme.color.accent": "Акцент",
   "theme.color.accentHover": "Акцент при наведении",
   "theme.color.onAccent": "Текст на акценте",
+  "theme.color.accentSecondary": "Второй цвет",
   "theme.help":
     "Выберите тему или создайте свою через «Настроить» (цвета и шрифты). Импортируемые темы могут менять ещё и форму карточек и значков, размеры и фон: «Экспорт» создаёт полный файл .json для правки. Темы проверяются и не могут содержать код.",
   "theme.editorScope":

@@ -16,7 +16,8 @@
     "textFaint": "#7673a8",
     "accent": "#ff3d9a",
     "accentHover": "#ff6fb5",
-    "onAccent": "#14021f"
+    "onAccent": "#14021f",
+    "accentSecondary": "#35e8ff"
   },
   "fontFamily": "Tektur",
   "typography": {
@@ -38,7 +39,9 @@
     "sidebarSide": "left",
     "dividers": true,
     "scrollbars": "auto",
-    "windowControls": "bars"
+    "windowControls": "bars",
+    "navHeadings": "accent",
+    "navPages": "secondary"
   },
   "cards": {
     "shape": "cut",
