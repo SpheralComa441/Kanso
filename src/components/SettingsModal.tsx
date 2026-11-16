@@ -17,6 +17,7 @@ import {
   Puzzle,
   Settings2,
   SlidersHorizontal,
+  Gauge,
   Tag,
   Trash2,
   Upload,
@@ -61,6 +62,7 @@ import type {
   Theme,
 } from "../types/game";
 import { CARD_INFO_CHOICES } from "../lib/cardInfo";
+import { DlssSettings } from "./DlssSettings";
 import { EmulatorsSettings } from "./EmulatorsSettings";
 import { PluginsSettings } from "./PluginsSettings";
 import { StoreAccountsSettings } from "./StoreAccountsSettings";
@@ -72,6 +74,7 @@ export type SettingsSection =
   | "appearance"
   | "home"
   | "store"
+  | "dlss"
   | "accessibility"
   | "library"
   | "accounts"
@@ -83,6 +86,7 @@ const SECTIONS: { id: SettingsSection; icon: typeof Palette; label: MessageKey }
   { id: "appearance", icon: Palette, label: "settings.cat.appearance" },
   { id: "home", icon: Home, label: "sidebar.home" },
   { id: "store", icon: Tag, label: "sidebar.store" },
+  { id: "dlss", icon: Gauge, label: "dlss.title" },
   { id: "accessibility", icon: Accessibility, label: "a11y.section" },
   { id: "library", icon: Library, label: "settings.cat.library" },
   { id: "accounts", icon: UserRound, label: "accounts.title" },
@@ -198,6 +202,7 @@ export function SettingsModal({
   const [hiddenSections, setHiddenSections] = useState(initialConfig.hiddenSections);
   const [home, setHome] = useState(initialConfig.home);
   const [store, setStore] = useState(initialConfig.store);
+  const [dlssUpdates, setDlssUpdates] = useState(initialConfig.dlssUpdates);
   // Looking for the place whose weather to follow: what was typed, and what was found
   const [placeQuery, setPlaceQuery] = useState("");
   const [places, setPlaces] = useState<PlaceMatch[] | "searching" | null>(null);
@@ -229,6 +234,7 @@ export function SettingsModal({
       setHiddenSections(initialConfig.hiddenSections);
       setHome(initialConfig.home);
       setStore(initialConfig.store);
+      setDlssUpdates(initialConfig.dlssUpdates);
       setPlaceQuery("");
       setPlaces(null);
       setEmulators(initialConfig.emulators);
@@ -416,6 +422,7 @@ export function SettingsModal({
         hiddenSections,
         home,
         store,
+        dlssUpdates,
         // An entry that says nothing (no executable, folder or argument) is not kept
         emulators: emulators.filter(
           (emulator) => emulator.exePath.trim() || emulator.folders.length > 0 || emulator.args.trim()
@@ -1066,6 +1073,15 @@ export function SettingsModal({
                 </div>
                 <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.storePrivacy")}</p>
               </section>
+            </Panel>
+
+            <Panel id="dlss" active={section === "dlss"} title={t("dlss.title")} description={t("settings.cat.dlssHelp")}>
+              <DlssSettings
+                active={isOpen && section === "dlss"}
+                enabled={dlssUpdates}
+                onEnabledChange={setDlssUpdates}
+                saved={initialConfig.dlssUpdates}
+              />
             </Panel>
 
             <Panel

@@ -5,10 +5,10 @@ mod plugins;
 mod browser_signin;
 mod gamepass;
 mod signin_window;
+mod dlss;
 mod weather;
 
 use kanso_core::deals::is_allowed_store_url;
-use kanso_core::dlss::{find_dlss, DlssLibrary};
 use kanso_core::theme::{
     delete_user_theme, export_theme_file, import_theme_file, list_user_themes, save_user_theme,
 };
@@ -57,6 +57,8 @@ pub(crate) struct AppState {
     deals_cache: Arc<Mutex<Option<CachedDeals>>>,
     /// The last answer about the weather for the Home page.
     weather_cache: weather::WeatherCache,
+    /// What is known about DLSS while Kanso runs: NVIDIA's newest version, the games that carry it.
+    pub(crate) dlss_cache: dlss::DlssCache,
     /// Games Kanso currently sees running, kept by the play time tracker.
     pub(crate) running_games: Arc<Mutex<Vec<String>>>,
     pub(crate) plugins: Arc<plugins::PluginHost>,
@@ -896,23 +898,6 @@ fn open_game_folder(app: AppHandle, state: State<'_, AppState>, game_id: String)
         .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
 }
 
-/// The versions of the DLSS libraries a game carries (Super Resolution, Frame Generation, Ray
-/// Reconstruction), read from the files in its folder. Which folder is read from the library,
-/// never taken from the webview; the files are only read, and nothing is sent anywhere.
-#[tauri::command]
-async fn game_dlss(state: State<'_, AppState>, game_id: String) -> Result<Vec<DlssLibrary>, String> {
-    let game = lock_db(&state.db)
-        .get_game(&game_id)?
-        .ok_or_else(|| game_not_found(&game_id))?;
-    // A game played through an emulator has no libraries of its own; one not on disk, no files
-    if !game.is_installed || game.platform == GamePlatform::Emulator || game.install_dir.trim().is_empty() {
-        return Ok(Vec::new());
-    }
-    tauri::async_runtime::spawn_blocking(move || find_dlss(Path::new(&game.install_dir)))
-        .await
-        .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
-}
-
 fn launch_game_inner(app: &AppHandle, game: &DetectedGame) -> Result<(), String> {
     // Prefer protocol URI when available (Steam `steam://rungameid/{appid}`, Epic launcher URI)
     if let Some(uri) = game.launch_uri.as_deref().filter(|u| !u.trim().is_empty()) {
@@ -998,6 +983,7 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         startup_warnings: Mutex::new(startup_warnings),
         deals_cache: Arc::new(Mutex::new(None)),
         weather_cache: Arc::default(),
+        dlss_cache: Arc::default(),
         running_games: Arc::clone(&running_games),
         plugins: Arc::clone(&plugin_host),
         completing_library: Arc::default(),
@@ -1079,7 +1065,12 @@ pub fn run() {
             set_game_status,
             set_game_genres,
             open_game_folder,
-            game_dlss,
+            dlss::game_dlss,
+            dlss::dlss_status,
+            dlss::dlss_download,
+            dlss::dlss_update,
+            dlss::dlss_restore,
+            dlss::open_dlss_source,
             playtime::get_game_achievements,
             playtime::get_play_sessions,
             playtime::get_running_games,

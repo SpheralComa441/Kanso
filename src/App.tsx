@@ -77,6 +77,7 @@ import {
 } from "./lib/library";
 import { isEmulated, platformLabel, uninstallMode } from "./lib/platforms";
 import { CARD_INFO_DEFAULT } from "./lib/cardInfo";
+import { gamesToUpdate, loadDlssStatus, useDlssStatus } from "./lib/dlss";
 import { DEFAULT_ACCESSIBILITY, applyTheme, resolveTheme } from "./lib/themes";
 import type {
   AccessibilityConfig,
@@ -107,6 +108,7 @@ const INITIAL_CONFIG: AppConfig = {
   hiddenSections: [],
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   store: { hiddenStores: [], hiddenDeals: [], liked: [] },
+  dlssUpdates: false,
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
@@ -698,6 +700,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   // The weather outside, when the user follows it: asked while Home is in view, and again
   // every half hour. Anything that goes wrong leaves the season to show
   const [weather, setWeather] = useState<WeatherNow | null>(null);
+  // DLSS: with the setting on, Kanso asks NVIDIA for its newest version and looks through the
+  // games' folders once, in the background, to say at the top how many games are behind.
+  // With it off nothing of this runs until the user opens a place that shows DLSS.
+  const dlss = useDlssStatus();
+  const followsDlss = config.dlssUpdates;
+  useEffect(() => {
+    if (followsDlss) void loadDlssStatus().catch(() => {});
+  }, [followsDlss]);
   const followsWeather = showsAmbience && config.home.weather && config.home.place !== null;
   const weatherPlaceKey = config.home.place ? `${config.home.place.latitude},${config.home.place.longitude}` : "";
   useEffect(() => {
@@ -941,6 +951,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         settingsDisabled={themeEditorBase !== null}
         onScan={() => void performScan(true)}
         onOpenSettings={() => openSettings()}
+        dlssUpdates={config.dlssUpdates ? gamesToUpdate(dlss) : 0}
+        onOpenDlss={() => openSettings("dlss")}
         pluginCommands={pluginCommands}
         onRunPluginCommand={(command) => void startCommand(command)}
       />

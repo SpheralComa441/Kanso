@@ -375,15 +375,16 @@ function previewBanner(title: string, from: string, to: string): string {
 
 /** Sample deals for the browser preview, shaped like the real store answers. */
 /** What the DLSS libraries of two sample games would read. */
+export const PREVIEW_DLSS_LATEST = "310.9.16";
 export const PREVIEW_DLSS: Record<string, DlssLibrary[]> = {
   "steam:1091500": [
-    { part: "superResolution", version: "3.7.10", copies: 1 },
-    { part: "frameGeneration", version: "3.7.10", copies: 1 },
-    { part: "rayReconstruction", version: "3.5.10", copies: 1 },
+    { part: "superResolution", version: "3.7.10", copies: 1, replaced: false },
+    { part: "frameGeneration", version: "3.7.10", copies: 1, replaced: false },
+    { part: "rayReconstruction", version: "3.5.10", copies: 1, replaced: false },
   ],
   "epic:dc9d2e595d0e4650b35d659f90d41059": [
-    { part: "superResolution", version: "310.2.1", copies: 2 },
-    { part: "superResolution", version: "3.5", copies: 1 },
+    { part: "superResolution", version: "310.2.1", copies: 2, replaced: false },
+    { part: "superResolution", version: "3.5", copies: 1, replaced: false },
   ],
 };
 
