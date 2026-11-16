@@ -288,6 +288,27 @@ impl DetectedGame {
         }
     }
 
+    /// Address that asks the game's own client to uninstall it, for the stores that have
+    /// one. Like the others, built from what is stored for the game, never from the
+    /// interface. The client asks for confirmation itself: Kanso deletes nothing.
+    pub fn uninstall_uri(&self) -> Option<String> {
+        if !self.is_installed {
+            return None;
+        }
+        let app_id = self
+            .platform_app_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty())?;
+        match self.platform {
+            GamePlatform::Steam => app_id
+                .bytes()
+                .all(|b| b.is_ascii_digit())
+                .then(|| format!("steam://uninstall/{app_id}")),
+            _ => None,
+        }
+    }
+
     /// Address that asks the game's own client to install it, for the stores that have one.
     /// Built from what is stored for the game, never from the interface.
     pub fn install_uri(&self) -> Option<String> {

@@ -1,9 +1,22 @@
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
-import { CloudDownload, Download, Eye, EyeOff, Pencil, Play, Plus, Star, X } from "lucide-react";
+import {
+  CloudDownload,
+  Download,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  Pencil,
+  Play,
+  Plus,
+  Star,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import { useI18n, type I18n } from "../i18n";
 import { getPlaySessions, resolveCoverUrl } from "../lib/backend";
 import { GAME_STATUSES, genreKey } from "../lib/library";
-import { PLATFORM_META, canInstall, platformLabel } from "../lib/platforms";
+import { PLATFORM_META, canInstall, platformLabel, uninstallMode } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame, GameStatus, PlaySession, PluginInfo, ThemeDetail } from "../types/game";
 import { Cover } from "./Cover";
@@ -33,6 +46,10 @@ interface GameDetailProps {
   onToggleFavorite: (game: DetectedGame) => void;
   onToggleHidden: (game: DetectedGame) => void;
   onEdit: (game: DetectedGame) => void;
+  /** Opens the folder the game is in, in the file manager. */
+  onOpenFolder: (game: DetectedGame) => void;
+  /** Asks the game's client to uninstall it, or to show it where that is all it can do. */
+  onUninstall: (game: DetectedGame) => void;
   onSelectGenre: (genreKey: string) => void;
   onSelectTag: (tagKey: string) => void;
   /** Kanso sees one of the game's processes right now. */
@@ -82,6 +99,26 @@ function Badges({
         {/* An emulated game says which emulator runs it, where a store game names its store */}
         {(game.platform === "emulator" && emulatorName) || platformLabel(game.platform, t)}
       </span>
+      {/* What is installed: the game's version, or the version of the emulator that runs it */}
+      {game.isInstalled && game.version && (
+        <span
+          id="detail-version"
+          title={t(game.platform === "emulator" ? "detail.versionEmulator" : "detail.version")}
+          className="inline-block rounded-md border border-oled-border bg-oled-bg/60 px-2 py-0.5 font-mono text-3xs text-zinc-400"
+        >
+          {/^\d/.test(game.version) ? `v${game.version}` : game.version}
+        </span>
+      )}
+      {game.isFamilyShared && (
+        <span
+          id="detail-family-shared-badge"
+          title={t("game.familySharedHelp")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-oled-border bg-oled-bg/60 px-2 py-0.5 text-3xs font-medium text-zinc-300"
+        >
+          <Users className="h-3 w-3" />
+          {t("game.familyShared")}
+        </span>
+      )}
       {!game.isInstalled && (
         <span
           id="detail-not-installed-badge"
@@ -277,7 +314,7 @@ function CoverArt({ game, coverUrl, onBroken }: { game: DetectedGame; coverUrl: 
 
 type ActionsProps = Pick<
   GameDetailProps,
-  "isLaunching" | "onLaunch" | "onToggleFavorite" | "onToggleHidden" | "onEdit"
+  "isLaunching" | "onLaunch" | "onToggleFavorite" | "onToggleHidden" | "onEdit" | "onOpenFolder" | "onUninstall"
 > & {
   game: DetectedGame;
   playButtonRef: React.RefObject<HTMLButtonElement>;
@@ -292,6 +329,8 @@ function Actions({
   onToggleFavorite,
   onToggleHidden,
   onEdit,
+  onOpenFolder,
+  onUninstall,
   playButtonRef,
   stacked = false,
 }: ActionsProps) {
@@ -299,6 +338,10 @@ function Actions({
   // The main button starts the game, or asks its store's client to install it
   const canLaunch = game.isInstalled ? Boolean(game.launchUri || game.executablePath) : canInstall(game);
   const hideLabel = game.isHidden ? t("detail.unhide") : t("detail.hide");
+  const removal = uninstallMode(game);
+  const removalHelp = t(removal === "client" ? "detail.uninstallInClient" : "detail.uninstallHelp", {
+    client: platformLabel(game.platform, t),
+  });
   const secondary =
     "inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-medium transition-colors";
 
@@ -361,6 +404,36 @@ function Actions({
           {game.isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
         </button>
       </div>
+
+      {/* What is on disk: its folder, one click away */}
+      {game.isInstalled && (game.executablePath || game.installDir) && (
+        <div className={stacked ? "flex items-center gap-2" : "contents"}>
+          <button
+            id="detail-folder-button"
+            type="button"
+            onClick={() => onOpenFolder(game)}
+            title={t("detail.openFolderHelp")}
+            className={`${secondary} ${stacked ? "min-w-0 flex-1" : ""} border-oled-border bg-oled-bg/60 text-zinc-300 hover:border-zinc-600`}
+          >
+            <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{t("detail.openFolder")}</span>
+          </button>
+          {removal && (
+            <button
+              id="detail-uninstall-button"
+              type="button"
+              data-uninstall={removal}
+              onClick={() => onUninstall(game)}
+              title={removalHelp}
+              aria-label={`${t("detail.uninstall")}: ${removalHelp}`}
+              className={`${secondary} border-oled-border bg-oled-bg/60 text-zinc-300 hover:border-red-400/50 hover:text-red-300`}
+            >
+              <Trash2 className="h-3.5 w-3.5 shrink-0" />
+              {!stacked && <span>{t("detail.uninstall")}</span>}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

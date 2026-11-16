@@ -580,6 +580,24 @@ export async function setGameGenres(gameId: string, genres: string[]): Promise<D
   return updated;
 }
 
+/** Asks the game's own client to uninstall it (or to show it, where that is all it takes). */
+export async function uninstallGame(game: DetectedGame): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("uninstall_game", { gameId: game.id });
+    return;
+  }
+  throw new Error(`Anteprima: nell'app la richiesta per ${game.title} andrebbe al client dello store.`);
+}
+
+/** Opens the folder a game is in, in the file manager. */
+export async function openGameFolder(game: DetectedGame): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_game_folder", { gameId: game.id });
+    return;
+  }
+  throw new Error(`Anteprima: nell'app si aprirebbe la cartella di ${game.title}.`);
+}
+
 /** The parts of the side panel that can be hidden, in the order Settings lists them. */
 export const HIDEABLE_SECTIONS: HideableSection[] = ["home", "store", "tags"];
 
@@ -657,6 +675,7 @@ export async function listEmulators(): Promise<EmulatorInfo[]> {
       exePath: setting.exePath,
       folders: setting.folders.map((path) => ({ path, fromEmulator: false })),
       addedByUser: true,
+      version: null,
     }));
   return [...PREVIEW_MOCK_EMULATORS, ...added];
 }

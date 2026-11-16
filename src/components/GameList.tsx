@@ -6,6 +6,7 @@ import {
   Gamepad2,
   Play,
   Star,
+  Users,
 } from "lucide-react";
 import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
@@ -275,6 +276,16 @@ export function GameList({
                         <StatusIcon status={game.status} className="h-3 w-3" />
                       </span>
                     )}
+                    {game.isFamilyShared && (
+                      <span
+                        data-family-shared={game.id}
+                        title={t("game.familySharedHelp")}
+                        className="shrink-0 rounded-md border border-white/15 bg-black/75 p-1 text-white"
+                      >
+                        <Users className="h-3 w-3" aria-hidden="true" />
+                        <span className="sr-only">{t("game.familyShared")}</span>
+                      </span>
+                    )}
                     {runningIds.has(game.id) && (
                       <span
                         data-running={game.id}
@@ -453,6 +464,16 @@ export function GameList({
                         >
                           {platformLabel(game.platform, t)}
                         </span>
+                        {game.isFamilyShared && (
+                          <span
+                            data-family-shared={game.id}
+                            title={t("game.familySharedHelp")}
+                            className="inline-flex shrink-0 items-center gap-1 text-3xs text-zinc-400"
+                          >
+                            <Users className="h-3 w-3" aria-hidden="true" />
+                            {t("game.familyShared")}
+                          </span>
+                        )}
                         {game.status && (
                           <span
                             data-status={game.status}

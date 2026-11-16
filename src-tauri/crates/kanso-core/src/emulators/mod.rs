@@ -375,6 +375,8 @@ pub struct Emulator {
     pub args: Vec<String>,
     pub library: Library,
     pub added_by_user: bool,
+    /// The version its executable carries, when it carries one.
+    pub version: Option<String>,
 }
 
 /// What the interface shows of an emulator.
@@ -387,6 +389,7 @@ pub struct EmulatorInfo {
     pub exe_path: String,
     pub folders: Vec<GamesFolder>,
     pub added_by_user: bool,
+    pub version: Option<String>,
 }
 
 impl Emulator {
@@ -398,6 +401,7 @@ impl Emulator {
             exe_path: self.exe_path.to_string_lossy().into_owned(),
             folders: self.folders.clone(),
             added_by_user: self.added_by_user,
+            version: self.version.clone(),
         }
     }
 
@@ -502,6 +506,7 @@ pub fn resolve(settings: &[EmulatorSetting], found_exes: &[PathBuf], places: &Pl
                 None => vec!["{rom}".to_string()],
             }),
             library: def.map(|d| d.library).unwrap_or(Library::Files),
+            version: crate::pe_version::file_version(&exe).map(|version| version.short()),
             exe_path: exe,
             folders,
             added_by_user,
@@ -548,7 +553,7 @@ fn emulated_game(emulator: &Emulator, file: &str, title: String) -> DetectedGame
         .parent()
         .map(|dir| dir.to_string_lossy().into_owned())
         .unwrap_or_default();
-    DetectedGame::new_detected(
+    let mut game = DetectedGame::new_detected(
         format!("emu:{}:{:016x}", emulator.id, fnv1a_64(key.as_bytes())),
         title.clone(),
         clean_game_title(&title),
@@ -557,7 +562,10 @@ fn emulated_game(emulator: &Emulator, file: &str, title: String) -> DetectedGame
         folder,
         Some(file.to_string()),
         None,
-    )
+    );
+    // A game file has no version of its own: what matters is the emulator that runs it
+    game.version = emulator.version.clone();
+    game
 }
 
 /// The games of each emulator, as library entries.

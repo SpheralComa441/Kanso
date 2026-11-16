@@ -133,6 +133,26 @@ pub fn parse_app_manifest_acf(
     content: &str,
     library_root: &Path,
 ) -> Result<Option<DetectedGame>, String> {
+    parse_app_manifest_for_account(content, library_root, None)
+}
+
+/// What every Steam account id is counted from: SteamID64 = this + the account's number.
+const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
+
+/// The SteamID64 of the account whose folder `userdata/<number>/config` is.
+fn steam_id64_of(config_dir: &Path) -> Option<u64> {
+    let number: u64 = config_dir.parent()?.file_name()?.to_str()?.parse().ok()?;
+    (number > 0).then(|| STEAM_ID64_BASE + number)
+}
+
+/// Like [`parse_app_manifest_acf`], knowing which Steam account uses this PC: a game whose
+/// manifest names another account as its owner (`LastOwner`) is played through family
+/// sharing. Also reads the build installed (`buildid`).
+pub fn parse_app_manifest_for_account(
+    content: &str,
+    library_root: &Path,
+    account_id64: Option<u64>,
+) -> Result<Option<DetectedGame>, String> {
     let root = parse_vdf(content)?;
     let Some(app_state) = root.get_section("AppState") else {
         return Err(format!("{} (.acf): AppState", T::InvalidManifest.s()));
@@ -183,6 +203,16 @@ pub fn parse_app_manifest_acf(
         Some(format!("steam://rungameid/{appid}")),
     );
     game.title_provisional = name_is_placeholder;
+    // Steam knows a build by its number: there is no version a person would write
+    game.version = app_state
+        .get_str("buildid")
+        .map(str::trim)
+        .filter(|build| !build.is_empty() && *build != "0" && build.bytes().all(|b| b.is_ascii_digit()))
+        .map(|build| format!("build {build}"));
+    // An owner that is not the account in use: borrowed. No owner written, or no account
+    // known, says nothing
+    let owner = app_state.get_str("LastOwner").and_then(|raw| raw.trim().parse::<u64>().ok());
+    game.is_family_shared = matches!((owner, account_id64), (Some(owner), Some(account)) if owner != 0 && owner != account);
 
     Ok(Some(game))
 }
@@ -221,6 +251,7 @@ pub fn scan_steam_from_root(steam_root: &Path) -> SourceScanOutput {
 
     let mut seen_libs = HashSet::new();
     let mut seen_app_ids = HashSet::new();
+    let account_id64 = steam_account_config_dir(steam_root).as_deref().and_then(steam_id64_of);
 
     for lib_root in library_roots {
         let canonical_key = lib_root
@@ -263,7 +294,7 @@ pub fn scan_steam_from_root(steam_root: &Path) -> SourceScanOutput {
             }
 
             match fs::read_to_string(&path) {
-                Ok(acf_content) => match parse_app_manifest_acf(&acf_content, &lib_root) {
+                Ok(acf_content) => match parse_app_manifest_for_account(&acf_content, &lib_root, account_id64) {
                     Ok(Some(game)) => {
                         if seen_app_ids.insert(game.id.clone()) {
                             output.games.push(game);
@@ -633,6 +664,34 @@ mod tests {
 
         assert!(parse_local_config_play_stats("not a vdf {").is_empty());
         assert!(parse_local_config_play_stats("\"Other\" { }").is_empty());
+    }
+
+    #[test]
+    fn a_manifest_says_the_build_installed_and_who_owns_the_game() {
+        let manifest = |extra: &str| {
+            format!("\"AppState\"\n{{\n\t\"appid\"\t\"620\"\n\t\"name\"\t\"Portal 2\"\n\t\"installdir\"\t\"Portal 2\"\n{extra}}}\n")
+        };
+        let me = STEAM_ID64_BASE + 123_456;
+        let parse = |extra: &str, account: Option<u64>| {
+            parse_app_manifest_for_account(&manifest(extra), Path::new("/steam"), account).unwrap().unwrap()
+        };
+
+        let mine = parse(&format!("\t\"buildid\"\t\"15738292\"\n\t\"LastOwner\"\t\"{me}\"\n"), Some(me));
+        assert_eq!(mine.version.as_deref(), Some("build 15738292"));
+        assert!(!mine.is_family_shared, "my own game");
+        let borrowed = parse(&format!("\t\"LastOwner\"\t\"{}\"\n", me + 77), Some(me));
+        assert!(borrowed.is_family_shared, "another account owns it: family sharing");
+        assert_eq!(borrowed.version, None, "no build written, no version");
+        // Nothing to go by: no owner written, owner zero, or no account known on this PC
+        assert!(!parse("", Some(me)).is_family_shared);
+        assert!(!parse("\t\"LastOwner\"\t\"0\"\n\t\"buildid\"\t\"0\"\n", Some(me)).is_family_shared);
+        assert!(!parse(&format!("\t\"LastOwner\"\t\"{}\"\n", me + 77), None).is_family_shared);
+        assert_eq!(parse("\t\"buildid\"\t\"12 or so\"\n", Some(me)).version, None);
+
+        // The account is the one whose folder Steam keeps under userdata
+        assert_eq!(steam_id64_of(Path::new("/steam/userdata/123456/config")), Some(me));
+        assert_eq!(steam_id64_of(Path::new("/steam/userdata/anonymous/config")), None);
+        assert_eq!(steam_id64_of(Path::new("/steam/userdata/0/config")), None);
     }
 
     #[test]

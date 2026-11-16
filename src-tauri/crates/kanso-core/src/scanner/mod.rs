@@ -81,6 +81,15 @@ pub fn scan_library(
     let mut standalone_out = standalone::scan_custom_folders(&config.custom_folders, &known_dirs);
     // An emulator kept in a games folder is an emulator, not a game
     let (emulator_exes, loose_games) = split_off_emulators(std::mem::take(&mut standalone_out.games));
+    // A loose program says its own version; a store's game is given one by its store
+    let mut loose_games = loose_games;
+    for game in &mut loose_games {
+        game.version = game
+            .executable_path
+            .as_deref()
+            .and_then(|exe| crate::pe_version::file_version(std::path::Path::new(exe)))
+            .map(|version| version.short());
+    }
     report.games.extend(loose_games);
     report.warnings.extend(standalone_out.warnings);
 

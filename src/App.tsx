@@ -43,6 +43,8 @@ import {
   scanGames,
   setGameFavorite,
   setGameHidden,
+  openGameFolder,
+  uninstallGame,
   setGameGenres,
   mergedGenres,
   setGameStatus,
@@ -1082,6 +1084,18 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         isRunning={detailGame !== null && runningIds.has(detailGame.id)}
         onSetStatus={handleSetStatus}
         onSetGenres={handleSetGenres}
+        onUninstall={(game) => {
+          uninstallGame(game)
+            .then(() => setStatusMessage(t("app.uninstallSent", { client: platformLabel(game.platform, t) })))
+            .catch((err) =>
+              setStatusMessage(typeof err === "string" ? err : err instanceof Error ? err.message : t("app.statusError"))
+            );
+        }}
+        onOpenFolder={(game) => {
+          openGameFolder(game).catch((err) =>
+            setStatusMessage(typeof err === "string" ? err : err instanceof Error ? err.message : t("app.statusError"))
+          );
+        }}
         knownGenres={genres.map((genre) => genre.label)}
         plugins={detailPlugins}
       />

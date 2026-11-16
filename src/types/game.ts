@@ -378,6 +378,8 @@ export interface EmulatorInfo {
   folders: { path: string; fromEmulator: boolean }[];
   /** Added in Settings rather than found by Kanso. */
   addedByUser: boolean;
+  /** The version its executable carries, when it carries one. */
+  version: string | null;
 }
 
 /** What Settings keeps about an emulator (`emulators` in `config.json`). */
