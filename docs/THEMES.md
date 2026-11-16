@@ -306,7 +306,7 @@ there are, in which order, and what moves behind it.*
 
 | Chiave / Key | Valori / Values | Significato / Meaning |
 | --- | --- | --- |
-| `sections` | elenco di `resume`, `upNext`, `mostPlayed`, `recommendations`, `deals` | Le parti mostrate, nell'ordine scritto: da riprendere, prossimi giochi, i più giocati, consigli, offerte. Una parte non nominata non viene mostrata; un elenco vuoto lascia la Home vuota |
+| `sections` | elenco di `resume`, `upNext`, `mostPlayed`, `recommendations`, `deals` | Le parti mostrate, nell'ordine scritto: da riprendere, prossimi giochi, i più giocati, consigli per genere dallo Store («Per te»), i cinque sconti più alti. Una parte non nominata non viene mostrata; un elenco vuoto lascia la Home vuota |
 | `effects` | `seasonal`, `none` | Lo sfondo che scende dall'alto: qualcosa della stagione, di una festa vicina o, se l'utente lo ha chiesto, del meteo; oppure niente |
 
 Un tema decide ordine e presenza delle parti; l'utente può comunque nasconderne qualunque, e

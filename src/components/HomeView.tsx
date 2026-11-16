@@ -30,7 +30,9 @@ interface HomeViewProps {
   launchingId: string | null;
   onOpenSettings: () => void;
   /** The discounts of the stores, drawn by whoever owns them. */
+  /** The best discounts of the moment, and the suggestions by genre: both from the Store. */
   deals: ReactNode;
+  recommendations: ReactNode;
 }
 
 /** The narrowest a cover on a shelf gets, in rem. */
@@ -177,6 +179,7 @@ export function HomeView({
   launchingId,
   onOpenSettings,
   deals,
+  recommendations,
 }: HomeViewProps) {
   const { t, relativePast, duration } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -401,11 +404,15 @@ export function HomeView({
         </section>
       ) : null,
 
-    // Suggestions from the stores arrive with the Store page
-    recommendations: null,
+    // Both draw themselves, or nothing when the stores have nothing to say
+    recommendations: (
+      <div key="recommendations" className="empty:hidden">
+        {recommendations}
+      </div>
+    ),
 
     deals: (
-      <div key="deals" data-home-section="deals">
+      <div key="deals" className="empty:hidden">
         {deals}
       </div>
     ),

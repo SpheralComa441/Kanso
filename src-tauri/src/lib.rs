@@ -13,7 +13,7 @@ use kanso_core::theme::{
 };
 use kanso_core::{
     current_language, is_absent_cover_due, is_metadata_sync_due, now_timestamp_ms, scan_library,
-    set_language, AppConfig, DealsClient, DealsReport, DetectedGame, GameManualUpdate, GamePlatform, GameStatus,
+    set_language, AppConfig, DealStore, DealsClient, DealsReport, DetectedGame, GameManualUpdate, GamePlatform, GameStatus,
     Lang, LibraryDb, LibraryStore, MetadataClient, ScanReport, SgdbGameMatch, Theme, T,
 };
 use serde::Serialize;
@@ -44,6 +44,8 @@ const DEALS_CACHE_TTL_MS: u64 = 30 * 60 * 1000;
 struct CachedDeals {
     lang: Lang,
     country: String,
+    /// The stores that were asked: a store shown again asks afresh.
+    stores: Vec<DealStore>,
     report: DealsReport,
 }
 
@@ -744,8 +746,9 @@ fn setup_system_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Current discounts on Steam, Epic and GOG. Results are reused for half an hour unless
-/// `force_refresh`; `country` (ISO code) selects the regional prices.
+/// Current discounts on Steam, Epic, GOG and, through CheapShark, the other shops. A store
+/// the user left out of the Store page is not asked. Results are reused for half an hour
+/// unless `force_refresh`; `country` (ISO code) selects the regional prices.
 #[tauri::command]
 async fn fetch_deals(
     app: AppHandle,
@@ -753,11 +756,13 @@ async fn fetch_deals(
     country: String,
     force_refresh: bool,
 ) -> Result<DealsReport, String> {
-    let lang = resolve_config_path(&app)
-        .ok()
-        .and_then(|p| AppConfig::load_from_file(&p).ok())
-        .and_then(|c| c.lang())
-        .unwrap_or(FALLBACK_LANGUAGE);
+    let config = resolve_config_path(&app).ok().and_then(|p| AppConfig::load_from_file(&p).ok());
+    let lang = config.as_ref().and_then(|c| c.lang()).unwrap_or(FALLBACK_LANGUAGE);
+    let hidden = config.map(|c| c.store.hidden_stores).unwrap_or_default();
+    let stores: Vec<DealStore> = DealStore::ALL
+        .into_iter()
+        .filter(|store| !hidden.iter().any(|name| name == store.name()))
+        .collect();
     let country = kanso_core::deals::normalize_country(&country);
     let cache = Arc::clone(&state.deals_cache);
 
@@ -765,19 +770,41 @@ async fn fetch_deals(
         let cached = cache.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(entry) = cached.as_ref() {
             let fresh = now_timestamp_ms().saturating_sub(entry.report.fetched_at) < DEALS_CACHE_TTL_MS;
-            if fresh && entry.lang == lang && entry.country == country {
+            if fresh && entry.lang == lang && entry.country == country && entry.stores == stores {
                 return Ok(entry.report.clone());
             }
         }
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let report = DealsClient::new().fetch_all(lang, &country);
+        let mut report = DealsClient::new().fetch_stores(lang, &country, &stores);
+        // Steam's list of discounts does not say what kind of game each one is: its store
+        // service does, for all of them in one request (and for the games of the other shops
+        // that are on Steam too). Without an answer the deals are listed all the same, just
+        // not among the suggestions by genre. With Steam left out, Steam is not asked this
+        // either.
+        let mut steam_ids: Vec<u64> = report
+            .deals
+            .iter()
+            .filter_map(|deal| deal.steam_appid.as_deref()?.parse().ok())
+            .collect();
+        steam_ids.sort_unstable();
+        steam_ids.dedup();
+        if !steam_ids.is_empty() && stores.contains(&DealStore::Steam) {
+            let details = MetadataClient::new().with_language(lang).fetch_steam_app_details(&steam_ids);
+            for detail in details.unwrap_or_default() {
+                let appid = detail.appid.to_string();
+                for deal in report.deals.iter_mut().filter(|deal| deal.steam_appid.as_deref() == Some(appid.as_str())) {
+                    deal.genres = detail.genres.clone();
+                }
+            }
+        }
         // A fully failed fetch (offline) is not worth caching: the next visit retries
         if !report.deals.is_empty() {
             *cache.lock().unwrap_or_else(|p| p.into_inner()) = Some(CachedDeals {
                 lang,
                 country,
+                stores,
                 report: report.clone(),
             });
         }

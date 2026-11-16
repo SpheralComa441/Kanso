@@ -74,6 +74,8 @@ export interface I18n {
   plural: (family: PluralFamily, count: number) => string;
   /** "3 hours ago", "ieri", "2 месяца назад"... for a past timestamp in milliseconds. */
   relativePast: (timestampMs: number) => string;
+  /** "in 5 hours", "domani"... for a timestamp still to come. */
+  relativeFuture: (timestampMs: number) => string;
   /** Short day and month, e.g. "19 nov". */
   shortDate: (timestampMs: number) => string;
   /** Localised price, e.g. "26,65 €". */
@@ -119,6 +121,13 @@ export function createI18n(lang: LanguageCode): I18n {
       if (elapsed < 60) return t("time.justNow");
       for (const [limit, unit, size] of RELATIVE_STEPS) {
         if (elapsed < limit) return relative.format(-Math.floor(elapsed / size), unit);
+      }
+      return "";
+    },
+    relativeFuture: (timestampMs) => {
+      const left = Math.max(0, Math.round((timestampMs - Date.now()) / 1000));
+      for (const [limit, unit, size] of RELATIVE_STEPS) {
+        if (left < limit) return relative.format(Math.max(1, Math.floor(left / size)), unit);
       }
       return "";
     },

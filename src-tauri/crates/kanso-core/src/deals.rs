@@ -1,15 +1,26 @@
-//! Current discounts from the public, key-less endpoints of Steam, the Epic Games Store and GOG.
+//! Current discounts from the public, key-less endpoints of Steam, the Epic Games Store and GOG,
+//! and, for the other shops (Humble, Fanatical, GreenManGaming…), from CheapShark's public list.
+//!
+//! Nothing about the user is sent to any of them: a language and a country for the prices,
+//! nothing at all to CheapShark. A store the user left out in Settings is not asked.
 
 use crate::i18n::Lang;
 use crate::models::now_timestamp_ms;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 const DEFAULT_STEAM_STORE_BASE_URL: &str = "https://store.steampowered.com";
 const DEFAULT_EPIC_BASE_URL: &str = "https://store-site-backend-static.ak.epicgames.com";
 const DEFAULT_GOG_CATALOG_BASE_URL: &str = "https://catalog.gog.com";
+const DEFAULT_CHEAPSHARK_BASE_URL: &str = "https://www.cheapshark.com";
+/// Where a CheapShark deal is opened: its own redirect, as its terms ask of who uses the list.
+const CHEAPSHARK_REDIRECT: &str = "https://www.cheapshark.com/redirect?dealID=";
+/// How many deals to ask CheapShark for; the same game at several shops is listed once.
+const CHEAPSHARK_DEALS_LIMIT: usize = 60;
+/// CheapShark's numbers for Steam, GOG and Epic, which Kanso asks itself.
+const CHEAPSHARK_OWN_STORES: [&str; 3] = ["1", "7", "25"];
 
 /// How many GOG discounts to list (its catalog has thousands at any time).
 const GOG_DEALS_LIMIT: usize = 24;
@@ -20,6 +31,22 @@ pub enum DealStore {
     Steam,
     Epic,
     Gog,
+    /// Every other shop, as CheapShark lists them; [`Deal::seller`] says which one.
+    Others,
+}
+
+impl DealStore {
+    pub const ALL: [DealStore; 4] = [DealStore::Epic, DealStore::Steam, DealStore::Gog, DealStore::Others];
+
+    /// The name the settings and the interface know the store by.
+    pub fn name(self) -> &'static str {
+        match self {
+            DealStore::Steam => "steam",
+            DealStore::Epic => "epic",
+            DealStore::Gog => "gog",
+            DealStore::Others => "others",
+        }
+    }
 }
 
 /// One discounted (or free) game on a store.
@@ -29,8 +56,12 @@ pub struct Deal {
     /// Unique across stores, e.g. `steam:2406770`.
     pub id: String,
     pub store: DealStore,
+    /// The shop selling it, for [`DealStore::Others`]: "Humble Store", "Fanatical"…
+    #[serde(default)]
+    pub seller: Option<String>,
     pub title: String,
-    /// Store page, always `https://` on the store's own domain.
+    /// Store page, always `https://` on the store's own domain (for the other shops, on
+    /// CheapShark's redirect to it).
     pub url: String,
     /// Landscape artwork.
     pub image_url: Option<String>,
@@ -47,6 +78,10 @@ pub struct Deal {
     pub ends_at: Option<u64>,
     /// Steam appid, to recognise games already in the library.
     pub steam_appid: Option<String>,
+    /// The game's genres where the store says them, in the language asked for: what the
+    /// suggestions by genre go by. Empty when the store does not say.
+    #[serde(default)]
+    pub genres: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -63,6 +98,7 @@ pub struct DealsClient {
     steam_store_base_url: String,
     epic_base_url: String,
     gog_catalog_base_url: String,
+    cheapshark_base_url: String,
     agent: ureq::Agent,
 }
 
@@ -91,25 +127,36 @@ impl DealsClient {
             steam_store_base_url: steam_store.trim_end_matches('/').to_string(),
             epic_base_url: epic.trim_end_matches('/').to_string(),
             gog_catalog_base_url: gog_catalog.trim_end_matches('/').to_string(),
+            cheapshark_base_url: DEFAULT_CHEAPSHARK_BASE_URL.to_string(),
             agent,
         }
+    }
+
+    pub fn with_cheapshark_base_url(mut self, cheapshark: &str) -> Self {
+        self.cheapshark_base_url = cheapshark.trim_end_matches('/').to_string();
+        self
     }
 
     /// Fetches every store. `country` is an ISO 3166 code (`IT`, `US`...) that selects the
     /// regional prices; a store that fails is reported in `failed_stores` without hiding the rest.
     pub fn fetch_all(&self, lang: Lang, country: &str) -> DealsReport {
+        self.fetch_stores(lang, country, &DealStore::ALL)
+    }
+
+    /// Fetches the stores named, and only those: a store left out is not contacted.
+    pub fn fetch_stores(&self, lang: Lang, country: &str, stores: &[DealStore]) -> DealsReport {
         let country = normalize_country(country);
         let mut report = DealsReport {
             fetched_at: now_timestamp_ms(),
             ..Default::default()
         };
-
-        let sources: [(DealStore, Result<Vec<Deal>, String>); 3] = [
-            (DealStore::Epic, self.fetch_epic_free_games(lang, &country)),
-            (DealStore::Steam, self.fetch_steam_specials(lang, &country)),
-            (DealStore::Gog, self.fetch_gog_discounts(lang, &country)),
-        ];
-        for (store, result) in sources {
+        for store in DealStore::ALL.into_iter().filter(|store| stores.contains(store)) {
+            let result = match store {
+                DealStore::Epic => self.fetch_epic_free_games(lang, &country),
+                DealStore::Steam => self.fetch_steam_specials(lang, &country),
+                DealStore::Gog => self.fetch_gog_discounts(lang, &country),
+                DealStore::Others => self.fetch_other_shops(),
+            };
             match result {
                 Ok(deals) => report.deals.extend(deals),
                 Err(_) => report.failed_stores.push(store),
@@ -164,6 +211,95 @@ impl DealsClient {
         );
         Ok(parse_gog_catalog(&self.get_json(&url)?))
     }
+
+    /// The best rated discounts of the other shops, from CheapShark: the names of the shops,
+    /// then the deals. Two requests that say nothing of the user; prices are the shops' US ones.
+    pub fn fetch_other_shops(&self) -> Result<Vec<Deal>, String> {
+        let shops = self.get_json(&format!("{}/api/1.0/stores", self.cheapshark_base_url))?;
+        let deals = self.get_json(&format!(
+            "{}/api/1.0/deals?onSale=1&sortBy=DealRating&pageSize={CHEAPSHARK_DEALS_LIMIT}",
+            self.cheapshark_base_url
+        ))?;
+        Ok(parse_cheapshark_deals(&deals, &parse_cheapshark_shops(&shops)))
+    }
+}
+
+/// The shops CheapShark follows that are still open, by its number for them.
+pub fn parse_cheapshark_shops(root: &Value) -> HashMap<String, String> {
+    root.as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|shop| {
+            let id = shop.get("storeID").and_then(Value::as_str)?;
+            let name: String = shop.get("storeName").and_then(Value::as_str)?.trim().chars().filter(|c| !c.is_control()).take(40).collect();
+            let open = shop.get("isActive").and_then(Value::as_i64) != Some(0);
+            (open && !name.is_empty() && id.len() <= 4 && id.chars().all(|c| c.is_ascii_digit())).then(|| (id.to_string(), name))
+        })
+        .collect()
+}
+
+/// CheapShark's list of deals, less the stores Kanso asks itself and the shops it does not
+/// know; a game on offer at several shops is listed once, where it costs the least.
+pub fn parse_cheapshark_deals(root: &Value, shops: &HashMap<String, String>) -> Vec<Deal> {
+    let text = |deal: &Value, key: &str| deal.get(key).and_then(Value::as_str).map(str::trim).map(str::to_string);
+    let money = |deal: &Value, key: &str| text(deal, key).and_then(|amount| amount.parse::<f64>().ok()).filter(|amount| amount.is_finite());
+    let digits = |value: &str, max: usize| !value.is_empty() && value.len() <= max && value.chars().all(|c| c.is_ascii_digit());
+
+    let mut deals: Vec<Deal> = Vec::new();
+    let mut by_game: HashMap<String, usize> = HashMap::new();
+    for entry in root.as_array().map(Vec::as_slice).unwrap_or_default() {
+        let (Some(deal_id), Some(shop_id), Some(game_id), Some(title), Some(final_price), Some(base_price)) = (
+            text(entry, "dealID"),
+            text(entry, "storeID"),
+            text(entry, "gameID"),
+            text(entry, "title"),
+            money(entry, "salePrice"),
+            money(entry, "normalPrice"),
+        ) else {
+            continue;
+        };
+        let Some(seller) = shops.get(&shop_id) else { continue };
+        // The id goes into the address as it is: nothing but what CheapShark's ids are made of
+        let plain_id = deal_id.len() <= 120 && !deal_id.is_empty() && deal_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '%');
+        if CHEAPSHARK_OWN_STORES.contains(&shop_id.as_str())
+            || !plain_id
+            || !digits(&game_id, 12)
+            || title.is_empty()
+            || base_price <= 0.0
+            || final_price < 0.0
+            || final_price >= base_price
+        {
+            continue;
+        }
+        let deal = Deal {
+            id: format!("others:{shop_id}:{game_id}"),
+            store: DealStore::Others,
+            seller: Some(seller.clone()),
+            title: title.chars().filter(|c| !c.is_control()).take(160).collect(),
+            url: format!("{CHEAPSHARK_REDIRECT}{deal_id}"),
+            image_url: https_url(entry.get("thumb")),
+            original_price: Some(base_price),
+            final_price,
+            // CheapShark follows the shops' prices in US dollars
+            currency: "USD".to_string(),
+            discount_percent: (((base_price - final_price) / base_price) * 100.0).round() as u32,
+            upcoming: false,
+            starts_at: None,
+            ends_at: None,
+            steam_appid: text(entry, "steamAppID").filter(|appid| digits(appid, 10)),
+            genres: Vec::new(),
+        };
+        match by_game.get(&game_id) {
+            Some(&index) if deals[index].final_price <= deal.final_price => {}
+            Some(&index) => deals[index] = deal,
+            None => {
+                by_game.insert(game_id, deals.len());
+                deals.push(deal);
+            }
+        }
+    }
+    deals
 }
 
 /// Upper-case two-letter country code, `US` when the input is not one.
@@ -232,6 +368,7 @@ pub fn parse_steam_featured(root: &Value) -> Vec<Deal> {
             deals.push(Deal {
                 id: format!("steam:{id}"),
                 store: DealStore::Steam,
+                seller: None,
                 title: name.trim().to_string(),
                 url: format!("https://store.steampowered.com/app/{id}/"),
                 image_url: https_url(item.get("header_image"))
@@ -255,6 +392,7 @@ pub fn parse_steam_featured(root: &Value) -> Vec<Deal> {
                     .filter(|secs| *secs > 0)
                     .map(|secs| secs * 1000),
                 steam_appid: Some(id.to_string()),
+                genres: Vec::new(),
             });
         }
     }
@@ -324,6 +462,7 @@ pub fn parse_epic_free_games(root: &Value, locale: &str, now_ms: u64) -> Vec<Dea
                 element.get("id").and_then(Value::as_str).unwrap_or(&slug)
             ),
             store: DealStore::Epic,
+            seller: None,
             title: title.trim().to_string(),
             url: format!("https://store.epicgames.com/{locale}/p/{slug}"),
             image_url: epic_image(element),
@@ -339,6 +478,7 @@ pub fn parse_epic_free_games(root: &Value, locale: &str, now_ms: u64) -> Vec<Dea
             starts_at,
             ends_at,
             steam_appid: None,
+            genres: Vec::new(),
         });
     }
 
@@ -416,6 +556,7 @@ pub fn parse_gog_catalog(root: &Value) -> Vec<Deal> {
         deals.push(Deal {
             id: format!("gog:{id}"),
             store: DealStore::Gog,
+            seller: None,
             title: title.trim().to_string(),
             url: link,
             image_url: https_url(product.get("coverHorizontal")),
@@ -431,6 +572,18 @@ pub fn parse_gog_catalog(root: &Value) -> Vec<Deal> {
             starts_at: None,
             ends_at: None,
             steam_appid: None,
+            // GOG lists a game's genres with it
+            genres: product
+                .get("genres")
+                .and_then(Value::as_array)
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|genre| genre.get("name").and_then(Value::as_str))
+                .map(|name| name.trim().chars().filter(|c| !c.is_control()).take(40).collect::<String>())
+                .filter(|name| !name.is_empty())
+                .take(6)
+                .collect(),
         });
     }
     deals
@@ -476,12 +629,14 @@ pub fn parse_iso8601_ms(raw: &str) -> Option<u64> {
 }
 
 /// `true` for a store page Kanso is willing to open in the browser: `https` on one of the
-/// three stores' own domains. Deal URLs come from remote JSON, so they are checked again here.
+/// three stores' own domains, or CheapShark's redirect to a shop's page. Deal URLs come from
+/// remote JSON, so they are checked again here.
 pub fn is_allowed_store_url(url: &str) -> bool {
     const ALLOWED_PREFIXES: &[&str] = &[
         "https://store.steampowered.com/",
         "https://store.epicgames.com/",
         "https://www.gog.com/",
+        CHEAPSHARK_REDIRECT,
     ];
     ALLOWED_PREFIXES.iter().any(|prefix| url.starts_with(prefix))
         && !url.chars().any(|c| c.is_whitespace() || c.is_control())
@@ -649,10 +804,70 @@ mod tests {
     #[test]
     fn a_failing_store_does_not_hide_the_others() {
         // Nothing listens on these ports: every store fails fast
-        let client = DealsClient::with_base_urls("http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9");
+        let client = DealsClient::with_base_urls("http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9")
+            .with_cheapshark_base_url("http://127.0.0.1:9");
         let report = client.fetch_all(Lang::It, "IT");
         assert!(report.deals.is_empty());
-        assert_eq!(report.failed_stores, vec![DealStore::Epic, DealStore::Steam, DealStore::Gog]);
+        assert_eq!(report.failed_stores, vec![DealStore::Epic, DealStore::Steam, DealStore::Gog, DealStore::Others]);
         assert!(report.fetched_at > 0);
+    }
+
+    #[test]
+    fn a_store_left_out_is_not_asked() {
+        let client = DealsClient::with_base_urls("http://127.0.0.1:9", "http://127.0.0.1:9", "http://127.0.0.1:9")
+            .with_cheapshark_base_url("http://127.0.0.1:9");
+        let report = client.fetch_stores(Lang::It, "IT", &[DealStore::Others, DealStore::Gog]);
+        assert_eq!(report.failed_stores, vec![DealStore::Gog, DealStore::Others], "only the two named were tried");
+        assert!(client.fetch_stores(Lang::It, "IT", &[]).failed_stores.is_empty());
+    }
+
+    #[test]
+    fn parses_the_other_shops_from_cheapshark() {
+        // Cut from real answers of `/api/1.0/stores` and `/api/1.0/deals`
+        let shops = parse_cheapshark_shops(&json!([
+            {"storeID": "1", "storeName": "Steam", "isActive": 1},
+            {"storeID": "3", "storeName": "GreenManGaming", "isActive": 1},
+            {"storeID": "4", "storeName": "Amazon", "isActive": 0},
+            {"storeID": "21", "storeName": "WinGameStore", "isActive": 1},
+            {"storeID": "27", "storeName": "Gamesplanet", "isActive": 1}
+        ]));
+        assert_eq!(shops.len(), 4, "a shop that closed is not one");
+        let deal = |shop: &str, game: &str, id: &str, sale: &str, normal: &str| {
+            json!({"internalName": "X", "title": "Ashes of the Singularity II", "dealID": id, "storeID": shop, "gameID": game,
+                   "salePrice": sale, "normalPrice": normal, "isOnSale": "1", "savings": "35.508877", "steamAppID": "3499790",
+                   "thumb": "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/3499790/capsule_231x87.jpg"})
+        };
+        let mut no_steam = deal("27", "9", "abc%3D", "6.99", "69.99");
+        no_steam["steamAppID"] = Value::Null;
+        no_steam["title"] = json!("Dead Island 2 Ultimate Edition");
+        no_steam["thumb"] = json!("http://plain.example/x.jpg");
+        let deals = parse_cheapshark_deals(
+            &json!([
+                deal("3", "335218", "YvAF%2BpcSCX0mc%3D", "25.91", "39.99"),
+                deal("21", "335218", "Zz9%3D", "25.79", "39.99"),
+                deal("1", "335218", "onSteam", "20.00", "39.99"),
+                deal("4", "77", "closedShop", "1.00", "9.99"),
+                deal("3", "78", "not a plain id&x=1", "1.00", "9.99"),
+                deal("3", "79", "noDiscount", "9.99", "9.99"),
+                no_steam,
+            ]),
+            &shops,
+        );
+        assert_eq!(deals.len(), 2, "Steam is asked directly; unknown shops and odd entries are left out");
+        let ashes = &deals[0];
+        assert_eq!(ashes.id, "others:21:335218", "of two shops, the cheaper one");
+        assert_eq!(ashes.store, DealStore::Others);
+        assert_eq!(ashes.seller.as_deref(), Some("WinGameStore"));
+        assert_eq!(ashes.url, "https://www.cheapshark.com/redirect?dealID=Zz9%3D");
+        assert!(is_allowed_store_url(&ashes.url));
+        assert_eq!((ashes.final_price, ashes.original_price, ashes.discount_percent), (25.79, Some(39.99), 36));
+        assert_eq!(ashes.currency, "USD");
+        assert_eq!(ashes.steam_appid.as_deref(), Some("3499790"));
+        assert_eq!(deals[1].seller.as_deref(), Some("Gamesplanet"));
+        assert_eq!(deals[1].steam_appid, None);
+        assert_eq!(deals[1].image_url, None, "a picture not on https is not loaded");
+        assert!(parse_cheapshark_deals(&json!({"error": "rate limited"}), &shops).is_empty());
+        assert!(!is_allowed_store_url("https://www.cheapshark.com/redirect?dealID=a b"));
+        assert!(!is_allowed_store_url("https://www.cheapshark.com.evil.example/redirect?dealID=a"));
     }
 }

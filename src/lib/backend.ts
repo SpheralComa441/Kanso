@@ -29,6 +29,9 @@ import type {
   HomeConfig,
   HomeSection,
   PlaceMatch,
+  DealStore,
+  LikedDeal,
+  StoreConfig,
 } from "../types/game";
 import {
   PREVIEW_MOCK_DEALS,
@@ -70,6 +73,7 @@ const DEFAULT_CONFIG: AppConfig = {
   cardInfo: [...CARD_INFO_DEFAULT],
   hiddenSections: [],
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
+  store: { hiddenStores: [], hiddenDeals: [], liked: [] },
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
@@ -160,6 +164,7 @@ export async function getSettings(): Promise<AppConfig> {
       cardInfo: withCardInfo(parsed.cardInfo),
       hiddenSections: withHiddenSections(parsed.hiddenSections),
       home: withHomeConfig(parsed.home),
+      store: withStoreConfig(parsed.store),
       emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
       gamePassCatalog: parsed.gamePassCatalog === true,
@@ -185,6 +190,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     cardInfo: withCardInfo(config.cardInfo),
     hiddenSections: withHiddenSections(config.hiddenSections),
     home: withHomeConfig(config.home),
+    store: withStoreConfig(config.store),
     emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
     gamePassCatalog: config.gamePassCatalog === true,
@@ -640,6 +646,41 @@ export async function openWeatherSource(): Promise<void> {
     return;
   }
   throw new Error("Anteprima: nell'app si aprirebbe open-meteo.com nel browser.");
+}
+
+/** The stores whose deals the Store page lists. */
+export const DEAL_STORES: DealStore[] = ["steam", "epic", "gog", "others"];
+
+/** The Store settings as the backend would keep them. */
+export function withStoreConfig(value: unknown): StoreConfig {
+  const raw = (value && typeof value === "object" ? value : {}) as Partial<StoreConfig>;
+  const isId = (id: unknown): id is string => typeof id === "string" && /^[A-Za-z0-9:._-]{1,120}$/.test(id);
+  const hiddenStores = Array.isArray(raw.hiddenStores) ? raw.hiddenStores : [];
+  const seen = new Set<string>();
+  const liked = (Array.isArray(raw.liked) ? raw.liked : [])
+    .filter(
+      (deal): deal is LikedDeal =>
+        Boolean(deal) &&
+        isId(deal.id) &&
+        DEAL_STORES.includes(deal.store) &&
+        typeof deal.url === "string" &&
+        deal.url.startsWith("https://") &&
+        !seen.has(deal.id) &&
+        Boolean(seen.add(deal.id))
+    )
+    .slice(0, 60)
+    .map((deal) => ({
+      id: deal.id,
+      store: deal.store,
+      title: String(deal.title ?? "").trim().slice(0, 160),
+      url: deal.url,
+      endsAt: typeof deal.endsAt === "number" ? deal.endsAt : null,
+    }));
+  return {
+    hiddenStores: DEAL_STORES.filter((store) => hiddenStores.includes(store)),
+    hiddenDeals: [...new Set((Array.isArray(raw.hiddenDeals) ? raw.hiddenDeals : []).filter(isId))].slice(0, 300),
+    liked,
+  };
 }
 
 /** The parts of the Home page, in Kanso's own order. */

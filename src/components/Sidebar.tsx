@@ -10,6 +10,7 @@ import {
   LayoutGrid,
   Library,
   Star,
+  Tag,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
@@ -30,7 +31,7 @@ import type { CategoryKind } from "./CategoryGrid";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
 /** The library, or one of the pages beside it; `genres` and `tags` are the walls of tiles. */
-export type MainView = "home" | "library" | "stats" | "emulators" | CategoryKind;
+export type MainView = "home" | "store" | "library" | "stats" | "emulators" | CategoryKind;
 
 const SECTION_PREF_KEYS: Record<CategoryKind, string> = {
   genres: "kanso.ui.sidebar.genres",
@@ -41,6 +42,9 @@ interface SidebarProps {
   isOpen: boolean;
   view: MainView;
   onOpenHome: () => void;
+  onOpenStore: () => void;
+  /** Liked deals about to end: the Store entry wears their number. */
+  storeAlerts: number;
   onOpenStats: () => void;
   /** Shows the emulators of this PC. */
   onOpenEmulators: () => void;
@@ -69,6 +73,8 @@ interface NavRowProps {
   id: string;
   label: string;
   count?: number;
+  /** What the count is, when it is not a number of games: said to who cannot see it. */
+  countLabel?: string;
   active: boolean;
   icon?: ReactNode;
   /** One of the pages beside the library: it wears the color the theme gives to those. */
@@ -76,7 +82,7 @@ interface NavRowProps {
   onClick: () => void;
 }
 
-function NavRow({ id, label, count, active, icon, page = false, onClick }: NavRowProps) {
+function NavRow({ id, label, count, countLabel, active, icon, page = false, onClick }: NavRowProps) {
   return (
     <button
       id={id}
@@ -95,15 +101,24 @@ function NavRow({ id, label, count, active, icon, page = false, onClick }: NavRo
       <span className="min-w-0 flex-1 truncate" title={label}>
         {label}
       </span>
-      {count !== undefined && (
-        <span
-          className={`shrink-0 tabular-nums ${
-            page ? "opacity-80" : active ? "text-accent" : "text-zinc-500"
-          }`}
-        >
-          {count}
-        </span>
-      )}
+      {count !== undefined &&
+        (countLabel ? (
+          <span
+            className="nav-alert shrink-0 rounded-full bg-amber-400 px-1.5 text-2xs font-semibold tabular-nums text-zinc-950"
+            title={countLabel}
+            aria-label={countLabel}
+          >
+            {count}
+          </span>
+        ) : (
+          <span
+            className={`shrink-0 tabular-nums ${
+              page ? "opacity-80" : active ? "text-accent" : "text-zinc-500"
+            }`}
+          >
+            {count}
+          </span>
+        ))}
     </button>
   );
 }
@@ -230,6 +245,8 @@ export function Sidebar({
   genres,
   tags,
   hidden,
+  onOpenStore,
+  storeAlerts,
 }: SidebarProps) {
   const { t } = useI18n();
   const [showAllTags, setShowAllTags] = useState(false);
@@ -315,6 +332,18 @@ export function Sidebar({
               active={view === "home"}
               icon={<Home className="h-3.5 w-3.5 shrink-0" />}
               onClick={onOpenHome}
+            />
+          )}
+          {!hidden.includes("store") && (
+            <NavRow
+              id="nav-store"
+              page
+              label={t("sidebar.store")}
+              count={storeAlerts > 0 ? storeAlerts : undefined}
+              countLabel={t("store.endingSoon")}
+              active={view === "store"}
+              icon={<Tag className="h-3.5 w-3.5 shrink-0" />}
+              onClick={onOpenStore}
             />
           )}
           <NavRow
