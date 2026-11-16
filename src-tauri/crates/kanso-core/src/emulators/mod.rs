@@ -13,6 +13,7 @@
 //! `platform_app_id` naming the emulator), so covers, favourites, status and the sheet work
 //! as for store games; the interface keeps them in their own section.
 
+pub mod find;
 pub mod own_settings;
 pub mod roms;
 pub mod special;
@@ -21,7 +22,6 @@ use crate::cleaner::clean_game_title;
 use crate::config::EmulatorSetting;
 use crate::i18n::T;
 use crate::models::{DetectedGame, GamePlatform, SourceScanOutput};
-use crate::scanner::registry::RegistryEntry;
 use own_settings::Places;
 use roms::{find_rom_files, RomFile};
 use serde::Serialize;
@@ -423,45 +423,6 @@ pub fn split_args(line: &str) -> Vec<String> {
     args
 }
 
-/// The executables of known emulators installed where programs usually go: the folders
-/// installers and guides use, and the folders programs registered in Windows' list of
-/// installed apps. Portable copies elsewhere are found through the user's games folders or
-/// added in Settings.
-pub fn find_installed(places: &Places, uninstall_entries: &[RegistryEntry]) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = Vec::new();
-    for def in KNOWN {
-        for base in places.program_dirs.iter().chain(&places.local_appdata).chain(&places.appdata) {
-            dirs.extend(def.install_dirs.iter().map(|name| base.join(name)));
-        }
-        for entry in uninstall_entries {
-            let name = entry.get("DisplayName").to_ascii_lowercase();
-            let location = entry.get("InstallLocation").trim_matches('"');
-            if !location.is_empty() && name.starts_with(&def.name.to_ascii_lowercase()) {
-                dirs.push(PathBuf::from(location));
-            }
-        }
-    }
-
-    let mut found = Vec::new();
-    for dir in dirs {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        let mut exes: Vec<PathBuf> = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| path.is_file() && identify(path).is_some())
-            .collect();
-        exes.sort();
-        for exe in exes {
-            if !found.contains(&exe) {
-                found.push(exe);
-            }
-        }
-    }
-    found
-}
-
 /// The emulators of this PC: those the user added in Settings first, then the known ones
 /// among `found_exes` (each emulator once, the first copy found). A setting without an
 /// executable adds its folders and arguments to the emulator Kanso found by itself.
@@ -663,27 +624,6 @@ mod tests {
         assert_eq!(split_args(r#"  --config "C:\My Files\a.ini"   --exec={rom} "" "#), ["--config", r"C:\My Files\a.ini", "--exec={rom}", ""]);
         assert_eq!(split_args("a;b && c | d $(e) %PATH%"), ["a;b", "&&", "c", "|", "d", "$(e)", "%PATH%"], "nothing is special");
         assert!(split_args("   ").is_empty());
-    }
-
-    #[test]
-    fn finds_emulators_where_programs_are_installed() {
-        let s = Scratch::new("find");
-        let duck = s.file("AppData/Local/DuckStation/duckstation-qt-x64-ReleaseLTCG.exe", "x");
-        s.file("AppData/Local/DuckStation/updater.exe", "x");
-        let retroarch = s.file("Program Files/RetroArch-Win64/retroarch.exe", "x");
-        let ppsspp = s.file("Tools/PSP/PPSSPPWindows64.exe", "x");
-        s.file("Tools/Other/Dolphin.exe", "x");
-        let uninstall = [
-            RegistryEntry::new("PPSSPP_is1", &[("DisplayName", "PPSSPP 1.17"), ("InstallLocation", &s.root.join("Tools/PSP").to_string_lossy())]),
-            // Another program whose folder happens to hold an emulator is not looked into
-            RegistryEntry::new("Other", &[("DisplayName", "Some Tool"), ("InstallLocation", &s.root.join("Tools/Other").to_string_lossy())]),
-            RegistryEntry::new("Gone", &[("DisplayName", "Dolphin"), ("InstallLocation", "Z:/gone")]),
-        ];
-        let mut found = find_installed(&s.places(), &uninstall);
-        found.sort();
-        let mut expected = vec![duck, retroarch, ppsspp];
-        expected.sort();
-        assert_eq!(found, expected);
     }
 
     #[test]

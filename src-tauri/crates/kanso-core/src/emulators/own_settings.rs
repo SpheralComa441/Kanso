@@ -19,6 +19,8 @@ pub struct Places {
     pub documents: Vec<PathBuf>,
     /// `Program Files`, `Program Files (x86)`, per-user programs: where installers put things.
     pub program_dirs: Vec<PathBuf>,
+    /// The user's Desktop, Documents and Downloads: where unpacked programs often stay.
+    pub profile_dirs: Vec<PathBuf>,
 }
 
 impl Places {
@@ -28,9 +30,15 @@ impl Places {
         let profile = var("USERPROFILE");
         let local_appdata = var("LOCALAPPDATA");
         let mut documents = Vec::new();
+        let mut profile_dirs = Vec::new();
         if let Some(profile) = &profile {
             documents.push(profile.join("Documents"));
             documents.push(profile.join("OneDrive").join("Documents"));
+            for folder in ["Desktop", "Documents", "Downloads"] {
+                profile_dirs.push(profile.join(folder));
+            }
+            profile_dirs.push(profile.join("OneDrive").join("Desktop"));
+            profile_dirs.push(profile.join("OneDrive").join("Documents"));
         }
         let mut program_dirs: Vec<PathBuf> =
             ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"].iter().filter_map(|name| var(name)).collect();
@@ -47,6 +55,7 @@ impl Places {
             local_appdata,
             documents,
             program_dirs,
+            profile_dirs,
         }
     }
 
@@ -298,6 +307,33 @@ pub fn game_folders(id: &str, exe_dir: &Path, places: &Places) -> Vec<PathBuf> {
                 .map(str::to_string)
                 .collect()
         }
+        // No list of folders of their own: where the user last opened a game from
+        "melonds" => {
+            let portable = exe_dir.join("portable");
+            let root = if portable.is_dir() { portable } else { exe_dir.to_path_buf() };
+            let entries: Vec<Entry> = ["melonDS.toml", "melonDS.ini"]
+                .iter()
+                .flat_map(|file| read_entries(&root.join(file)))
+                .collect();
+            entries
+                .iter()
+                .filter(|entry| entry.key == "LastROMFolder")
+                // A TOML string writes a backslash as two
+                .map(|entry| entry.value.replace("\\\\", "\\"))
+                .collect()
+        }
+        "mgba" => {
+            let root = if exe_dir.join("portable.ini").is_file() {
+                Some(exe_dir.to_path_buf())
+            } else {
+                places.appdata.as_ref().map(|appdata| appdata.join("mGBA"))
+            };
+            let entries = root.map(|root| read_entries(&root.join("qt.ini"))).unwrap_or_default();
+            // The games opened most recently: their folders are where the games are
+            values_of(&entries, "mru", |key| key.bytes().all(|b| b.is_ascii_digit()))
+                .filter_map(|file| Path::new(file).parent().map(|folder| folder.to_string_lossy().into_owned()))
+                .collect()
+        }
         "flycast" => {
             let entries = read_entries(&exe_dir.join("emu.cfg"));
             values_of(&entries, "config", |key| key.eq_ignore_ascii_case("Dreamcast.ContentPath"))
@@ -350,6 +386,7 @@ pub(crate) mod tests {
                 local_appdata: Some(self.root.join("AppData").join("Local")),
                 documents: vec![self.root.join("Documents")],
                 program_dirs: vec![self.root.join("Program Files")],
+                profile_dirs: Vec::new(),
             }
         }
 
@@ -459,8 +496,18 @@ pub(crate) mod tests {
         s.file("Emu/Flycast/emu.cfg", &format!("[config]\nDreamcast.ContentPath = {};{}\n", at("Roms/DC"), at("Roms/Naomi")));
         assert_eq!(names(&game_folders("flycast", &flycast, &places), &s.root), ["Roms/DC", "Roms/Naomi"]);
 
+        // melonDS and mGBA have no list: the folder games were last opened from
+        let melonds = s.dir("Emu/melonDS");
+        s.dir("Roms/NDS");
+        s.file("Emu/melonDS/melonDS.toml", &format!("[Instance0]\nLastROMFolder = \"{}\"\nRecentROM = []\n", at("Roms/NDS").replace('\\', "\\\\")));
+        assert_eq!(names(&game_folders("melonds", &melonds, &places), &s.root), ["Roms/NDS"]);
+        let mgba = s.dir("Emu/mGBA");
+        s.dir("Roms/GBA");
+        s.file("AppData/Roaming/mGBA/qt.ini", &format!("[mru]\n0={}/Golden Sun.gba\n1={}/Metroid Fusion.gba\n2={}/gone.gba\n[other]\n0=x\n", at("Roms/GBA"), at("Roms/GBA"), at("Roms/Gone")));
+        assert_eq!(names(&game_folders("mgba", &mgba, &places), &s.root), ["Roms/GBA"]);
+
         // Emulators without a list, and ones Kanso does not know, give nothing
-        assert!(game_folders("melonds", &s.root, &places).is_empty());
+        assert!(game_folders("xenia", &s.root, &places).is_empty());
         assert!(game_folders("custom-thing", &s.root, &places).is_empty());
     }
 

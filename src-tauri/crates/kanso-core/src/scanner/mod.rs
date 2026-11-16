@@ -34,12 +34,32 @@ use exe_pick::normalize_dir_key;
 /// claimed (e.g. an EA or Ubisoft title bought and installed through Steam), the later entry
 /// is dropped.
 pub fn scan_all_installed_games(config: &AppConfig) -> ScanReport {
-    scan_library(config).0
+    scan_library(config, None, false).0
+}
+
+/// What the search for emulators draws on from this PC (see [`emulators::find`]):
+/// `remembered_file` is where discoveries are kept between scans, `thorough` asks for the
+/// disks to be searched as well.
+pub fn emulator_search(remembered_file: Option<&std::path::Path>, thorough: bool) -> emulators::find::Search {
+    emulators::find::Search {
+        remembered_file: remembered_file.map(std::path::Path::to_path_buf),
+        thorough,
+        drives: xbox::fixed_drive_roots(),
+        run_programs: emulators::find::RUN_PROGRAM_KEYS
+            .iter()
+            .flat_map(|key| registry::read_registry_value_names(registry::RegistryHive::CurrentUser, key))
+            .collect(),
+        uninstall_entries: registry::read_uninstall_entries(),
+    }
 }
 
 /// [`scan_all_installed_games`], together with the emulators found on the way: the interface
 /// lists them, and starting an emulated game needs to know its emulator.
-pub fn scan_library(config: &AppConfig) -> (ScanReport, Vec<Emulator>) {
+pub fn scan_library(
+    config: &AppConfig,
+    emulators_file: Option<&std::path::Path>,
+    thorough: bool,
+) -> (ScanReport, Vec<Emulator>) {
     let mut sources: Vec<SourceScanOutput> = Vec::new();
 
     if let Some(steam_root) = steam::detect_steam_root() {
@@ -66,7 +86,7 @@ pub fn scan_library(config: &AppConfig) -> (ScanReport, Vec<Emulator>) {
 
     let places = Places::of_this_pc();
     let mut found = emulator_exes;
-    found.extend(emulators::find_installed(&places, &registry::read_uninstall_entries()));
+    found.extend(emulators::find::find(&places, &emulator_search(emulators_file, thorough)));
     let emulators = emulators::resolve(&config.emulators, &found, &places);
     let emulated = emulators::scan_games(&emulators);
     report.games.extend(emulated.games);
@@ -76,12 +96,16 @@ pub fn scan_library(config: &AppConfig) -> (ScanReport, Vec<Emulator>) {
     (report, emulators)
 }
 
-/// The emulators of this PC without scanning for games: those added in Settings and those
-/// installed where programs usually go. Portable copies in the user's games folders are only
-/// found by a scan.
-pub fn find_emulators(config: &AppConfig) -> Vec<Emulator> {
+/// The emulators of this PC without scanning for games: those added in Settings, those
+/// installed or run, and those earlier scans found. The disks are not searched.
+pub fn find_emulators(config: &AppConfig, emulators_file: Option<&std::path::Path>) -> Vec<Emulator> {
     let places = Places::of_this_pc();
-    let found = emulators::find_installed(&places, &registry::read_uninstall_entries());
+    let mut search = emulator_search(emulators_file, false);
+    // Listing is not searching: with nothing remembered yet the disks are left to the scan
+    if !emulators_file.is_some_and(std::path::Path::is_file) {
+        search.remembered_file = None;
+    }
+    let found = emulators::find::find(&places, &search);
     emulators::resolve(&config.emulators, &found, &places)
 }
 

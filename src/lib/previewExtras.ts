@@ -127,12 +127,12 @@ const PLUGINS: PluginSeed[] = [
   {
     id: "nexus-mods",
     name: "Mod su Nexus Mods",
-    version: "1.0.0",
+    version: "1.1.0",
     author: "Kanso",
     description:
-      "Quante mod ha un gioco su Nexus Mods, con il link alla sua pagina delle mod nel browser. Scarica l'elenco pubblico dei giochi di Nexus Mods e vi cerca il gioco su questo PC: nessun account, e nulla della tua libreria viene inviato.",
+      "Quante mod ha un gioco su Nexus Mods, con il link alla sua pagina delle mod nel browser. Nessun account. Scarica l'elenco pubblico dei giochi di Nexus Mods e vi cerca il gioco su questo PC, quindi nulla della tua libreria viene inviato; solo quando quell'elenco non è disponibile chiede a Nexus Mods del solo gioco di cui è aperta la scheda, per titolo.",
     homepage: "https://www.nexusmods.com",
-    hosts: ["data.nexusmods.com"],
+    hosts: ["data.nexusmods.com", "api.nexusmods.com"],
     gameDetails: true,
     badge: false,
     background: false,

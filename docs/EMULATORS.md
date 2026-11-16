@@ -19,17 +19,32 @@ sezione: non compare in *Tutti i giochi*, nei conteggi, nei generi o nei tag del
 
 ## Come vengono trovati gli emulatori
 
-1. **Aggiunti da te** in *Impostazioni → Emulatori → Aggiungi emulatore…*: scegli l'eseguibile.
-   Se Kanso lo riconosce dal nome del file, sa già quali file sono giochi e come avviarli;
-   altrimenti chiede un nome e le estensioni dei giochi.
-2. **Dove si installano i programmi**: le cartelle che gli installer usano (`Program Files`,
-   `%LOCALAPPDATA%\Programs`, la radice del disco di sistema, `%APPDATA%`) e quelle dichiarate
-   nell'elenco *App installate* di Windows.
-3. **Nelle tue cartelle di giochi** (*Impostazioni → Cartelle giochi personalizzate*): un
-   emulatore trovato lì è un emulatore, non un gioco.
+Gli emulatori quasi mai si installano: sono archivi scompattati dove capita, in cartelle con il
+nome che ciascuno preferisce (`D:\pcsx2 PS2 Emulator`). Kanso quindi non li aspetta in un posto
+preciso: raccoglie candidati da più parti e tiene gli eseguibili il cui nome di file è quello di
+un emulatore che conosce.
 
-Gli emulatori sono quasi sempre copie portatili scompattate dove capita: il primo modo è quello
-che funziona sempre.
+1. **Aggiunti da te** in *Impostazioni → Emulatori → Aggiungi emulatore…*: hanno la precedenza.
+2. **Programmi installati**: le cartelle che gli installer usano e quelle dichiarate
+   nell'elenco *App installate* di Windows.
+3. **Programmi avviati**: Windows tiene nel registro dell'utente due elenchi dei programmi che
+   sono stati avviati (`MuiCache` e `Compatibility Assistant\Store`). Kanso ne legge solo i
+   percorsi e tiene quelli che sono emulatori noti: il resto dell'elenco non viene conservato
+   né inviato da nessuna parte.
+4. **Ricerca sui dischi**: i dischi fissi e le cartelle Desktop, Documenti e Download, fino a
+   quattro livelli sotto la radice, un livello alla volta (prima ciò che è vicino alla radice
+   di ogni disco, poi più in profondità) e aprendo al massimo 12.000 cartelle. Sono saltate le
+   cartelle di sistema, le librerie degli store (`steamapps`, `XboxGames`, `WindowsApps`) e
+   quelle nascoste; `Program Files` è guardata solo per due livelli. Una cartella che contiene
+   un emulatore non viene esplorata oltre.
+5. **Nelle tue cartelle di giochi** (*Impostazioni → Cartelle giochi personalizzate*): un
+   emulatore trovato lì è un emulatore, non un gioco.
+6. **Ciò che le ricerche precedenti hanno trovato**, ricordato in `emulators.json` nella
+   cartella dati di Kanso (solo un elenco di percorsi).
+
+La ricerca sui dischi è quella lenta: parte alla prima scansione, quando premi *Scansiona* e
+con *Cerca sul PC* nella sezione Emulatori, non a ogni avvio. In tutti i casi Kanso legge solo
+nomi di file e cartelle: non apre, non modifica e non invia nulla.
 
 ## Come vengono trovati i giochi
 
@@ -68,8 +83,8 @@ l'emulatore tiene le impostazioni accanto all'eseguibile.
 | xemu | Xbox | `xemu.toml`, `[general] games_dir` (accanto all'eseguibile o in `%APPDATA%\xemu\xemu`) | `-dvd_path <gioco>` |
 | Snes9x | Super Nintendo | `snes9x.conf`, `[Settings\Win\Files]` `Dir:Roms` | `<gioco>` |
 | Flycast | Dreamcast, NAOMI | `emu.cfg`, `[config]` `Dreamcast.ContentPath` | `<gioco>` |
-| melonDS | Nintendo DS | — (aggiungi una cartella) | `<gioco>` |
-| mGBA | Game Boy, Game Boy Advance | — (aggiungi una cartella) | `<gioco>` |
+| melonDS | Nintendo DS | `melonDS.toml`, `LastROMFolder`: la cartella da cui hai aperto l'ultimo gioco | `<gioco>` |
+| mGBA | Game Boy, Game Boy Advance | `qt.ini`, `[mru]`: le cartelle dei giochi aperti di recente (in `%APPDATA%\mGBA`, o accanto all'eseguibile con `portable.ini`) | `<gioco>` |
 | Xenia, Xenia Canary | Xbox 360 | — (aggiungi una cartella) | `<gioco>` |
 | Mesen | NES, SNES, Game Boy, PC Engine, Master System | — (aggiungi una cartella) | `<gioco>` |
 
@@ -97,6 +112,7 @@ riconosciuto» solo dove basta passare un file.
 
 - `src-tauri/crates/kanso-core/src/emulators/mod.rs`: l'elenco degli emulatori, come si trovano
   e come si avvia un gioco.
+- `…/emulators/find.rs`: la ricerca degli emulatori sul PC.
 - `…/emulators/own_settings.rs`: la lettura delle cartelle dei giochi dalle impostazioni di
   ciascun emulatore.
 - `…/emulators/roms.rs`: quali file sono giochi e come si chiamano.

@@ -1,12 +1,12 @@
 //! The emulators of this PC, for the interface: listing them, recognising an executable,
 //! starting one, and starting a game with its emulator.
 
-use crate::{load_config, AppState};
+use crate::{load_config, resolve_app_data_dir, AppState};
 use kanso_core::emulators::{self, Emulator, EmulatorIdentity, EmulatorInfo, LaunchCommand};
 use kanso_core::playtime::path_key;
 use kanso_core::{find_emulators, now_timestamp_ms, DetectedGame, T};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
@@ -18,11 +18,17 @@ pub(crate) type SharedEmulators = Arc<Mutex<Vec<Emulator>>>;
 /// time tracker credits the game for as long as that emulator keeps running.
 pub(crate) type EmulatedSessions = Arc<Mutex<HashMap<String, (String, u64)>>>;
 
+/// Where the emulators found by the scans are remembered: a list of paths in Kanso's own
+/// data folder.
+pub(crate) fn remembered_file(app: &AppHandle) -> Option<PathBuf> {
+    resolve_app_data_dir(app).ok().map(|dir| dir.join("emulators.json"))
+}
+
 /// What the last scan found, or, before any scan, what can be told without one.
 fn known_emulators(app: &AppHandle, state: &AppState) -> Vec<Emulator> {
     let cached = state.emulators.lock().map(|list| list.clone()).unwrap_or_default();
     if cached.is_empty() {
-        find_emulators(&load_config(app))
+        find_emulators(&load_config(app), remembered_file(app).as_deref())
     } else {
         cached
     }

@@ -151,7 +151,12 @@ fn apply_language(app: &AppHandle, lang: Lang) {
 }
 
 #[tauri::command]
-async fn scan_games(app: AppHandle, state: State<'_, AppState>) -> Result<ScanReport, String> {
+async fn scan_games(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    // The user asked for this scan: emulators are searched for on the disks as well
+    thorough: Option<bool>,
+) -> Result<ScanReport, String> {
     let config_path = resolve_config_path(&app)?;
     let config = AppConfig::load_from_file(&config_path)?;
     let db = Arc::clone(&state.db);
@@ -162,9 +167,11 @@ async fn scan_games(app: AppHandle, state: State<'_, AppState>) -> Result<ScanRe
         .unwrap_or_default();
 
     let emulators = Arc::clone(&state.emulators);
+    let emulators_file = emulators::remembered_file(&app);
 
     tauri::async_runtime::spawn_blocking(move || {
-        let (raw_report, found_emulators) = scan_library(&config);
+        let (raw_report, found_emulators) =
+            scan_library(&config, emulators_file.as_deref(), thorough.unwrap_or(false));
         if let Ok(mut known) = emulators.lock() {
             *known = found_emulators;
         }
