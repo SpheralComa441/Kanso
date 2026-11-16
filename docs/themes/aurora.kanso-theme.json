@@ -24,7 +24,9 @@
     "headingWeight": 500,
     "headingUppercase": false,
     "headingSpacing": -0.01,
-    "scale": 1
+    "scale": 1,
+    "labelFont": null,
+    "labelUppercase": true
   },
   "layout": {
     "cardMinWidth": 200,
@@ -46,11 +48,33 @@
     "hover": "zoom",
     "caption": "overlay"
   },
-  "shapes": { "controlRadius": 14, "panelRadius": 24, "chipRadius": 12 },
-  "icons": { "strokeWidth": 1.75, "corners": "round", "scale": 1, "fill": 0.18 },
+  "shapes": {
+    "controlRadius": 14,
+    "panelRadius": 24,
+    "chipRadius": 12,
+    "panelShape": "rounded"
+  },
+  "icons": {
+    "strokeWidth": 1.75,
+    "corners": "round",
+    "scale": 1,
+    "fill": 0.18
+  },
   "effects": {
-    "backgroundGradient": ["#0d1026", "#1a1440", "#0c2a3a"],
+    "backgroundGradient": [
+      "#0d1026",
+      "#1a1440",
+      "#0c2a3a"
+    ],
     "backgroundAngle": 155
+  },
+  "detail": {
+    "layout": "bento",
+    "backdrop": "art",
+    "backdropBlur": 32,
+    "backdropDim": 0.45,
+    "tiles": "glass",
+    "tileGap": 16
   },
   "fontFiles": []
 }

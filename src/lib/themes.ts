@@ -5,6 +5,7 @@ import type {
   Theme,
   ThemeCards,
   ThemeColors,
+  ThemeDetail,
   ThemeEffects,
   ThemeFontFile,
   ThemeIcons,
@@ -23,6 +24,8 @@ const DEFAULT_TYPOGRAPHY: ThemeTypography = {
   headingUppercase: false,
   headingSpacing: 0,
   scale: 1,
+  labelFont: null,
+  labelUppercase: true,
 };
 const DEFAULT_LAYOUT: ThemeLayout = {
   cardMinWidth: 185,
@@ -44,9 +47,22 @@ const DEFAULT_CARDS: ThemeCards = {
   hover: "lift",
   caption: "below",
 };
-const DEFAULT_SHAPES: ThemeShapes = { controlRadius: 8, panelRadius: 12, chipRadius: 6 };
+const DEFAULT_SHAPES: ThemeShapes = {
+  controlRadius: 8,
+  panelRadius: 12,
+  chipRadius: 6,
+  panelShape: "rounded",
+};
 const DEFAULT_ICONS: ThemeIcons = { strokeWidth: 2, corners: "round", scale: 1, fill: 0 };
 const DEFAULT_EFFECTS: ThemeEffects = { backgroundGradient: [], backgroundAngle: 180 };
+const DEFAULT_DETAIL: ThemeDetail = {
+  layout: "bento",
+  backdrop: "art",
+  backdropBlur: 18,
+  backdropDim: 0.62,
+  tiles: "filled",
+  tileGap: 12,
+};
 
 /** A theme whose optional sections may be missing or partial (theme files, older data). */
 export type ThemeInput = Pick<Theme, "name" | "colors"> & {
@@ -58,9 +74,10 @@ export type ThemeInput = Pick<Theme, "name" | "colors"> & {
   typography?: Partial<ThemeTypography>;
   layout?: Partial<Record<keyof ThemeLayout, unknown>>;
   cards?: Partial<Record<keyof ThemeCards, unknown>>;
-  shapes?: Partial<ThemeShapes>;
+  shapes?: Partial<Record<keyof ThemeShapes, unknown>>;
   icons?: Partial<Record<keyof ThemeIcons, unknown>>;
   effects?: Partial<ThemeEffects>;
+  detail?: Partial<Record<keyof ThemeDetail, unknown>>;
   fontFiles?: ThemeFontFile[];
 };
 
@@ -77,90 +94,100 @@ export function withThemeDefaults(input: ThemeInput): Theme {
     typography: { ...DEFAULT_TYPOGRAPHY, ...input.typography },
     layout: { ...DEFAULT_LAYOUT, ...input.layout } as ThemeLayout,
     cards: { ...DEFAULT_CARDS, ...input.cards } as ThemeCards,
-    shapes: { ...DEFAULT_SHAPES, ...input.shapes },
+    shapes: { ...DEFAULT_SHAPES, ...input.shapes } as ThemeShapes,
     icons: { ...DEFAULT_ICONS, ...input.icons } as ThemeIcons,
     effects: { ...DEFAULT_EFFECTS, ...input.effects },
+    detail: { ...DEFAULT_DETAIL, ...input.detail } as ThemeDetail,
     fontFiles: input.fontFiles ?? [],
   };
 }
 
-function builtin(
+/*
+ * Kanso's own look, drawn from its logo: a monogram of straight strokes and diagonal cuts, in
+ * dark slate with one vivid color. The six themes below share the logo's shapes (cut
+ * corners, sharp icons, an angular face for titles) and differ in that one color, as the
+ * logo's own versions do.
+ */
+const LOGO_STYLE = {
+  fontFamily: "Manrope",
+  typography: {
+    headingFont: "Tektur",
+    headingWeight: 600,
+    headingSpacing: 0.01,
+    labelFont: "JetBrains Mono",
+    labelUppercase: true,
+  },
+  layout: { cardRadius: 10 },
+  cards: { shape: "cut", hover: "glow" },
+  shapes: { controlRadius: 4, panelRadius: 10, chipRadius: 3, panelShape: "cut" },
+  icons: { corners: "sharp" },
+} satisfies Partial<ThemeInput>;
+
+/** The slate of the logo, as a ramp of surfaces and of the text read on them. */
+const SLATE = {
+  background: "#17181f",
+  surface: "#1e2029",
+  elevated: "#282a37",
+  border: "#343747",
+  borderStrong: "#5b5f78",
+  text: "#f3f4f8",
+  textSecondary: "#d5d7e1",
+  textMuted: "#a4a8ba",
+  textFaint: "#868aa1",
+};
+
+function slate(
   slug: string,
   name: string,
   description: string,
-  colorScheme: Theme["colorScheme"],
-  colors: ThemeColors
+  accent: string,
+  accentHover: string,
+  onAccent: string
 ): Theme {
   return withThemeDefaults({
+    ...LOGO_STYLE,
     id: `${BUILTIN_PREFIX}${slug}`,
     name,
     author: "Kanso",
     description,
-    colorScheme,
-    colors,
+    colorScheme: "dark",
+    colors: { ...SLATE, accent, accentHover, onAccent },
   });
 }
 
 /**
- * Themes shipped with Kanso. The first four change colors only; Arcade and Aurora are the
- * example files of `docs/themes/` and show what an imported theme can reshape.
+ * Themes shipped with Kanso. The first six are the logo's own versions: the same slate with
+ * one color each, and the logo in ink on paper. Arcade and Aurora are the example files of
+ * `docs/themes/` and show how far an imported theme can reshape the interface.
  */
 export const BUILTIN_THEMES: Theme[] = [
-  builtin("oled", "Kanso OLED", "Deep black, amber accent.", "dark", {
-    background: "#0f0f11",
-    surface: "#16161a",
-    elevated: "#1e1e24",
-    border: "#272730",
-    borderStrong: "#52525b",
-    text: "#f4f4f5",
-    textSecondary: "#d4d4d8",
-    textMuted: "#a1a1aa",
-    textFaint: "#71717a",
-    accent: "#e5a93c",
-    accentHover: "#f0bc59",
-    onAccent: "#09090b",
-  }),
-  builtin("graphite", "Grafite", "Soft dark grey, teal accent.", "dark", {
-    background: "#1b1d21",
-    surface: "#23262b",
-    elevated: "#2c3036",
-    border: "#363a42",
-    borderStrong: "#5a606b",
-    text: "#eef0f3",
-    textSecondary: "#cfd3da",
-    textMuted: "#9aa1ad",
-    textFaint: "#737a86",
-    accent: "#4fd1c5",
-    accentHover: "#76e0d6",
-    onAccent: "#0c1f1d",
-  }),
-  builtin("nord", "Nord", "Arctic blue-grey palette.", "dark", {
-    background: "#2e3440",
-    surface: "#3b4252",
-    elevated: "#434c5e",
-    border: "#4c566a",
-    borderStrong: "#6b7890",
-    text: "#eceff4",
-    textSecondary: "#d8dee9",
-    textMuted: "#aab4c5",
-    textFaint: "#8a94a8",
-    accent: "#88c0d0",
-    accentHover: "#a3d4e2",
-    onAccent: "#2e3440",
-  }),
-  builtin("paper", "Carta", "Light theme, warm accent.", "light", {
-    background: "#f4f4f5",
-    surface: "#ffffff",
-    elevated: "#e9e9ec",
-    border: "#d9d9de",
-    borderStrong: "#a1a1aa",
-    text: "#18181b",
-    textSecondary: "#3f3f46",
-    textMuted: "#5b5b66",
-    textFaint: "#7c7c87",
-    accent: "#b7791f",
-    accentHover: "#9c6615",
-    onAccent: "#ffffff",
+  slate("ember", "Kanso Brace", "Slate and ember orange: the logo's own colors.", "#ff4500", "#ff6a33", "#0d0d10"),
+  slate("amber", "Kanso Ambra", "Slate with an amber accent.", "#f6ba1b", "#ffcf4d", "#17140a"),
+  slate("cyan", "Kanso Ciano", "Slate with a cyan accent.", "#00ffff", "#8affff", "#041a1c"),
+  // The logo's violet (#8a2be1) is too dark to read as text on slate: a lighter step of it
+  slate("violet", "Kanso Viola", "Slate with a violet accent.", "#a968f5", "#bd8af8", "#120621"),
+  slate("mint", "Kanso Menta", "Slate with a mint green accent.", "#50fb7b", "#86fda3", "#06210f"),
+  withThemeDefaults({
+    ...LOGO_STYLE,
+    id: `${BUILTIN_PREFIX}ink`,
+    name: "Kanso Inchiostro",
+    author: "Kanso",
+    description: "The logo in ink, on paper: light and monochrome.",
+    colorScheme: "light",
+    colors: {
+      background: "#f5f5f2",
+      surface: "#ffffff",
+      elevated: "#eaeae6",
+      border: "#d9d9d4",
+      borderStrong: "#9d9d98",
+      text: "#1e1e1e",
+      textSecondary: "#3a3a3a",
+      textMuted: "#595959",
+      textFaint: "#6b6b6b",
+      accent: "#1e1e1e",
+      accentHover: "#000000",
+      onAccent: "#ffffff",
+    },
   }),
   withThemeDefaults({ ...arcadeTheme, id: `${BUILTIN_PREFIX}arcade` }),
   withThemeDefaults({ ...auroraTheme, id: `${BUILTIN_PREFIX}aurora` }),
@@ -354,7 +381,7 @@ export function applyTheme(
 ): void {
   const root = document.documentElement;
   const set = (name: string, value: string) => root.style.setProperty(name, value);
-  const { typography, layout, cards, shapes, icons, effects } = theme;
+  const { typography, layout, cards, shapes, icons, effects, detail } = theme;
   const scale = typography.scale * (accessibility.textScale / 100);
   // Pixel sizes follow the interface scale, like everything sized in rem
   const px = (value: number) => `${Math.round(value * scale * 100) / 100}px`;
@@ -390,6 +417,9 @@ export function applyTheme(
   const headingFont = readableFont ? null : cssFontStack(typography.headingFont);
   set("--font-heading", headingFont ? `${headingFont}, var(--font-sans)` : "var(--font-sans)");
   set("--ui-scale", String(scale));
+  const labelFont = readableFont ? null : cssFontStack(typography.labelFont);
+  set("--font-label", labelFont ? `${labelFont}, var(--font-sans)` : "var(--font-sans)");
+  root.toggleAttribute("data-label-uppercase", typography.labelUppercase);
   set("--heading-weight", String(typography.headingWeight ?? 600));
   set("--heading-spacing", `${typography.headingSpacing}em`);
   root.toggleAttribute("data-heading-weight", typography.headingWeight !== null);
@@ -434,6 +464,14 @@ export function applyTheme(
   set("--radius-control", px(shapes.controlRadius));
   set("--radius-panel", px(shapes.panelRadius));
   set("--radius-chip", px(shapes.chipRadius));
+  root.dataset.panelShape = shapes.panelShape;
+
+  // The open sheet of a game
+  root.dataset.detailBackdrop = detail.backdrop;
+  root.dataset.detailTiles = detail.tiles;
+  set("--detail-blur", `${detail.backdropBlur}px`);
+  set("--detail-dim", `${Math.round(detail.backdropDim * 100)}%`);
+  set("--detail-gap", px(detail.tileGap));
 
   // Icons
   const sharp = icons.corners === "sharp";

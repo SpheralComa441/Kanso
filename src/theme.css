@@ -1,33 +1,35 @@
 /*
- * Kanso theme tokens — the built-in "Kanso OLED" look.
+ * Kanso theme tokens — the built-in "Kanso Brace" look: the slate and orange of the logo.
  *
  * Themes override these variables at runtime (see src/lib/themes.ts and docs/THEMES.md);
  * editing this file changes the defaults every theme starts from.
  */
 :root {
   /* Surfaces */
-  --bg-primary: #0f0f11;
-  --bg-surface: #16161a;
-  --bg-elevated: #1e1e24;
-  --border-subtle: #272730;
-  --border-strong: #52525b;
+  --bg-primary: #17181f;
+  --bg-surface: #1e2029;
+  --bg-elevated: #282a37;
+  --border-subtle: #343747;
+  --border-strong: #5b5f78;
   /* Window background: the plain color, or a theme's gradient */
   --app-background: var(--bg-primary);
 
   /* Text */
-  --text-primary: #f4f4f5;
-  --text-secondary: #d4d4d8;
-  --text-muted: #a1a1aa;
-  --text-faint: #71717a;
+  --text-primary: #f3f4f8;
+  --text-secondary: #d5d7e1;
+  --text-muted: #a4a8ba;
+  --text-faint: #868aa1;
 
-  /* Accent (warm amber-gold) and the text drawn on top of it */
-  --accent-color: #e5a93c;
-  --accent-hover: #f0bc59;
-  --accent-contrast: #09090b;
+  /* Accent (the orange of the logo) and the text drawn on top of it */
+  --accent-color: #ff4500;
+  --accent-hover: #ff6a33;
+  --accent-contrast: #0d0d10;
 
   /* Typography */
   --font-sans: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
   --font-heading: var(--font-sans);
+  /* Small labels over figures and sections */
+  --font-label: var(--font-sans);
   --heading-weight: 600;
   --heading-spacing: 0em;
   --ui-scale: 1;
@@ -55,6 +57,11 @@
   --radius-control: 8px;
   --radius-panel: 12px;
   --radius-chip: 6px;
+
+  /* The open sheet of a game: what is behind it, and the space between its tiles */
+  --detail-blur: 18px;
+  --detail-dim: 62%;
+  --detail-gap: 12px;
 
   /* Icons */
   --icon-stroke: 2;

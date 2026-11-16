@@ -126,6 +126,10 @@ pub struct ThemeTypography {
     pub heading_spacing: f64,
     /// Size of the whole interface relative to the default.
     pub scale: f64,
+    /// Font stack of the small labels over figures and sections; `None` uses the body font.
+    pub label_font: Option<String>,
+    /// Small labels in capitals, letter-spaced.
+    pub label_uppercase: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -213,6 +217,69 @@ pub struct ThemeShapes {
     pub panel_radius: u32,
     /// Badges, tags and sidebar entries.
     pub chip_radius: u32,
+    /// Corners of panels and of the tiles of a game's sheet: rounded by `panel_radius`, or
+    /// cut off diagonally by the same measure.
+    pub panel_shape: PanelShape,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PanelShape {
+    #[default]
+    Rounded,
+    /// Two opposite corners cut off diagonally.
+    Cut,
+}
+
+/// What the sheet of a game looks like when it is opened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DetailLayout {
+    /// Separate tiles: the cover, the figures, the description, each in its own.
+    #[default]
+    Bento,
+    /// One sheet: the cover on one side, everything else in a column.
+    Sheet,
+}
+
+/// What is behind the open sheet of a game.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DetailBackdrop {
+    /// The game's own artwork, blurred and veiled.
+    #[default]
+    Art,
+    /// A plain veil over the library.
+    Dim,
+}
+
+/// How the tiles of a game's sheet are filled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DetailTiles {
+    /// The surface color.
+    #[default]
+    Filled,
+    /// Translucent, with what is behind showing through blurred.
+    Glass,
+    /// The background color and a stronger border.
+    Outlined,
+}
+
+/// The open sheet of a game.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeDetail {
+    pub layout: DetailLayout,
+    pub backdrop: DetailBackdrop,
+    /// Blur of the artwork behind the sheet, in pixels.
+    pub backdrop_blur: u32,
+    /// How much of the theme's background color veils what is behind the sheet (0–1): text
+    /// stays legible over any artwork.
+    pub backdrop_dim: f64,
+    pub tiles: DetailTiles,
+    /// Space between tiles, in pixels.
+    pub tile_gap: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -295,6 +362,8 @@ pub struct Theme {
     #[serde(default)]
     pub effects: ThemeEffects,
     #[serde(default)]
+    pub detail: ThemeDetail,
+    #[serde(default)]
     pub font_files: Vec<ThemeFontFile>,
 }
 
@@ -302,13 +371,15 @@ impl ThemeColors {
     /// Kanso's own palette for the given scheme; the base every theme starts from.
     pub fn defaults(scheme: ColorScheme) -> Self {
         let colors = match scheme {
+            // The slate and the orange of Kanso's logo
             ColorScheme::Dark => [
-                "#0f0f11", "#16161a", "#1e1e24", "#272730", "#52525b", "#f4f4f5", "#d4d4d8",
-                "#a1a1aa", "#71717a", "#e5a93c", "#f0bc59", "#09090b",
+                "#17181f", "#1e2029", "#282a37", "#343747", "#5b5f78", "#f3f4f8", "#d5d7e1",
+                "#a4a8ba", "#868aa1", "#ff4500", "#ff6a33", "#0d0d10",
             ],
+            // The logo in ink, on paper
             ColorScheme::Light => [
-                "#f4f4f5", "#ffffff", "#e9e9ec", "#d9d9de", "#a1a1aa", "#18181b", "#3f3f46",
-                "#5b5b66", "#7c7c87", "#b7791f", "#9c6615", "#ffffff",
+                "#f5f5f2", "#ffffff", "#eaeae6", "#d9d9d4", "#9d9d98", "#1e1e1e", "#3a3a3a",
+                "#595959", "#6b6b6b", "#1e1e1e", "#000000", "#ffffff",
             ],
         };
         let [background, surface, elevated, border, border_strong, text, text_secondary, text_muted, text_faint, accent, accent_hover, on_accent] =
@@ -355,6 +426,8 @@ impl Default for ThemeTypography {
             heading_uppercase: false,
             heading_spacing: 0.0,
             scale: 1.0,
+            label_font: None,
+            label_uppercase: true,
         }
     }
 }
@@ -378,6 +451,20 @@ impl Default for ThemeShapes {
             control_radius: 8,
             panel_radius: 12,
             chip_radius: 6,
+            panel_shape: PanelShape::Rounded,
+        }
+    }
+}
+
+impl Default for ThemeDetail {
+    fn default() -> Self {
+        Self {
+            layout: DetailLayout::Bento,
+            backdrop: DetailBackdrop::Art,
+            backdrop_blur: 18,
+            backdrop_dim: 0.62,
+            tiles: DetailTiles::Filled,
+            tile_gap: 12,
         }
     }
 }
@@ -754,6 +841,8 @@ impl Theme {
             heading_uppercase: t.flag("headingUppercase", false)?,
             heading_spacing: t.decimal("headingSpacing", 0.0, -0.05, 0.3)?,
             scale: t.decimal("scale", 1.0, 0.85, 1.25)?,
+            label_font: t.font_stack("labelFont")?,
+            label_uppercase: t.flag("labelUppercase", true)?,
         };
 
         let l = Fields::section(&root, "layout")?;
@@ -788,6 +877,19 @@ impl Theme {
             control_radius: s.int("controlRadius", d.control_radius, 0, 24)?,
             panel_radius: s.int("panelRadius", d.panel_radius, 0, 32)?,
             chip_radius: s.int("chipRadius", d.chip_radius, 0, 16)?,
+            panel_shape: s.choice("panelShape", d.panel_shape)?,
+        };
+
+        let g = Fields::section(&root, "detail")?;
+        let d = ThemeDetail::default();
+        let detail = ThemeDetail {
+            layout: g.choice("layout", d.layout)?,
+            backdrop: g.choice("backdrop", d.backdrop)?,
+            backdrop_blur: g.int("backdropBlur", d.backdrop_blur, 0, 48)?,
+            // Never so thin that text over a bright cover cannot be read
+            backdrop_dim: g.decimal("backdropDim", d.backdrop_dim, 0.35, 0.95)?,
+            tiles: g.choice("tiles", d.tiles)?,
+            tile_gap: g.int("tileGap", d.tile_gap, 0, 28)?,
         };
 
         let i = Fields::section(&root, "icons")?;
@@ -829,6 +931,7 @@ impl Theme {
             shapes,
             icons,
             effects,
+            detail,
             font_files: parse_font_files(&root, fonts_dir)?,
         })
     }
@@ -850,6 +953,7 @@ impl Theme {
             "shapes": self.shapes,
             "icons": self.icons,
             "effects": self.effects,
+            "detail": self.detail,
             "fontFiles": self.font_files,
         });
         let mut text = serde_json::to_string_pretty(&value).unwrap_or_default();
@@ -1090,6 +1194,43 @@ mod tests {
     }
 
     #[test]
+    fn parses_the_sheet_of_a_game_and_the_small_labels() {
+        // Nothing said: the defaults
+        let plain = Theme::from_json(r#"{"name":"X","colors":{}}"#).unwrap();
+        assert_eq!(plain.detail, ThemeDetail::default());
+        assert_eq!(plain.detail.layout, DetailLayout::Bento);
+        assert_eq!(plain.detail.backdrop, DetailBackdrop::Art);
+        assert_eq!(plain.shapes.panel_shape, PanelShape::Rounded);
+        assert_eq!(plain.typography.label_font, None);
+        assert!(plain.typography.label_uppercase);
+
+        let theme = Theme::from_json(
+            r#"{"name":"X","colors":{},
+                "typography":{"labelFont":"JetBrains Mono, monospace","labelUppercase":false},
+                "shapes":{"panelShape":"cut"},
+                "detail":{"layout":"sheet","backdrop":"dim","backdropBlur":999,"backdropDim":0.05,"tiles":"glass","tileGap":40}}"#,
+        )
+        .unwrap();
+        assert_eq!(theme.typography.label_font.as_deref(), Some("JetBrains Mono, monospace"));
+        assert!(!theme.typography.label_uppercase);
+        assert_eq!(theme.shapes.panel_shape, PanelShape::Cut);
+        assert_eq!(theme.detail.layout, DetailLayout::Sheet);
+        assert_eq!(theme.detail.backdrop, DetailBackdrop::Dim);
+        assert_eq!(theme.detail.tiles, DetailTiles::Glass);
+        // Out of range: brought to the nearest limit, and the veil never so thin that text
+        // over a bright cover cannot be read
+        assert_eq!(theme.detail.backdrop_blur, 48);
+        assert_eq!(theme.detail.backdrop_dim, 0.35);
+        assert_eq!(theme.detail.tile_gap, 28);
+
+        // An exported theme spells the new sections out, and reads back the same
+        let exported = theme.to_json();
+        assert!(exported.contains("\"detail\""));
+        assert!(exported.contains("\"panelShape\": \"cut\""));
+        assert_eq!(Theme::from_json(&exported).unwrap().detail, theme.detail);
+    }
+
+    #[test]
     fn rejects_anything_that_is_not_a_plain_validated_value() {
         let bad = [
             (r#"{"colors":{}}"#, "name"),
@@ -1114,6 +1255,13 @@ mod tests {
             (r#"{"name":"X","colors":{},"effects":{"backgroundGradient":["red","blue"]}}"#, "effects.backgroundGradient"),
             (r##"{"name":"X","colors":{},"effects":{"backgroundGradient":["#000"]}}"##, "effects.backgroundGradient"),
             (r#"{"name":"X","colors":{},"effects":{"backgroundGradient":"linear-gradient(red, blue)"}}"#, "effects.backgroundGradient"),
+            (r#"{"name":"X","colors":{},"typography":{"labelFont":"a; } * { display:none"}}"#, "typography.labelFont"),
+            (r#"{"name":"X","colors":{},"shapes":{"panelShape":"polygon(0 0)"}}"#, "shapes.panelShape"),
+            (r#"{"name":"X","colors":{},"detail":{"layout":"url(https://evil.example)"}}"#, "detail.layout"),
+            (r#"{"name":"X","colors":{},"detail":{"backdrop":"https://evil.example/x.png"}}"#, "detail.backdrop"),
+            (r#"{"name":"X","colors":{},"detail":{"backdropBlur":"18px"}}"#, "detail.backdropBlur"),
+            (r#"{"name":"X","colors":{},"detail":{"tiles":"backdrop-filter: none"}}"#, "detail.tiles"),
+            (r#"{"name":"X","colors":{},"detail":"bento"}"#, "detail"),
             (r#"{"kansoTheme":3,"name":"X","colors":{}}"#, "kansoTheme"),
             (r#"["not", "a", "theme"]"#, "Tema non valido"),
             ("not json", "Tema non valido"),

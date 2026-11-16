@@ -1,9 +1,16 @@
 # Temi di Kanso / Kanso themes
 
 Un tema è un singolo file `.json` che ridisegna l'intera interfaccia: colori, font, forma di card,
-controlli e icone, disposizione e sfondo.
+controlli e icone, disposizione, sfondo e la scheda che si apre cliccando un gioco.
 *A theme is a single `.json` file that restyles the whole interface: colors, fonts, the shape of
-cards, controls and icons, layout and background.*
+cards, controls and icons, layout, background and the sheet that opens when a game is clicked.*
+
+I temi inclusi in Kanso (*Brace*, *Ambra*, *Ciano*, *Viola*, *Menta*, *Inchiostro*) nascono dal
+logo: la stessa ardesia con un colore ciascuno, angoli tagliati, icone squadrate. Sono temi come
+gli altri: tutto ciò che fanno lo può fare, o rovesciare, un file importato.
+*The themes that ship with Kanso come from its logo: the same slate with one color each, cut
+corners, sharp icons. They are themes like any other: whatever they do, an imported file can do
+or overturn.*
 
 ## Due modi di fare un tema / Two ways to make a theme
 
@@ -25,8 +32,10 @@ incorporati si definiscono nel file:
 import fail with the name of the field to fix.*
 
 Esempi / Examples: [`nord`](themes/nord.kanso-theme.json) (solo colori, formato 1),
-[`arcade`](themes/arcade.kanso-theme.json) (angoli tagliati, titoli pixel, icone squadrate),
-[`aurora`](themes/aurora.kanso-theme.json) (sfondo sfumato, forme tonde, titoli sulle copertine).
+[`arcade`](themes/arcade.kanso-theme.json) (angoli tagliati, titoli pixel, icone squadrate, scheda
+del gioco unica su velo scuro),
+[`aurora`](themes/aurora.kanso-theme.json) (sfondo sfumato, forme tonde, titoli sulle copertine,
+scheda del gioco a riquadri di vetro sopra la copertina molto sfocata).
 Arcade e Aurora sono anche inclusi nell'app.
 
 ## Installare un tema / Installing a theme
@@ -54,18 +63,18 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
   "description": "Una riga di descrizione.",
   "colorScheme": "dark",
   "colors": {
-    "background": "#0f0f11",
-    "surface": "#16161a",
-    "elevated": "#1e1e24",
-    "border": "#272730",
-    "borderStrong": "#52525b",
-    "text": "#f4f4f5",
-    "textSecondary": "#d4d4d8",
-    "textMuted": "#a1a1aa",
-    "textFaint": "#71717a",
-    "accent": "#e5a93c",
-    "accentHover": "#f0bc59",
-    "onAccent": "#09090b"
+    "background": "#17181f",
+    "surface": "#1e2029",
+    "elevated": "#282a37",
+    "border": "#343747",
+    "borderStrong": "#5b5f78",
+    "text": "#f3f4f8",
+    "textSecondary": "#d5d7e1",
+    "textMuted": "#a4a8ba",
+    "textFaint": "#868aa1",
+    "accent": "#ff4500",
+    "accentHover": "#ff6a33",
+    "onAccent": "#0d0d10"
   },
   "fontFamily": "Rubik",
   "typography": {
@@ -73,7 +82,9 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
     "headingWeight": 600,
     "headingUppercase": false,
     "headingSpacing": 0,
-    "scale": 1
+    "scale": 1,
+    "labelFont": null,
+    "labelUppercase": true
   },
   "layout": {
     "cardMinWidth": 185,
@@ -95,9 +106,17 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
     "hover": "lift",
     "caption": "below"
   },
-  "shapes": { "controlRadius": 8, "panelRadius": 12, "chipRadius": 6 },
+  "shapes": { "controlRadius": 8, "panelRadius": 12, "chipRadius": 6, "panelShape": "rounded" },
   "icons": { "strokeWidth": 2, "corners": "round", "scale": 1, "fill": 0 },
   "effects": { "backgroundGradient": [], "backgroundAngle": 180 },
+  "detail": {
+    "layout": "bento",
+    "backdrop": "art",
+    "backdropBlur": 18,
+    "backdropDim": 0.62,
+    "tiles": "filled",
+    "tileGap": 12
+  },
   "fontFiles": []
 }
 ```
@@ -154,6 +173,8 @@ Un nome può indicare:
 | `headingUppercase` | `true` / `false` | Titoli in maiuscolo |
 | `headingSpacing` | −0.05 – 0.3 | Spaziatura tra le lettere dei titoli, in em |
 | `scale` | 0.85 – 1.25 | Dimensione di tutta l'interfaccia rispetto al normale |
+| `labelFont` | — | Font delle piccole etichette sopra cifre e sezioni («Tempo di gioco», «Obiettivi»); `null` = come il testo |
+| `labelUppercase` | `true` / `false` | Piccole etichette in maiuscolo, spaziate |
 
 #### `fontFiles` — Font incorporati / Embedded fonts
 
@@ -211,6 +232,7 @@ Le misure sono in pixel. *Sizes are in pixels.*
 | `controlRadius` | 0 – 24 | Pulsanti, campi di testo, righe degli elenchi |
 | `panelRadius` | 0 – 32 | Finestre di dialogo e pannelli grandi |
 | `chipRadius` | 0 – 16 | Badge, etichette e voci del pannello laterale |
+| `panelShape` | `rounded`, `cut` | Angoli dei riquadri della scheda di un gioco: arrotondati di `panelRadius`, oppure tagliati a 45° della stessa misura in alto a destra e in basso a sinistra |
 
 ### `icons` — Icone
 
@@ -227,6 +249,25 @@ Le misure sono in pixel. *Sizes are in pixels.*
 | --- | --- | --- |
 | `backgroundGradient` | 2 o 3 colori | Sfondo sfumato della finestra; `[]` per il colore pieno `colors.background` |
 | `backgroundAngle` | 0 – 360 | Direzione della sfumatura in gradi (180 = dall'alto in basso) |
+
+### `detail` — La scheda di un gioco
+
+Ciò che si apre cliccando un gioco. Un tema ne decide la disposizione, che cosa c'è dietro e
+come sono fatti i riquadri. *What opens when a game is clicked: its layout, what is behind it and
+how its tiles look.*
+
+| Chiave / Key | Valori / Values | Significato / Meaning |
+| --- | --- | --- |
+| `layout` | `bento`, `sheet` | `bento`: riquadri separati (copertina e azioni a sinistra; titolo, ore di gioco con l'attività recente, obiettivi, descrizione a destra). `sheet`: una scheda unica con la copertina a lato e il resto in colonna |
+| `backdrop` | `art`, `dim` | Dietro la scheda: l'immagine del gioco sfocata e velata, oppure un velo scuro sopra la libreria |
+| `backdropBlur` | 0 – 48 | Sfocatura dell'immagine, in pixel |
+| `backdropDim` | 0.35 – 0.95 | Quanto del colore `background` vela ciò che sta dietro. Non scende sotto 0.35: il testo deve restare leggibile sopra qualunque copertina |
+| `tiles` | `filled`, `glass`, `outlined` | Riquadri pieni (`surface`); traslucidi, con lo sfondo che traspare sfocato; del colore di sfondo con bordo marcato |
+| `tileGap` | 0 – 28 | Spazio tra i riquadri |
+
+L'immagine dietro la scheda è sempre e solo la copertina del gioco che Kanso ha già in libreria:
+un tema sceglie *come* mostrarla, non *quale* immagine. *The image behind the sheet is always the
+cover Kanso already has for that game: a theme chooses how to show it, never which image.*
 
 ## Accessibilità e temi / Accessibility and themes
 
