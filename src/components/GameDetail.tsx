@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import { CloudDownload, Download, Eye, EyeOff, Pencil, Play, Star, X } from "lucide-react";
 import { useI18n, type I18n } from "../i18n";
 import { getPlaySessions, resolveCoverUrl } from "../lib/backend";
@@ -545,7 +545,7 @@ function BentoLayout(props: LayoutProps) {
       aria-modal="true"
       aria-labelledby="game-detail-title"
       data-detail-layout="bento"
-      className="detail-sheet detail-grid relative flex max-h-full w-full max-w-5xl"
+      className="detail-sheet motion-sheet detail-grid relative flex max-h-full w-full max-w-5xl"
     >
       {wide && (
         <div className="detail-grid scroll-area flex w-[15.5rem] shrink-0 flex-col overflow-y-auto">
@@ -642,7 +642,7 @@ function SheetLayout(props: LayoutProps) {
       aria-modal="true"
       aria-labelledby="game-detail-title"
       data-detail-layout="sheet"
-      className="detail-sheet relative flex max-h-full w-full max-w-3xl overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
+      className="detail-sheet motion-sheet relative flex max-h-full w-full max-w-3xl overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
     >
       {/* Ambient wash of the cover art behind the content */}
       {coverUrl && (
@@ -700,11 +700,59 @@ function SheetLayout(props: LayoutProps) {
   );
 }
 
-export function GameDetail({ game, layout, isTopmost, ...rest }: GameDetailProps) {
+/** How long the sheet takes to leave, as the theme and the settings say; 0 with animations off. */
+function leaveMs(): number {
+  const root = document.documentElement;
+  if (root.hasAttribute("data-reduce-motion")) return 0;
+  return parseFloat(getComputedStyle(root).getPropertyValue("--motion-base")) || 0;
+}
+
+/**
+ * The game whose sheet is on screen: the open one, or, for the moment the sheet takes to
+ * leave, the one that has just been closed (`closing`).
+ */
+function useLeaving(game: DetectedGame | null): { shown: DetectedGame | null; closing: boolean } {
+  const [last, setLast] = useState<DetectedGame | null>(game);
+  const [closing, setClosing] = useState(false);
+
+  // Before the next paint: a sheet that closes with animations off is never drawn again
+  useLayoutEffect(() => {
+    if (game) {
+      setLast(game);
+      setClosing(false);
+      return;
+    }
+    if (!last) return;
+    const wait = leaveMs();
+    if (wait <= 0) {
+      setLast(null);
+      return;
+    }
+    setClosing(true);
+    const timer = window.setTimeout(() => {
+      setLast(null);
+      setClosing(false);
+    }, wait);
+    return () => window.clearTimeout(timer);
+    // `last` is what this effect keeps: only the open game decides when it runs
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game]);
+
+  return { shown: game ?? last, closing: !game && closing };
+}
+
+export function GameDetail({ game: openGame, layout, isTopmost, ...rest }: GameDetailProps) {
   const playButtonRef = useRef<HTMLButtonElement>(null);
   const { usableCover, markBroken } = useBrokenCovers();
-  const gameId = game?.id ?? null;
+  const gameId = openGame?.id ?? null;
   const { onClose } = rest;
+  const { shown: game, closing } = useLeaving(openGame);
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  // A sheet on its way out is no longer there for the keyboard or a screen reader
+  useEffect(() => {
+    if (overlayRef.current) overlayRef.current.inert = closing;
+  }, [closing]);
 
   useEffect(() => {
     if (!gameId || !isTopmost) return;
@@ -727,12 +775,16 @@ export function GameDetail({ game, layout, isTopmost, ...rest }: GameDetailProps
 
   return (
     <div
-      className="detail-overlay below-header fixed inset-x-0 bottom-0 z-40 flex items-center justify-center overflow-hidden p-6"
+      className={`detail-overlay motion-backdrop fixed inset-0 z-40 flex items-center justify-center overflow-hidden px-6 pb-6 ${
+        closing ? "motion-closing" : ""
+      }`}
+      ref={overlayRef}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      {/* Behind the sheet: the game's artwork, blurred, under a veil of the theme's background */}
+      {/* Behind the sheet, bar included: the game's artwork, blurred, under a veil of the
+          theme's background */}
       {coverUrl && <img src={coverUrl} alt="" aria-hidden="true" className="detail-art" />}
       <div className="detail-veil" data-no-art={coverUrl ? undefined : ""} />
       <Layout

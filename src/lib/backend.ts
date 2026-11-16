@@ -34,6 +34,7 @@ import {
 import {
   DEFAULT_ACCESSIBILITY,
   withAccessibilityDefaults,
+  withAnimationsChoice,
   withThemeDefaults,
   type ThemeInput,
 } from "./themes";
@@ -51,6 +52,7 @@ const DEFAULT_CONFIG: AppConfig = {
   accessibility: DEFAULT_ACCESSIBILITY,
   trackPlaytime: true,
   plugins: {},
+  animations: "theme",
   hasGamePass: false,
   gamePassCatalog: false,
 };
@@ -134,6 +136,7 @@ export async function getSettings(): Promise<AppConfig> {
       accessibility: withAccessibilityDefaults(parsed.accessibility),
       trackPlaytime: parsed.trackPlaytime !== false,
       plugins: withPluginDefaults(parsed.plugins),
+      animations: withAnimationsChoice(parsed.animations),
       hasGamePass: parsed.hasGamePass === true,
       gamePassCatalog: parsed.gamePassCatalog === true,
     };
@@ -154,6 +157,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     accessibility: withAccessibilityDefaults(config.accessibility),
     trackPlaytime: config.trackPlaytime,
     plugins: withPluginDefaults(config.plugins),
+    animations: withAnimationsChoice(config.animations),
     hasGamePass: config.hasGamePass === true,
     gamePassCatalog: config.gamePassCatalog === true,
   };

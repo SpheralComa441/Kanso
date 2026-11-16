@@ -198,7 +198,7 @@ export function EditGameModal({
 
   return (
     <div
-      className="below-header fixed inset-x-0 bottom-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+      className="below-header fixed inset-x-0 bottom-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm motion-backdrop"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -207,7 +207,7 @@ export function EditGameModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="edit-game-modal-title"
-        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
+        className="motion-sheet flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-oled-border px-6 py-4">

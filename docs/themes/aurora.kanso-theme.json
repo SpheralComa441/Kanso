@@ -76,5 +76,11 @@
     "tiles": "glass",
     "tileGap": 16
   },
+  "motion": {
+    "level": "smooth",
+    "sheet": "rise",
+    "view": "fade",
+    "stagger": true
+  },
   "fontFiles": []
 }

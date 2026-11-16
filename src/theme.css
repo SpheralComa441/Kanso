@@ -58,6 +58,15 @@
   --radius-panel: 12px;
   --radius-chip: 6px;
 
+  /* Animations: durations, the distance things travel, how small a sheet starts, the curve */
+  --motion-fast: 130ms;
+  --motion-base: 220ms;
+  --motion-slow: 300ms;
+  --motion-distance: 14px;
+  --motion-scale: 0.975;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --motion-stagger: 18ms;
+
   /* The open sheet of a game: what is behind it, and the space between its tiles */
   --detail-blur: 18px;
   --detail-dim: 62%;

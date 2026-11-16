@@ -94,7 +94,7 @@ export function GameList({
   badges,
   runningIds,
 }: GameListProps) {
-  const { t } = useI18n();
+  const { t, duration } = useI18n();
   const { usableCover, markBroken } = useBrokenCovers();
 
   if (isScanning && totalDetected === 0) {
@@ -149,17 +149,20 @@ export function GameList({
         </div>
       ) : viewMode === "grid" ? (
         <div className="game-grid">
-          {games.map((game) => {
+          {games.map((game, index) => {
             const isLaunching = launchingId === game.id;
             const label = platformLabel(game.platform, t);
             const coverUrl = usableCover(
               resolveCoverUrl(game.coverPath, game.updatedAt)
             );
+            const actionable = game.isInstalled || canInstall(game);
 
             return (
               <article
                 key={game.id}
                 className={`game-card group ${coverUrl ? "" : "game-card-no-art"}`}
+                // Its place in the grid: cards come in one after the other
+                style={{ "--i": index } as React.CSSProperties}
               >
                 {/* 2:3 vertical cover; washed out for a game that is not on disk */}
                 <div className="game-card-cover relative w-full overflow-hidden bg-oled-bg">
@@ -176,7 +179,7 @@ export function GameList({
                       />
                     </div>
                   ) : (
-                    <div className="flex h-full w-full flex-col justify-end bg-gradient-to-b from-oled-elevated/50 to-oled-bg p-4">
+                    <div className="game-card-blank flex h-full w-full flex-col justify-end bg-gradient-to-b from-oled-elevated/50 to-oled-bg p-4">
                       <p className="line-clamp-4 text-sm font-semibold leading-snug text-zinc-300">
                         {game.title}
                       </p>
@@ -234,10 +237,37 @@ export function GameList({
                     }`}
                   />
 
-                  {/* Hover bar: play, or install through the store's client. A game that is
-                      not on disk and cannot be installed from here has no bar. */}
-                  {(game.isInstalled || canInstall(game)) && (
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/90 via-black/55 to-transparent p-3 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                  {/* Under the pointer: play, or install through the store's client, and, in
+                      themes whose cards have no caption, what matters about the game over
+                      its blurred cover. Clicks pass through to the cover, which opens the
+                      sheet; only the button takes them. */}
+                  <div className="game-card-hover pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/90 via-black/55 to-transparent p-3 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                    <div className="game-card-info space-y-1.5 text-white">
+                      <h3 className="line-clamp-3 text-sm font-semibold leading-snug">{game.title}</h3>
+                      <p className="truncate text-2xs text-white/75">
+                        {game.genres.length > 0 ? game.genres.slice(0, 3).join(" · ") : label}
+                      </p>
+                      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-white/85">
+                        <span data-card-playtime={game.id}>
+                          {!game.isInstalled
+                            ? t("game.notInstalled")
+                            : game.playtimeMinutes
+                              ? t("card.played", { time: duration(game.playtimeMinutes) })
+                              : t("card.neverPlayed")}
+                        </span>
+                        {(badges[game.id] ?? []).map((entry) => (
+                          <span
+                            key={entry.pluginId}
+                            data-badge={entry.pluginId}
+                            title={entry.tooltip ?? entry.pluginName}
+                            className="rounded-md border border-white/20 bg-white/10 px-1.5 py-0.5 tabular-nums"
+                          >
+                            {entry.text}
+                          </span>
+                        ))}
+                      </p>
+                    </div>
+                    {actionable && (
                       <button
                         id={`launch-grid-${game.id}`}
                         type="button"
@@ -262,8 +292,8 @@ export function GameList({
                               : t("common.play")}
                         </span>
                       </button>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
 
                 {/* Card caption */}

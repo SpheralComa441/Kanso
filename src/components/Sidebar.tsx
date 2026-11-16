@@ -73,7 +73,7 @@ function NavRow({ id, label, count, active, icon, onClick }: NavRowProps) {
       type="button"
       onClick={onClick}
       aria-pressed={active}
-      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors ${
+      className={`nav-item flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs ${
         active
           ? "bg-oled-elevated font-medium text-zinc-100"
           : "text-zinc-400 hover:bg-oled-surface hover:text-zinc-200"
@@ -140,7 +140,7 @@ function SectionToggle({
         aria-controls={controls}
         aria-current={active ? "page" : undefined}
         title={hint}
-        className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-3xs font-semibold uppercase tracking-[0.12em] transition-colors ${
+        className={`nav-item flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-3xs font-semibold uppercase tracking-[0.12em] ${
           active
             ? "bg-oled-elevated text-zinc-100"
             : "text-zinc-500 hover:bg-oled-surface hover:text-zinc-200"
@@ -445,7 +445,12 @@ export function Sidebar({
                 controls="sidebar-genres"
                 onClick={() => browse("genres")}
               />
-              <div id="sidebar-genres" className="space-y-0.5">
+              {/* Keyed by its state: unfolding is a new list, which comes in as such */}
+              <div
+                id="sidebar-genres"
+                key={unfolded.genres ? "open" : "closed"}
+                className="motion-list space-y-0.5"
+              >
                 {shownGenres.map((genre) => {
                   const active = inLibrary && filters.genre === genre.key;
                   return (
@@ -480,7 +485,11 @@ export function Sidebar({
               controls="sidebar-tags"
               onClick={() => browse("tags")}
             />
-            <div id="sidebar-tags" className="space-y-0.5">
+            <div
+              id="sidebar-tags"
+              key={unfolded.tags ? "open" : "closed"}
+              className="motion-list space-y-0.5"
+            >
               {shownTags.map((tag) => {
                 const active = inLibrary && filters.tag === tag.key;
                 return (

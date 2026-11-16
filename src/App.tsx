@@ -68,6 +68,7 @@ import { platformLabel } from "./lib/platforms";
 import { DEFAULT_ACCESSIBILITY, applyTheme, resolveTheme } from "./lib/themes";
 import type {
   AccessibilityConfig,
+  AnimationsChoice,
   AppConfig,
   BadgeEntry,
   DetectedGame,
@@ -86,6 +87,7 @@ const INITIAL_CONFIG: AppConfig = {
   accessibility: DEFAULT_ACCESSIBILITY,
   trackPlaytime: true,
   plugins: {},
+  animations: "theme",
   hasGamePass: false,
   gamePassCatalog: false,
 };
@@ -214,6 +216,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   /** Accessibility choices being tried in Settings, before they are saved. */
   const [previewAccessibility, setPreviewAccessibility] =
     useState<AccessibilityConfig | null>(null);
+  /** The level of animations being tried in Settings, before it is saved. */
+  const [previewAnimations, setPreviewAnimations] = useState<AnimationsChoice | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [pluginWarnings, setPluginWarnings] = useState<string[]>([]);
   /** Short labels plugins have for the game cards, by game id. */
@@ -242,8 +246,19 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     [config.themeId, userThemes]
   );
   useEffect(() => {
-    applyTheme(previewTheme ?? savedTheme, previewAccessibility ?? config.accessibility);
-  }, [previewTheme, savedTheme, previewAccessibility, config.accessibility]);
+    applyTheme(
+      previewTheme ?? savedTheme,
+      previewAccessibility ?? config.accessibility,
+      previewAnimations ?? config.animations
+    );
+  }, [
+    previewTheme,
+    savedTheme,
+    previewAccessibility,
+    config.accessibility,
+    previewAnimations,
+    config.animations,
+  ]);
 
   /* ---------------------------------------------------------------- plugins */
 
@@ -529,6 +544,19 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
   /* ------------------------------------------------------------- navigation */
 
+  /**
+   * What the content area shows, as far as the side panel decides it: when this changes the
+   * content is replaced (and animated in), while typing in the search box only narrows it.
+   */
+  const viewKey = [
+    mainView,
+    filters.collection,
+    filters.platform ?? "",
+    filters.genre ?? "",
+    filters.tag ?? "",
+    filters.status ?? "",
+  ].join("|");
+
   const showView = (view: MainView) => {
     setMainView(view);
     writeUiPreference(MAIN_VIEW_PREF_KEY, view);
@@ -739,6 +767,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           Number(isSettingsOpen) +
           Number(Boolean(commandRun))
         }
+        sheetOpen={Boolean(detailGame)}
         settingsDisabled={themeEditorBase !== null}
         onScan={() => void performScan(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -776,6 +805,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
             </div>
           )}
 
+          {/* Another entry of the side panel: the content is new, and comes in as such */}
+          <div key={viewKey} className="motion-view space-y-4">
           {mainView === "home" ? (
             <DealsView
               ownedSteamAppIds={ownedSteamAppIds}
@@ -898,6 +929,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
               />
             </>
           )}
+          </div>
         </main>
       </div>
 
@@ -971,6 +1003,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onThemesChanged={reloadThemes}
         onPreviewTheme={setPreviewTheme}
         onPreviewAccessibility={setPreviewAccessibility}
+        onPreviewAnimations={setPreviewAnimations}
         onCustomizeTheme={(theme) => {
           // The editor is a side panel: close the dialog so the app shows the draft live
           setIsSettingsOpen(false);

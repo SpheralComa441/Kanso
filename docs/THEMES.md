@@ -6,11 +6,13 @@ controlli e icone, disposizione, sfondo e la scheda che si apre cliccando un gio
 cards, controls and icons, layout, background and the sheet that opens when a game is clicked.*
 
 I temi inclusi in Kanso (*Brace*, *Ambra*, *Ciano*, *Viola*, *Menta*, *Inchiostro*) nascono dal
-logo: la stessa ardesia con un colore ciascuno, angoli tagliati, icone squadrate. Sono temi come
+logo per i colori: la stessa ardesia con un colore ciascuno. Hanno forme tonde, copertine senza
+didascalia che raccontano il gioco al passaggio del mouse, e animazioni fluide. Sono temi come
 gli altri: tutto ciò che fanno lo può fare, o rovesciare, un file importato.
-*The themes that ship with Kanso come from its logo: the same slate with one color each, cut
-corners, sharp icons. They are themes like any other: whatever they do, an imported file can do
-or overturn.*
+*The themes that ship with Kanso take their colors from its logo: the same slate with one color
+each. They have rounded shapes, covers without a caption that tell about the game under the
+pointer, and smooth animations. They are themes like any other: whatever they do, an imported
+file can do or overturn.*
 
 ## Due modi di fare un tema / Two ways to make a theme
 
@@ -33,7 +35,7 @@ import fail with the name of the field to fix.*
 
 Esempi / Examples: [`nord`](themes/nord.kanso-theme.json) (solo colori, formato 1),
 [`arcade`](themes/arcade.kanso-theme.json) (angoli tagliati, titoli pixel, icone squadrate, scheda
-del gioco unica su velo scuro),
+del gioco unica su velo scuro, animazioni vivaci),
 [`aurora`](themes/aurora.kanso-theme.json) (sfondo sfumato, forme tonde, titoli sulle copertine,
 scheda del gioco a riquadri di vetro sopra la copertina molto sfocata).
 Arcade e Aurora sono anche inclusi nell'app.
@@ -117,6 +119,7 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
     "tiles": "filled",
     "tileGap": 12
   },
+  "motion": { "level": "smooth", "sheet": "rise", "view": "rise", "stagger": true },
   "fontFiles": []
 }
 ```
@@ -223,7 +226,7 @@ Le misure sono in pixel. *Sizes are in pixels.*
 | `borderWidth` | 0 – 4 | Spessore del bordo |
 | `shadow` | `none`, `soft`, `strong`, `glow` | Ombra a riposo; `glow` è un alone nel colore d'accento. Con `cut` e `slant` l'ombra non è disponibile |
 | `hover` | `lift`, `zoom`, `glow`, `none` | Al passaggio del mouse: la card si solleva; la copertina si ingrandisce; bordo e alone d'accento; nessun effetto |
-| `caption` | `below`, `overlay`, `none` | Titolo e generi sotto la copertina; sopra la parte bassa della copertina; solo copertina |
+| `caption` | `below`, `overlay`, `hover`, `none` | Titolo e generi sotto la copertina; sopra la parte bassa della copertina; solo copertina, che al passaggio del mouse (o con il fuoco da tastiera) si sfoca e mostra titolo, generi, ore giocate e le etichette dei plugin; solo copertina |
 
 ### `shapes` — Controlli e pannelli
 
@@ -269,12 +272,30 @@ L'immagine dietro la scheda è sempre e solo la copertina del gioco che Kanso ha
 un tema sceglie *come* mostrarla, non *quale* immagine. *The image behind the sheet is always the
 cover Kanso already has for that game: a theme chooses how to show it, never which image.*
 
+### `motion` — Animazioni
+
+Come si muove l'interfaccia. *How the interface moves.*
+
+| Chiave / Key | Valori / Values | Significato / Meaning |
+| --- | --- | --- |
+| `level` | `none`, `subtle`, `smooth`, `lively` | Quanto: niente; dissolvenze brevi; dissolvenze con un piccolo movimento; movimenti più lunghi e ampi, con un leggero rimbalzo |
+| `sheet` | `rise`, `zoom`, `slide`, `fade` | Come entrano la scheda di un gioco e le finestre di dialogo: dal basso, ingrandendosi, di lato, in dissolvenza |
+| `view` | `rise`, `slide`, `fade` | Come cambia il contenuto scegliendo un'altra voce del pannello laterale |
+| `stagger` | `true` / `false` | Le card entrano una dopo l'altra quando si apre una vista |
+
+Un tema sceglie tra questi nomi: non può definire animazioni proprie né tempi arbitrari. L'utente
+può cambiare `level` da *Impostazioni → Animazioni* (Tema, Nessuna, Leggere, Fluide, Vivaci) senza
+toccare il tema, e l'opzione di accessibilità «Riduci le animazioni» le spegne sempre.
+*A theme picks among these names: it cannot define animations or timings of its own. The user can
+override `level` in Settings without touching the theme, and "Reduce motion" always switches
+them off.*
+
 ## Accessibilità e temi / Accessibility and themes
 
 Le preferenze di *Impostazioni → Accessibilità* prevalgono sul tema: la dimensione del testo
 moltiplica `typography.scale`, il contrasto elevato rende più forti i colori di testo e bordi, un
 font ad alta leggibilità sostituisce `fontFamily` e `headingFont`, le barre di scorrimento possono
-essere forzate visibili. Un tema non può disattivarle. *The user's accessibility preferences win
+essere forzate visibili, «Riduci le animazioni» spegne `motion`. Un tema non può disattivarle. *The user's accessibility preferences win
 over the theme and cannot be switched off by it.*
 
 ## Sicurezza / Safety

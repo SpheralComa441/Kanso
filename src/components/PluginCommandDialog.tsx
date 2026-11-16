@@ -64,7 +64,7 @@ export function PluginCommandDialog({
 
   return (
     <div
-      className="below-header fixed inset-x-0 bottom-0 z-40 flex items-center justify-center bg-black/75 p-6 backdrop-blur-sm"
+      className="below-header fixed inset-x-0 bottom-0 z-40 flex items-center justify-center bg-black/75 p-6 backdrop-blur-sm motion-backdrop"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -74,7 +74,7 @@ export function PluginCommandDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="plugin-command-title"
-        className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
+        className="motion-sheet flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
       >
         <div className="flex shrink-0 items-center justify-between gap-4 border-b border-oled-border px-6 py-4">
           <h2 id="plugin-command-title" className="text-base font-semibold text-zinc-100">
