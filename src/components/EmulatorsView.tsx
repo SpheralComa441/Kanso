@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ArrowLeft, FolderOpen, Play, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, FolderOpen, Play, ScanSearch, SlidersHorizontal } from "lucide-react";
 import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
@@ -18,6 +18,8 @@ interface EmulatorsViewProps {
   /** Opens the emulator itself, with no game. */
   onLaunchEmulator: (emulator: EmulatorInfo) => void;
   onOpenSettings: () => void;
+  /** Scans again, searching the disks for emulators. */
+  onSearch: () => void;
   /** Narrows the games of the open emulator. */
   searchQuery: string;
 
@@ -51,6 +53,7 @@ export function EmulatorsView({
   onOpen,
   onLaunchEmulator,
   onOpenSettings,
+  onSearch,
   searchQuery,
   ...list
 }: EmulatorsViewProps) {
@@ -188,15 +191,28 @@ export function EmulatorsView({
             </span>
           )}
         </div>
-        <button
-          id="manage-emulators-button"
-          type="button"
-          onClick={onOpenSettings}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-oled-elevated"
-        >
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          <span>{t("emulators.manage")}</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            id="search-emulators-button"
+            type="button"
+            onClick={onSearch}
+            disabled={list.isScanning}
+            title={t("emulators.searchHint")}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-oled-elevated disabled:opacity-60"
+          >
+            <ScanSearch className={`h-3.5 w-3.5 ${list.isScanning ? "animate-pulse" : ""}`} />
+            <span>{t(list.isScanning ? "emulators.searching" : "emulators.search")}</span>
+          </button>
+          <button
+            id="manage-emulators-button"
+            type="button"
+            onClick={onOpenSettings}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 text-xs font-medium text-zinc-300 transition-colors hover:bg-oled-elevated"
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            <span>{t("emulators.manage")}</span>
+          </button>
+        </div>
       </header>
 
       {emulators.length === 0 ? (

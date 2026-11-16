@@ -104,6 +104,27 @@ pub fn read_registry_subkeys(_hive: RegistryHive, _path: &str) -> Vec<RegistryEn
     Vec::new()
 }
 
+/// The names of the values directly under `path`, whatever they hold. A missing key yields
+/// nothing.
+#[cfg(target_os = "windows")]
+pub fn read_registry_value_names(hive: RegistryHive, path: &str) -> Vec<String> {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
+    let root = RegKey::predef(match hive {
+        RegistryHive::LocalMachine => HKEY_LOCAL_MACHINE,
+        RegistryHive::CurrentUser => HKEY_CURRENT_USER,
+    });
+    root.open_subkey(path)
+        .map(|key| key.enum_values().flatten().map(|(name, _)| name).collect())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn read_registry_value_names(_hive: RegistryHive, _path: &str) -> Vec<String> {
+    Vec::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

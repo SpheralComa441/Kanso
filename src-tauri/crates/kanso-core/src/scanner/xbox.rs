@@ -49,7 +49,7 @@ pub fn detect_xbox_game_roots() -> Vec<PathBuf> {
 /// optical drives and network shares are skipped: probing them can block for seconds or make
 /// Windows ask to insert a disk.
 #[cfg(target_os = "windows")]
-fn fixed_drive_roots() -> Vec<PathBuf> {
+pub fn fixed_drive_roots() -> Vec<PathBuf> {
     use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
 
     /// `DRIVE_FIXED` from `fileapi.h`.
@@ -72,6 +72,12 @@ fn fixed_drive_roots() -> Vec<PathBuf> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn detect_xbox_game_roots() -> Vec<PathBuf> {
+    Vec::new()
+}
+
+/// Roots of the fixed disks; none where there are no drive letters.
+#[cfg(not(target_os = "windows"))]
+pub fn fixed_drive_roots() -> Vec<PathBuf> {
     Vec::new()
 }
 

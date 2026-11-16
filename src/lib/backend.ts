@@ -187,9 +187,10 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
   return sanitized;
 }
 
-export async function scanGames(): Promise<ScanReport> {
+export async function scanGames(thorough = false): Promise<ScanReport> {
   if (isTauri()) {
-    return invoke<ScanReport>("scan_games");
+    // `thorough`: the user asked for it, so the disks are searched for emulators as well
+    return invoke<ScanReport>("scan_games", { thorough });
   }
 
   return { games: [...previewGamesState], warnings: [] };

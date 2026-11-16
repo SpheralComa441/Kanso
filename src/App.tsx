@@ -415,7 +415,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       setIsScanning(true);
       setStatusMessage(null);
       try {
-        const res = await scanGames();
+        // A scan the user asked for also searches the disks for emulators
+        const res = await scanGames(userRequested);
         setReport(res);
         // The scan is what finds the emulators kept in the user's games folders
         void listEmulators().then(setEmulators).catch(() => {});
@@ -873,6 +874,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                 );
               }}
               onOpenSettings={() => setIsSettingsOpen(true)}
+              onSearch={() => void performScan(true)}
               searchQuery={searchQuery}
               viewMode={viewMode}
               isScanning={isScanning}

@@ -605,7 +605,7 @@ fn nexus_mods_counts_the_mods_of_a_game_without_naming_it_to_anyone() {
         status(200, &nexus_list())
     });
     let plugin = plugin("nexus-mods");
-    assert_eq!(plugin.manifest.hosts, ["data.nexusmods.com"]);
+    assert_eq!(plugin.manifest.hosts, ["data.nexusmods.com", "api.nexusmods.com"]);
     assert!(!is_enabled(&plugin, &AppConfig::default()), "it contacts a new site: the user turns it on");
     let config = config_with("nexus-mods", &[]);
 
@@ -653,11 +653,100 @@ fn nexus_mods_counts_the_mods_of_a_game_without_naming_it_to_anyone() {
     assert_eq!(bench.transport.urls().len(), 1);
 }
 
+/// What Nexus Mods' public API answers a search with, shaped as its schema says.
+fn nexus_api_answer(request: &HttpRequest, games: &[(&str, &str, u32)]) -> String {
+    let body: serde_json::Value = serde_json::from_str(request.body.as_deref().expect("a body")).expect("json");
+    let query = body["query"].as_str().expect("a query");
+    assert!(query.contains("games(filter: { name: [{ value: $n0, op: ") && query.contains("nodes { name domainName modCount }"), "{query}");
+    let nodes: Vec<serde_json::Value> = games
+        .iter()
+        .map(|(name, domain, mods)| json!({"name": name, "domainName": domain, "modCount": mods}))
+        .collect();
+    // One alias per name searched for: the first finds the games, the others nothing
+    let mut data = serde_json::Map::new();
+    for index in 0..body["variables"].as_object().expect("variables").len() {
+        data.insert(format!("s{index}"), json!({"nodes": if index == 0 { nodes.clone() } else { Vec::new() }}));
+    }
+    json!({"data": data}).to_string()
+}
+
 #[test]
-fn nexus_mods_says_so_when_the_list_cannot_be_read() {
+fn nexus_mods_asks_about_the_one_game_when_the_list_is_missing() {
+    let bench = Bench::new(|request| {
+        if request.url == "https://data.nexusmods.com/file/nexus-data/games.json" {
+            // As seen in the wild: the public file answering "not found" for an hour and more
+            return status(404, "<!doctype html><title>Not Found</title>");
+        }
+        assert_eq!((request.method.as_str(), request.url.as_str()), ("POST", "https://api.nexusmods.com/v2/graphql"));
+        let header = |name: &str| request.headers.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value.as_str());
+        assert_eq!((header("Application-Name"), header("Content-Type")), (Some("Kanso"), Some("application/json")));
+        assert!(header("Authorization").is_none() && header("apikey").is_none(), "no account, no key");
+        let body = request.body.as_deref().unwrap_or_default();
+        if body.contains("Witcher") {
+            assert!(body.contains("*The Witcher 3: Wild Hunt*") || body.contains("\"The Witcher 3: Wild Hunt\""), "{body}");
+            status(200, &nexus_api_answer(request, &[("The Witcher 2", "witcher2", 660), ("The Witcher 3: Wild Hunt", "witcher3", 10935)]))
+        } else if body.contains("Celeste") {
+            status(200, &nexus_api_answer(request, &[]))
+        } else {
+            status(200, &nexus_api_answer(request, &[("Skyrim", "skyrim", 73225), ("Skyrim Special Edition", "skyrimspecialedition", 144507)]))
+        }
+    });
+    let plugin = plugin("nexus-mods");
+    let config = config_with("nexus-mods", &[]);
+
+    let witcher = other_game("gog:w3", "The Witcher 3: Wild Hunt");
+    let data = bench.details(&plugin, &config, Lang::It, &witcher);
+    assert_eq!(stat(&data, "Mod disponibili"), Some("10.935"));
+    assert_eq!(links(&data), ["https://www.nexusmods.com/games/witcher3/mods"]);
+    assert_eq!(
+        bench.transport.urls(),
+        ["https://data.nexusmods.com/file/nexus-data/games.json", "https://api.nexusmods.com/v2/graphql"],
+        "the list first; the API only because there is none"
+    );
+
+    // The missing list is not asked for again at every game
+    let mut skyrim = steam_game("489830", "The Elder Scrolls V: Skyrim Special Edition");
+    skyrim.clean_title = "The Elder Scrolls V: Skyrim".to_string();
+    let data = bench.details(&plugin, &config, Lang::It, &skyrim);
+    assert_eq!(links(&data), ["https://www.nexusmods.com/games/skyrimspecialedition/mods"], "the edition, not the 2011 game");
+    assert_eq!(bench.transport.urls().len(), 3, "{:?}", bench.transport.urls());
+
+    // A game Nexus Mods does not know: both ways of searching are tried, then nothing is shown
+    let answer = bench.engine.game_data(&bench.db, &plugin, &config, Lang::It, &other_game("gog:c", "Celeste"), true, 2_000);
+    assert!(answer.error.is_none() && answer.data.is_none_or(|data| data.is_empty()));
+    assert_eq!(bench.transport.urls().len(), 5);
+}
+
+#[test]
+fn nexus_mods_uses_an_old_list_rather_than_name_a_game() {
+    let fail = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let failing = Arc::clone(&fail);
+    let bench = Bench::new(move |request| {
+        assert_eq!(request.url, "https://data.nexusmods.com/file/nexus-data/games.json", "never the API while a list is kept");
+        if failing.load(std::sync::atomic::Ordering::SeqCst) {
+            status(404, "gone")
+        } else {
+            status(200, &nexus_list())
+        }
+    });
+    let plugin = plugin("nexus-mods");
+    let config = config_with("nexus-mods", &[]);
+    assert_eq!(links(&bench.details(&plugin, &config, Lang::It, &other_game("gog:f4", "Fallout 4"))), ["https://www.nexusmods.com/games/fallout4/mods"]);
+
+    // The file disappears; the list kept from before answers, whatever its age
+    fail.store(true, std::sync::atomic::Ordering::SeqCst);
+    let data = bench.details(&plugin, &config, Lang::It, &other_game("gog:bg3", "Baldur's Gate 3"));
+    assert_eq!(stat(&data, "Mod disponibili"), Some("20.495"));
+    assert_eq!(bench.transport.urls().len(), 1, "within the week the kept list is not even checked");
+}
+
+#[test]
+fn nexus_mods_says_so_when_neither_the_list_nor_the_api_answers() {
     let bench = Bench::new(|_| status(503, "busy"));
     let plugin = plugin("nexus-mods");
     let config = config_with("nexus-mods", &[]);
     let answer = bench.engine.game_data(&bench.db, &plugin, &config, Lang::It, &other_game("gog:f4", "Fallout 4"), true, 1_000);
-    assert!(answer.error.is_some() && answer.data.is_none(), "an error, not an empty section");
+    assert!(answer.data.is_none(), "an error, not an empty section");
+    let error = answer.error.expect("an error");
+    assert!(error.contains("HTTP 503") && error.contains("list of games") && error.contains("API"), "it says what failed: {error}");
 }
