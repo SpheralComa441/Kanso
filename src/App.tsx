@@ -71,7 +71,7 @@ import {
   type LibraryCollection,
   type LibraryFilters,
 } from "./lib/library";
-import { isEmulated, platformLabel } from "./lib/platforms";
+import { isEmulated, platformLabel, uninstallMode } from "./lib/platforms";
 import { CARD_INFO_DEFAULT } from "./lib/cardInfo";
 import { DEFAULT_ACCESSIBILITY, applyTheme, resolveTheme } from "./lib/themes";
 import type {
@@ -1086,7 +1086,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onSetGenres={handleSetGenres}
         onUninstall={(game) => {
           uninstallGame(game)
-            .then(() => setStatusMessage(t("app.uninstallSent", { client: platformLabel(game.platform, t) })))
+            .then(() =>
+              setStatusMessage(
+                t(uninstallMode(game) === "uninstall" ? "app.uninstallSent" : "app.uninstallOpened", {
+                  client: game.platform === "xbox" ? "Windows" : platformLabel(game.platform, t),
+                })
+              )
+            )
             .catch((err) =>
               setStatusMessage(typeof err === "string" ? err : err instanceof Error ? err.message : t("app.statusError"))
             );

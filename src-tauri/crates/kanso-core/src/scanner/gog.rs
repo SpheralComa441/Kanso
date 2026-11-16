@@ -56,7 +56,7 @@ pub fn scan_gog_from_entries(entries: &[RegistryEntry]) -> SourceScanOutput {
             (full_path, _) => Some(full_path.to_string()),
         };
 
-        output.games.push(DetectedGame::new_detected(
+        let mut game = DetectedGame::new_detected(
             format!("gog:{game_id}"),
             name.to_string(),
             clean_game_title(name),
@@ -65,7 +65,10 @@ pub fn scan_gog_from_entries(entries: &[RegistryEntry]) -> SourceScanOutput {
             install_dir.to_string(),
             exe,
             None,
-        ));
+        );
+        // GOG writes the version it installed next to the game's other values
+        game.version = super::plain_version(entry.get("ver"));
+        output.games.push(game);
     }
 
     output

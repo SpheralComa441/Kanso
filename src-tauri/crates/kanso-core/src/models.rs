@@ -299,13 +299,20 @@ impl DetectedGame {
             .platform_app_id
             .as_deref()
             .map(str::trim)
-            .filter(|id| !id.is_empty())?;
+            .filter(|id| !id.is_empty());
+        let numeric = |id: &&str| id.bytes().all(|b| b.is_ascii_digit());
         match self.platform {
-            GamePlatform::Steam => app_id
-                .bytes()
-                .all(|b| b.is_ascii_digit())
-                .then(|| format!("steam://uninstall/{app_id}")),
-            _ => None,
+            // Two clients take the request and ask for confirmation themselves
+            GamePlatform::Steam => app_id.filter(numeric).map(|id| format!("steam://uninstall/{id}")),
+            GamePlatform::Ubisoft => app_id.filter(numeric).map(|id| format!("uplay://uninstall/{id}")),
+            // The others have no such request: the game, or the library, is opened in the
+            // client (for Xbox games, the installed apps of Windows) to uninstall it there
+            GamePlatform::Gog => app_id.filter(numeric).map(|id| format!("goggalaxy://openGameView/{id}")),
+            GamePlatform::Epic => Some("com.epicgames.launcher://store/library".to_string()),
+            GamePlatform::Ea => Some("origin2://library/open".to_string()),
+            GamePlatform::BattleNet => Some("battlenet://".to_string()),
+            GamePlatform::Xbox => Some("ms-settings:appsfeatures".to_string()),
+            GamePlatform::Standalone | GamePlatform::Emulator => None,
         }
     }
 

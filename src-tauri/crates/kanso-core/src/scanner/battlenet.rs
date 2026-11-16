@@ -151,7 +151,7 @@ pub fn scan_battlenet_from_entries(entries: &[RawUninstallEntry]) -> SourceScanO
             continue;
         }
 
-        output.games.push(DetectedGame::new_detected(
+        let mut game = DetectedGame::new_detected(
             id,
             display_name.to_string(),
             clean_game_title(display_name),
@@ -160,7 +160,11 @@ pub fn scan_battlenet_from_entries(entries: &[RawUninstallEntry]) -> SourceScanO
             install_location.to_string(),
             exe_path,
             None,
-        ));
+        );
+        game.version = std::fs::read_to_string(Path::new(install_location).join(".build.info"))
+            .ok()
+            .and_then(|info| version_in_build_info(&info));
+        output.games.push(game);
     }
 
     output
@@ -393,5 +397,29 @@ mod tests {
             Path::new(cod.executable_path.as_deref().unwrap()),
             cod_dir.join("cod.exe")
         );
+    }
+}
+
+/// The version of a Blizzard game, from the `.build.info` its client keeps in the game's
+/// folder: a table with columns separated by `|`, one of them named `Version!STRING:0`.
+fn version_in_build_info(info: &str) -> Option<String> {
+    let mut lines = info.lines().filter(|line| !line.trim().is_empty());
+    let column = lines.next()?.split('|').position(|name| name.trim().starts_with("Version!"))?;
+    // The row of the build in use comes first
+    super::plain_version(lines.next()?.split('|').nth(column)?)
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::version_in_build_info;
+
+    #[test]
+    fn reads_the_version_from_blizzard_s_build_info() {
+        let info = "Branch!STRING:0|Active!DEC:1|Build Key!HEX:16|Version!STRING:0|Product!STRING:0\nus|1|abcdef|16.3.41150|hero\neu|0|abcdef|16.2.40000|hero\n";
+        assert_eq!(version_in_build_info(info).as_deref(), Some("16.3.41150"));
+        assert_eq!(version_in_build_info("Branch!STRING:0|Active!DEC:1\nus|1\n"), None, "no such column");
+        assert_eq!(version_in_build_info("Branch!STRING:0|Version!STRING:0\n"), None, "no row");
+        assert_eq!(version_in_build_info("Branch!STRING:0|Version!STRING:0\nus\n"), None, "a short row");
+        assert_eq!(version_in_build_info(""), None);
     }
 }

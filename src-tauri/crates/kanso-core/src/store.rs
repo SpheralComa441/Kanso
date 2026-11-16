@@ -923,6 +923,44 @@ mod tests {
     }
 
     #[test]
+    fn uninstalling_is_asked_of_the_game_s_client_or_done_there() {
+        let game = |platform: GamePlatform, app_id: Option<&str>| {
+            DetectedGame::new_detected(
+                "x:1".to_string(),
+                "X".to_string(),
+                "X".to_string(),
+                platform,
+                app_id.map(str::to_string),
+                "/games/x".to_string(),
+                Some("/games/x/x.exe".to_string()),
+                None,
+            )
+        };
+        let uri = |platform: GamePlatform, app_id: Option<&str>| game(platform, app_id).uninstall_uri();
+
+        // The two clients that take the request
+        assert_eq!(uri(GamePlatform::Steam, Some("620")).as_deref(), Some("steam://uninstall/620"));
+        assert_eq!(uri(GamePlatform::Ubisoft, Some("635")).as_deref(), Some("uplay://uninstall/635"));
+        // The others: the game or the library in the client, or the apps of Windows
+        assert_eq!(uri(GamePlatform::Gog, Some("1207664643")).as_deref(), Some("goggalaxy://openGameView/1207664643"));
+        assert_eq!(uri(GamePlatform::Epic, Some("Fortnite")).as_deref(), Some("com.epicgames.launcher://store/library"));
+        assert_eq!(uri(GamePlatform::Ea, None).as_deref(), Some("origin2://library/open"));
+        assert_eq!(uri(GamePlatform::BattleNet, Some("Diablo IV")).as_deref(), Some("battlenet://"));
+        assert_eq!(uri(GamePlatform::Xbox, Some("Microsoft.624F8B84B80")).as_deref(), Some("ms-settings:appsfeatures"));
+        // Nothing is built from an id that is not what the client knows the game by
+        assert_eq!(uri(GamePlatform::Steam, Some("620; rm -rf")), None);
+        assert_eq!(uri(GamePlatform::Steam, None), None);
+        assert_eq!(uri(GamePlatform::Gog, Some("../x")), None);
+        // A loose program or a game file has no client: Kanso deletes nothing itself
+        assert_eq!(uri(GamePlatform::Standalone, None), None);
+        assert_eq!(uri(GamePlatform::Emulator, Some("dolphin")), None);
+        // What is not installed cannot be uninstalled
+        let mut absent = game(GamePlatform::Steam, Some("620"));
+        absent.is_installed = false;
+        assert_eq!(absent.uninstall_uri(), None);
+    }
+
+    #[test]
     fn install_addresses_exist_only_for_stores_that_can_be_asked() {
         let game = |platform: GamePlatform, app_id: Option<&str>, launch_uri: Option<&str>| {
             DetectedGame::new_detected(

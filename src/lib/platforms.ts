@@ -92,7 +92,15 @@ export function uninstallMode(game: DetectedGame): "uninstall" | "client" | null
   const appId = game.platformAppId?.trim() ?? "";
   switch (game.platform) {
     case "steam":
+    case "ubisoft":
       return /^\d+$/.test(appId) ? "uninstall" : null;
+    case "gog":
+      return /^\d+$/.test(appId) ? "client" : null;
+    case "epic":
+    case "ea":
+    case "Battle.net":
+    case "xbox":
+      return "client";
     default:
       return null;
   }

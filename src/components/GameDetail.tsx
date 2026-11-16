@@ -339,9 +339,14 @@ function Actions({
   const canLaunch = game.isInstalled ? Boolean(game.launchUri || game.executablePath) : canInstall(game);
   const hideLabel = game.isHidden ? t("detail.unhide") : t("detail.hide");
   const removal = uninstallMode(game);
-  const removalHelp = t(removal === "client" ? "detail.uninstallInClient" : "detail.uninstallHelp", {
-    client: platformLabel(game.platform, t),
-  });
+  const removalHelp = t(
+    removal !== "client"
+      ? "detail.uninstallHelp"
+      : game.platform === "xbox"
+        ? "detail.uninstallInWindows"
+        : "detail.uninstallInClient",
+    { client: platformLabel(game.platform, t) }
+  );
   const secondary =
     "inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-medium transition-colors";
 

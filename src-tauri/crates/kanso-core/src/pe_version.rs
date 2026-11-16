@@ -82,7 +82,7 @@ fn directory_entry(file: &mut File, directory: u64, wanted: Option<u32>) -> Opti
     let header = read_at(file, directory, 16)?;
     let entries = usize::from(u16_at(&header, 12)?) + usize::from(u16_at(&header, 14)?);
     let table = read_at(file, directory + 16, entries.min(4096) * 8)?;
-    table.chunks_exact(8).find_map(|entry| {
+    table.as_chunks::<8>().0.iter().find_map(|entry| {
         let id = u32_at(entry, 0)?;
         let target = u32_at(entry, 4)?;
         match wanted {
@@ -123,7 +123,9 @@ pub fn file_version(path: &Path) -> Option<FileVersion> {
 
     let table = read_at(&mut file, pe + 24 + optional_size as u64, section_count * 40)?;
     let sections: Vec<Section> = table
-        .chunks_exact(40)
+        .as_chunks::<40>()
+        .0
+        .iter()
         .filter_map(|section| {
             Some(Section {
                 virtual_size: u32_at(section, 8)?,
