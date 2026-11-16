@@ -1,7 +1,9 @@
 //! The game files in an emulator's folders: which files count, and what to call them.
 
+use super::special::sfo_value;
 use crate::cleaner::clean_game_title;
 use std::collections::{BTreeMap, HashSet};
+use std::fs;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -62,6 +64,51 @@ pub fn rom_title(file_stem: &str) -> String {
     } else {
         title
     }
+}
+
+/// File names that say nothing about the game: the boot file every game of a console has.
+const BOOT_FILES: [&str; 4] = ["eboot", "boot", "default", "main"];
+/// Folders that belong to the layout of a game rather than to its name.
+const LAYOUT_FOLDERS: [&str; 4] = ["usrdir", "ps3_game", "image0", "sce_sys"];
+/// A title file is a few kilobytes: anything larger is not read.
+const MAX_SFO_BYTES: u64 = 1024 * 1024;
+
+/// The `TITLE` of a PlayStation title file, when `path` is a small file of that kind.
+pub fn sfo_title_of(path: &Path) -> Option<String> {
+    let size = fs::metadata(path).ok().filter(|meta| meta.is_file())?.len();
+    if size > MAX_SFO_BYTES {
+        return None;
+    }
+    sfo_value(&fs::read(path).ok()?, "TITLE")
+}
+
+/// What to call the game a file is.
+///
+/// Usually its file name says it (see [`rom_title`]). A console's boot file does not: every
+/// PlayStation game is an `eboot.bin`, every extracted Xbox 360 game a `default.xex`. Such a
+/// game is named by the title file next to it (`sce_sys/param.sfo`, `PARAM.SFO`) or, without
+/// one, by the folder it is in.
+pub fn game_title(file: &Path) -> String {
+    let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+    if !BOOT_FILES.iter().any(|name| stem.eq_ignore_ascii_case(name)) {
+        return rom_title(stem);
+    }
+    let Some(dir) = file.parent() else {
+        return rom_title(stem);
+    };
+    let title_files = [
+        Some(dir.join("sce_sys").join("param.sfo")),
+        Some(dir.join("PARAM.SFO")),
+        dir.parent().map(|above| above.join("PARAM.SFO")),
+    ];
+    if let Some(title) = title_files.iter().flatten().find_map(|path| sfo_title_of(path)) {
+        return title;
+    }
+    dir.ancestors()
+        .filter_map(|folder| folder.file_name().and_then(|name| name.to_str()))
+        .find(|name| !LAYOUT_FOLDERS.iter().any(|layout| name.eq_ignore_ascii_case(layout)))
+        .map(rom_title)
+        .unwrap_or_else(|| rom_title(stem))
 }
 
 /// Which disc of a multi-disc game a file is, from marks like `(Disc 2)` or `(CD 1 of 3)`.
@@ -144,7 +191,7 @@ pub fn find_rom_files(folders: &[PathBuf], extensions: &[String]) -> Vec<RomFile
             continue;
         }
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
-        let title = rom_title(stem);
+        let title = game_title(&path);
         // A playlist stands for all its discs; a file with no disc mark is its own game
         let rank = match (extension.as_str(), disc_number(stem)) {
             ("m3u", _) => 0,
@@ -214,6 +261,46 @@ mod tests {
         ] {
             assert_eq!(rom_title(file), title, "{file}");
         }
+    }
+
+    #[test]
+    fn a_boot_file_is_named_by_its_title_file_or_its_folder() {
+        use super::super::special::tests::sfo;
+        let dir = std::env::temp_dir().join(format!("kanso-boot-files-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let write = |relative: &str, bytes: &[u8]| -> PathBuf {
+            let path = dir.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, bytes).unwrap();
+            path
+        };
+
+        // PlayStation 4: the title file is in sce_sys, next to the boot file
+        let ps4 = write("PS4/CUSA00900/eboot.bin", b"x");
+        write("PS4/CUSA00900/sce_sys/param.sfo", &sfo(&[("TITLE", "Bloodborne")]));
+        assert_eq!(game_title(&ps4), "Bloodborne");
+        // PlayStation 3: next to the boot file's folder
+        let ps3 = write("PS3/Demons Souls [BLUS30443]/PS3_GAME/USRDIR/EBOOT.BIN", b"x");
+        write("PS3/Demons Souls [BLUS30443]/PS3_GAME/PARAM.SFO", &sfo(&[("TITLE", "Demon's Souls")]));
+        assert_eq!(game_title(&ps3), "Demon's Souls");
+        // No title file, or one that is not: the folder that names the game
+        let bare = write("PS3/Journey (Europe)/PS3_GAME/USRDIR/EBOOT.BIN", b"x");
+        assert_eq!(game_title(&bare), "Journey");
+        let broken = write("PS4/Gravity Rush 2/eboot.bin", b"x");
+        write("PS4/Gravity Rush 2/sce_sys/param.sfo", b"not a title file");
+        assert_eq!(game_title(&broken), "Gravity Rush 2");
+        let xbox = write("X360/Red Dead Redemption/default.xex", b"x");
+        assert_eq!(game_title(&xbox), "Red Dead Redemption");
+        // Any other file is called by its own name, whatever is next to it
+        let named = write("PS4/CUSA00900/Bloodborne Trial (Europe).bin", b"x");
+        assert_eq!(game_title(&named), "Bloodborne Trial");
+
+        // In a list of files, each boot file is its own game with its own name
+        let extensions = vec!["bin".to_string()];
+        let titles: Vec<String> = find_rom_files(&[dir.join("PS3")], &extensions).into_iter().map(|rom| rom.title).collect();
+        assert_eq!(titles, ["Demon's Souls", "Journey"]);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn touch(root: &Path, relative: &str) {

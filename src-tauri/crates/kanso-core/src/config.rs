@@ -118,10 +118,27 @@ impl EmulatorSetting {
             })
             .take(MAX_EMULATOR_EXTENSIONS)
             .collect();
+        let exe_path = plain(&self.exe_path, 1000);
+        // An emulator added as one Kanso did not know, which it has learnt since: it becomes
+        // the known one, with that emulator's own name, files and way of finding games
+        let learnt = Some(&id)
+            .filter(|id| id.starts_with("custom-"))
+            .and_then(|_| exe_path.rsplit(['\\', '/']).next())
+            .and_then(crate::emulators::identify_name);
+        if let Some(def) = learnt {
+            return Some(Self {
+                id: def.id.to_string(),
+                name: String::new(),
+                exe_path,
+                folders,
+                extensions: Vec::new(),
+                args: plain(&self.args, MAX_EMULATOR_ARGS_CHARS),
+            });
+        }
         Some(Self {
             id,
             name: plain(&self.name, 60),
-            exe_path: plain(&self.exe_path, 1000),
+            exe_path,
             folders,
             extensions,
             args: plain(&self.args, MAX_EMULATOR_ARGS_CHARS),
@@ -395,6 +412,23 @@ mod tests {
                 // The same emulator again, and an id that is not one
                 EmulatorSetting { id: "dolphin".to_string(), ..EmulatorSetting::default() },
                 EmulatorSetting { id: "../escape".to_string(), ..EmulatorSetting::default() },
+                // Added by hand when Kanso did not know it, known since
+                EmulatorSetting {
+                    id: "custom-shadps4".to_string(),
+                    name: "shadPS4".to_string(),
+                    exe_path: r"D:\shadPS4\shadPS4.exe".to_string(),
+                    folders: vec![r"D:\Giochi PS4".to_string()],
+                    extensions: vec!["bin".to_string()],
+                    ..EmulatorSetting::default()
+                },
+                // One Kanso still does not know stays as the user described it
+                EmulatorSetting {
+                    id: "custom-openbor".to_string(),
+                    name: " OpenBOR ".to_string(),
+                    exe_path: r"D:\OpenBOR\OpenBOR.exe".to_string(),
+                    extensions: vec!["pak".to_string()],
+                    ..EmulatorSetting::default()
+                },
             ],
             card_info: vec![
                 "badges".to_string(),
@@ -432,7 +466,7 @@ mod tests {
         assert!(!saved.track_playtime);
         assert_eq!(saved.card_info, ["genres", "badges"], "known names, once, in Kanso's order");
         assert_eq!(
-            saved.emulators,
+            saved.emulators[..1],
             [EmulatorSetting {
                 id: "dolphin".to_string(),
                 name: String::new(),
@@ -441,6 +475,24 @@ mod tests {
                 extensions: vec!["iso".to_string(), "rvz".to_string()],
                 args: "-b -e {rom}".to_string(),
             }]
+        );
+        assert_eq!(
+            saved.emulators[1..],
+            [
+                EmulatorSetting {
+                    id: "shadps4".to_string(),
+                    exe_path: r"D:\shadPS4\shadPS4.exe".to_string(),
+                    folders: vec![r"D:\Giochi PS4".to_string()],
+                    ..EmulatorSetting::default()
+                },
+                EmulatorSetting {
+                    id: "custom-openbor".to_string(),
+                    name: "OpenBOR".to_string(),
+                    exe_path: r"D:\OpenBOR\OpenBOR.exe".to_string(),
+                    extensions: vec!["pak".to_string()],
+                    ..EmulatorSetting::default()
+                },
+            ]
         );
         assert_eq!(saved.plugins.len(), 1, "ids that are not plain names are dropped");
         let plugin = &saved.plugins["price-history"];

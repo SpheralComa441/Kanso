@@ -36,6 +36,8 @@ pub enum Library {
     RetroArchPlaylists,
     /// RPCS3: the folders its list of games names.
     Rpcs3Games,
+    /// PlayStation 4: the folders that hold an `eboot.bin`, in the games folders.
+    Ps4Folders,
 }
 
 /// An emulator Kanso knows.
@@ -44,7 +46,8 @@ pub struct EmulatorDef {
     pub name: &'static str,
     /// What it emulates, as shown on its tile.
     pub systems: &'static str,
-    /// File names of its executable, lower case; one ending in `*` matches by prefix.
+    /// File names of its executable, lower case; one ending in `*` matches by prefix. When
+    /// several are on this PC, the one named first here is the one used.
     pub exe_names: &'static [&'static str],
     /// Folder names installers and guides put it in, looked for where programs are installed.
     pub install_dirs: &'static [&'static str],
@@ -110,6 +113,17 @@ pub const KNOWN: &[EmulatorDef] = &[
         extensions: &[],
         args: &["--no-gui", "{rom}"],
         library: Library::Rpcs3Games,
+    },
+    EmulatorDef {
+        id: "shadps4",
+        name: "shadPS4",
+        systems: "PlayStation 4",
+        // Its launcher, which has a window, before the emulator proper, which has none
+        exe_names: &["shadps4qtlauncher.exe", "shadps4.exe"],
+        install_dirs: &["shadPS4", "shadPS4QtLauncher"],
+        extensions: &[],
+        args: &["-g", "{rom}"],
+        library: Library::Ps4Folders,
     },
     EmulatorDef {
         id: "ppsspp",
@@ -296,12 +310,31 @@ pub const KNOWN: &[EmulatorDef] = &[
 ];
 
 impl EmulatorDef {
-    fn runs(&self, file_name: &str) -> bool {
+    /// Which of its executable names `file_name` is: the lower, the more it is preferred.
+    fn rank(&self, file_name: &str) -> Option<usize> {
         let name = file_name.to_ascii_lowercase();
-        self.exe_names.iter().any(|pattern| match pattern.strip_suffix('*') {
+        self.exe_names.iter().position(|pattern| match pattern.strip_suffix('*') {
             Some(prefix) => name.starts_with(prefix) && name.ends_with(".exe"),
             None => name == *pattern,
         })
+    }
+
+    fn runs(&self, file_name: &str) -> bool {
+        self.rank(file_name).is_some()
+    }
+
+    /// The arguments that start a game with the executable `exe`.
+    ///
+    /// shadPS4's launcher takes other arguments than the emulator it starts: `-d` chooses
+    /// the emulator version selected in the launcher, and a path with no option before it
+    /// would be read as the emulator to use, not as the game.
+    fn args_for(&self, exe: &Path) -> Vec<String> {
+        let name = exe.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_ascii_lowercase();
+        let args: &[&str] = match self.id {
+            "shadps4" if name.starts_with("shadps4qtlauncher") => &["-d", "-g", "{rom}"],
+            _ => self.args,
+        };
+        args.iter().map(|arg| arg.to_string()).collect()
     }
 }
 
@@ -312,8 +345,12 @@ pub fn known(id: &str) -> Option<&'static EmulatorDef> {
 
 /// The emulator an executable is, by its file name; `None` for any other program.
 pub fn identify(exe_path: &Path) -> Option<&'static EmulatorDef> {
-    let name = exe_path.file_name()?.to_str()?;
-    KNOWN.iter().find(|def| def.runs(name))
+    identify_name(exe_path.file_name()?.to_str()?)
+}
+
+/// The emulator whose executable has this file name.
+pub fn identify_name(file_name: &str) -> Option<&'static EmulatorDef> {
+    KNOWN.iter().find(|def| def.runs(file_name))
 }
 
 /// A folder an emulator's games are read from, and who said so.
@@ -424,7 +461,7 @@ pub fn split_args(line: &str) -> Vec<String> {
 }
 
 /// The emulators of this PC: those the user added in Settings first, then the known ones
-/// among `found_exes` (each emulator once, the first copy found). A setting without an
+/// among `found_exes` (each emulator once: the executable it prefers, the first copy found). A setting without an
 /// executable adds its folders and arguments to the emulator Kanso found by itself.
 pub fn resolve(settings: &[EmulatorSetting], found_exes: &[PathBuf], places: &Places) -> Vec<Emulator> {
     let mut emulators: Vec<Emulator> = Vec::new();
@@ -461,7 +498,7 @@ pub fn resolve(settings: &[EmulatorSetting], found_exes: &[PathBuf], places: &Pl
                 None => setting.map(|s| s.extensions.clone()).unwrap_or_default(),
             },
             args: own_args.unwrap_or_else(|| match def {
-                Some(def) => def.args.iter().map(|a| a.to_string()).collect(),
+                Some(def) => def.args_for(&exe),
                 None => vec!["{rom}".to_string()],
             }),
             library: def.map(|d| d.library).unwrap_or(Library::Files),
@@ -476,13 +513,22 @@ pub fn resolve(settings: &[EmulatorSetting], found_exes: &[PathBuf], places: &Pl
             emulators.push(build(&setting.id, PathBuf::from(setting.exe_path.trim()), Some(setting), true));
         }
     }
+    // Each emulator found once: the executable its definition prefers, then the first found
+    let mut chosen: Vec<(&EmulatorDef, usize, &PathBuf)> = Vec::new();
     for exe in found_exes {
-        let Some(def) = identify(exe) else {
+        let Some((def, rank)) = identify(exe).and_then(|def| Some((def, def.rank(exe.file_name()?.to_str()?)?))) else {
             continue;
         };
         if emulators.iter().any(|known| known.id == def.id) || !exe.is_file() {
             continue;
         }
+        match chosen.iter_mut().find(|(known, _, _)| known.id == def.id) {
+            Some(entry) if rank < entry.1 => *entry = (def, rank, exe),
+            Some(_) => {}
+            None => chosen.push((def, rank, exe)),
+        }
+    }
+    for (def, _, exe) in chosen {
         let setting = settings.iter().find(|setting| setting.id == def.id);
         emulators.push(build(def.id, exe.clone(), setting, false));
     }
@@ -536,6 +582,12 @@ pub fn scan_games(emulators: &[Emulator]) -> SourceScanOutput {
             }
             Library::Rpcs3Games => {
                 for RomFile { path, title } in special::rpcs3_games(&emulator.exe_dir()) {
+                    output.games.push(emulated_game(emulator, &path.to_string_lossy(), title));
+                }
+            }
+            Library::Ps4Folders => {
+                let folders: Vec<PathBuf> = emulator.folders.iter().map(|folder| PathBuf::from(&folder.path)).collect();
+                for RomFile { path, title } in special::ps4_games(&folders) {
                     output.games.push(emulated_game(emulator, &path.to_string_lossy(), title));
                 }
             }
@@ -602,6 +654,8 @@ mod tests {
             ("xenia_canary.exe", Some("xenia")),
             ("Mesen.exe", Some("mesen")),
             ("Mesen-S.exe", None),
+            ("shadPS4.exe", Some("shadps4")),
+            ("shadPS4QtLauncher.exe", Some("shadps4")),
             ("notepad.exe", None),
         ] {
             assert_eq!(identify(Path::new("D:/Emu").join(file).as_path()).map(|def| def.id), id, "{file}");
@@ -683,6 +737,43 @@ mod tests {
         assert_eq!((custom.name.as_str(), custom.systems.as_str()), ("OpenBOR", ""));
         assert_eq!((custom.extensions.as_slice(), custom.args.as_slice()), (&["pak".to_string()][..], &["{rom}".to_string()][..]));
         assert_eq!(dolphin.info().exe_path, my_dolphin.to_string_lossy());
+    }
+
+    #[test]
+    fn shadps4_lists_game_folders_and_starts_them_as_each_executable_expects() {
+        let s = Scratch::new("shadps4");
+        let places = s.places();
+        let core = s.file("Emu/shadPS4 core/shadPS4.exe", "x");
+        let launcher = s.file("Emu/shadPS4 launcher/shadPS4QtLauncher.exe", "x");
+        let eboot = s.file("Giochi PS4/CUSA00900/eboot.bin", "x");
+        std::fs::write(s.dir("Giochi PS4/CUSA00900/sce_sys").join("param.sfo"), special::tests::sfo(&[("TITLE", "Bloodborne")])).unwrap();
+        s.file("Giochi PS4/CUSA00900/data/level.bin", "x");
+        let settings = [EmulatorSetting { id: "shadps4".into(), folders: vec![s.root.join("Giochi PS4").to_string_lossy().into_owned()], ..EmulatorSetting::default() }];
+
+        // Only the emulator proper: the game is named with -g, as every version takes it
+        let emulators = resolve(&settings, std::slice::from_ref(&core), &places);
+        assert_eq!(emulators[0].exe_path, core);
+        let scanned = scan_games(&emulators);
+        let games: Vec<(&str, Option<&Path>)> = scanned.games.iter().map(|game| (game.title.as_str(), game.executable_path.as_deref().map(Path::new))).collect();
+        assert_eq!(games, [("Bloodborne", Some(eboot.as_path()))], "one game per folder, named by its title file");
+        let command = launch_command(&emulators[0], &eboot.to_string_lossy()).unwrap();
+        assert_eq!(command.args, ["-g", eboot.to_string_lossy().as_ref()]);
+
+        // Both on this PC, whichever is found first: the launcher, which has a window; it
+        // needs to be told which emulator to use before the game
+        for found in [[core.clone(), launcher.clone()], [launcher.clone(), core.clone()]] {
+            let emulators = resolve(&settings, &found, &places);
+            assert_eq!(emulators.len(), 1);
+            assert_eq!(emulators[0].exe_path, launcher);
+            let command = launch_command(&emulators[0], &eboot.to_string_lossy()).unwrap();
+            assert_eq!(command.args, ["-d", "-g", eboot.to_string_lossy().as_ref()]);
+            assert_eq!(command.working_dir, s.root.join("Emu/shadPS4 launcher"), "where it looks for its portable settings");
+        }
+        // The copy the user chose is the one used, and arguments they typed are kept
+        let own = [EmulatorSetting { id: "shadps4".into(), exe_path: core.to_string_lossy().into_owned(), args: "-f true -g {rom}".into(), ..EmulatorSetting::default() }];
+        let emulators = resolve(&own, &[launcher], &places);
+        assert_eq!((emulators.len(), emulators[0].exe_path.as_path()), (1, core.as_path()));
+        assert_eq!(emulators[0].args, ["-f", "true", "-g", "{rom}"]);
     }
 
     #[test]

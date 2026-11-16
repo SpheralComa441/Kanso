@@ -1,13 +1,15 @@
-//! The two emulators whose games are not simply "the files in some folders".
+//! The emulators whose games are not simply "the files in some folders".
 //!
 //! - **RetroArch** runs many systems, each through a *core*. Its games are in its playlists
 //!   (`playlists/*.lpl`, JSON), which also say which core runs each one.
 //! - **RPCS3** keeps a list of games by serial (`config/games.yml`), each a folder holding the
 //!   game's `EBOOT.BIN` and a `PARAM.SFO` with its title.
+//! - **shadPS4** runs games that are folders: each holds an `eboot.bin`, the same file name
+//!   for every game, and a `sce_sys/param.sfo` with its title.
 
-use super::roms::{rom_title, RomFile, MAX_GAMES_PER_EMULATOR};
+use super::roms::{game_title, rom_title, RomFile, MAX_GAMES_PER_EMULATOR};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -116,12 +118,13 @@ pub fn retroarch_core_for(exe_dir: &Path, content: &str) -> Option<PathBuf> {
         .map(|game| game.core)
 }
 
-/// The `TITLE` of a PlayStation `PARAM.SFO`: a small table of named values.
+/// A text value of a PlayStation title file (`PARAM.SFO`, `param.sfo`): a small table of
+/// named values, the same on PlayStation 3 and 4. `TITLE` is the name of the game.
 ///
 /// Layout: magic `\0PSF`, version, offset of the key table, offset of the data table, number
 /// of entries; then one 16-byte entry each (key offset, format, length, max length, data
 /// offset), all little-endian.
-pub fn sfo_title(bytes: &[u8]) -> Option<String> {
+pub fn sfo_value(bytes: &[u8], wanted: &str) -> Option<String> {
     let u32_at = |offset: usize| -> Option<usize> {
         bytes.get(offset..offset + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize)
     };
@@ -134,18 +137,23 @@ pub fn sfo_title(bytes: &[u8]) -> Option<String> {
         let key_offset = u16::from_le_bytes([*bytes.get(entry)?, *bytes.get(entry + 1)?]) as usize;
         let key_start = keys.checked_add(key_offset)?;
         let key_end = key_start + bytes.get(key_start..)?.iter().position(|b| *b == 0)?;
-        if &bytes[key_start..key_end] != b"TITLE" {
+        if &bytes[key_start..key_end] != wanted.as_bytes() {
             continue;
         }
         let length = u32_at(entry + 4)?;
         let start = data.checked_add(u32_at(entry + 12)?)?;
         let raw = bytes.get(start..start.checked_add(length)?)?;
         let raw = raw.split(|b| *b == 0).next().unwrap_or_default();
-        let title = String::from_utf8_lossy(raw).replace(['\r', '\n'], " ");
-        let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
-        return (!title.is_empty()).then_some(title);
+        let text = String::from_utf8_lossy(raw).replace(['\r', '\n'], " ");
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        return (!text.is_empty()).then_some(text);
     }
     None
+}
+
+/// The `TITLE` of a PlayStation title file.
+pub fn sfo_title(bytes: &[u8]) -> Option<String> {
+    sfo_value(bytes, "TITLE")
 }
 
 /// The games RPCS3 lists: for each folder in `games.yml`, the `EBOOT.BIN` that starts it and
@@ -195,6 +203,70 @@ pub fn rpcs3_games(exe_dir: &Path) -> Vec<RomFile> {
     games
 }
 
+/// How deep below a games folder a PlayStation 4 game is looked for: as deep as shadPS4
+/// itself goes.
+const PS4_MAX_DEPTH: usize = 5;
+/// Most folders opened while looking for PlayStation 4 games in one games folder.
+const PS4_MAX_FOLDERS: usize = 4000;
+
+/// Whether a folder holds an update or mods of a game rather than a game: shadPS4 keeps
+/// those next to the game, under its folder's name and a suffix (`CUSA00900-UPDATE`,
+/// `CUSA00900-patch`, `CUSA00900-mods`).
+fn is_ps4_addition(folder_name: &str) -> bool {
+    let name = folder_name.to_ascii_lowercase();
+    ["-update", "-patch", "-mods"].iter().any(|suffix| name.ends_with(suffix))
+}
+
+/// The PlayStation 4 games in `folders`: every folder that holds an `eboot.bin`, the file
+/// shadPS4 starts. The title is the one in the game's `sce_sys/param.sfo`, or the folder's
+/// name without one. A game's folder is not searched further, and updates or mods kept in a
+/// folder of their own are not games.
+pub fn ps4_games(folders: &[PathBuf]) -> Vec<RomFile> {
+    let mut games: Vec<RomFile> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    for root in folders {
+        let mut queue: VecDeque<(PathBuf, usize)> = VecDeque::from([(root.clone(), 0)]);
+        let mut opened = 0;
+        while let Some((folder, depth)) = queue.pop_front() {
+            opened += 1;
+            if opened > PS4_MAX_FOLDERS || games.len() >= MAX_GAMES_PER_EMULATOR {
+                break;
+            }
+            let Ok(entries) = fs::read_dir(&folder) else {
+                continue;
+            };
+            let mut eboot = None;
+            let mut below = Vec::new();
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let Ok(kind) = entry.file_type() else {
+                    continue;
+                };
+                if kind.is_file() && name.eq_ignore_ascii_case("eboot.bin") {
+                    eboot = Some(entry.path());
+                } else if kind.is_dir() && !name.starts_with('.') && !is_ps4_addition(&name) {
+                    below.push(entry.path());
+                }
+            }
+            match eboot {
+                Some(eboot) => {
+                    if seen.insert(eboot.to_string_lossy().to_lowercase()) {
+                        games.push(RomFile { title: game_title(&eboot), path: eboot });
+                    }
+                }
+                None if depth < PS4_MAX_DEPTH => {
+                    below.sort();
+                    queue.extend(below.into_iter().map(|path| (path, depth + 1)));
+                }
+                None => {}
+            }
+        }
+    }
+    games.sort_by(|a, b| a.path.cmp(&b.path));
+    games.truncate(MAX_GAMES_PER_EMULATOR);
+    games
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::own_settings::tests::Scratch;
@@ -240,6 +312,48 @@ pub(crate) mod tests {
         for cut in 0..file.len() {
             let _ = sfo_title(&file[..cut]);
         }
+    }
+
+    #[test]
+    fn ps4_games_are_folders_named_by_their_title_file() {
+        let s = Scratch::new("ps4");
+        let games_dir = s.dir("Giochi PS4");
+        // A game by its serial, with its title file
+        s.file("Giochi PS4/CUSA00900/eboot.bin", "x");
+        fs::write(s.dir("Giochi PS4/CUSA00900/sce_sys").join("param.sfo"), sfo(&[("CATEGORY", "gd"), ("TITLE", "Bloodborne"), ("TITLE_ID", "CUSA00900")])).unwrap();
+        // Data files of the game are not games
+        s.file("Giochi PS4/CUSA00900/data/movie.bin", "x");
+        s.file("Giochi PS4/CUSA00900/sce_module/libc.prx", "x");
+        // Its update, kept next to it: part of the same game
+        s.file("Giochi PS4/CUSA00900-UPDATE/eboot.bin", "x");
+        s.file("Giochi PS4/CUSA00900-patch/eboot.bin", "x");
+        s.file("Giochi PS4/CUSA00900-mods/eboot.bin", "x");
+        // A game with no title file is called as its folder
+        s.file("Giochi PS4/Gravity Rush 2 [CUSA04943]/EBOOT.BIN", "x");
+        // Games grouped in a folder; a folder too deep; a hidden one; one with no game
+        s.file("Giochi PS4/Sparatutto/CUSA07408/eboot.bin", "x");
+        fs::write(s.dir("Giochi PS4/Sparatutto/CUSA07408/sce_sys").join("param.sfo"), sfo(&[("TITLE", "God of War")])).unwrap();
+        s.file("Giochi PS4/a/b/c/d/e/CUSA11111/eboot.bin", "x");
+        s.file("Giochi PS4/.trash/CUSA22222/eboot.bin", "x");
+        s.file("Giochi PS4/Salvataggi/readme.txt", "x");
+
+        let listed = |folders: &[PathBuf]| -> Vec<(String, String)> {
+            ps4_games(folders)
+                .into_iter()
+                .map(|game| (game.title, game.path.strip_prefix(&s.root).unwrap().to_string_lossy().replace('\\', "/")))
+                .collect()
+        };
+        let expected = [
+            ("Bloodborne", "Giochi PS4/CUSA00900/eboot.bin"),
+            ("Gravity Rush 2", "Giochi PS4/Gravity Rush 2 [CUSA04943]/EBOOT.BIN"),
+            ("God of War", "Giochi PS4/Sparatutto/CUSA07408/eboot.bin"),
+        ]
+        .map(|(title, path)| (title.to_string(), path.to_string()));
+        assert_eq!(listed(std::slice::from_ref(&games_dir)), expected);
+        // The same folder twice, a folder inside it and one that is gone change nothing
+        assert_eq!(listed(&[games_dir.clone(), games_dir.join("Sparatutto"), s.root.join("gone"), games_dir.clone()]), expected);
+        // A folder that is itself a game
+        assert_eq!(listed(&[games_dir.join("CUSA00900")]), [expected[0].clone()]);
     }
 
     #[test]

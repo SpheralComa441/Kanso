@@ -104,6 +104,21 @@ impl LibraryStore {
                     scanned.clean_title = cached.clean_title.clone();
                     scanned.title_provisional = false;
                 }
+
+                // An emulated game is known by the name the scan reads from its files. When
+                // that name changes (Kanso learnt to read the game's title file, the file was
+                // renamed) the cover and description found under the old name belonged to
+                // another game: they are looked up again. A game the user edited is theirs.
+                if scanned.platform == GamePlatform::Emulator && !cached.custom_override && cached.title != scanned.title {
+                    scanned.steamgriddb_id = None;
+                    scanned.cover_path = None;
+                    scanned.short_description = None;
+                    scanned.genres = Vec::new();
+                    scanned.tags = Vec::new();
+                    scanned.steam_store_appid = None;
+                    scanned.metadata_synced = false;
+                    scanned.metadata_attempted_at = 0;
+                }
             }
         }
 
@@ -726,6 +741,59 @@ mod tests {
         assert!(db.get_game("steam:2").unwrap().unwrap().is_favorite);
         assert!(db.get_game("steam:2").unwrap().unwrap().is_installed);
         assert!(!db.get_game("steam:1").unwrap().unwrap().is_installed);
+    }
+
+    #[test]
+    fn an_emulated_game_the_scan_renames_gets_its_cover_looked_up_again() {
+        let emulated = |title: &str| {
+            DetectedGame::new_detected(
+                "emu:custom-ps4:00000000000000aa".to_string(),
+                title.to_string(),
+                title.to_string(),
+                GamePlatform::Emulator,
+                Some("custom-ps4".to_string()),
+                "/games/CUSA00900".to_string(),
+                Some("/games/CUSA00900/eboot.bin".to_string()),
+                None,
+            )
+        };
+        let cover = std::env::temp_dir().join(format!("kanso-renamed-cover-{}.png", std::process::id()));
+        fs::write(&cover, b"png").unwrap();
+        // What a scan that only knew the file's name left behind: someone else's cover
+        let mut wrong = emulated("eboot");
+        wrong.cover_path = Some(cover.to_string_lossy().into_owned());
+        wrong.steamgriddb_id = Some(42);
+        wrong.short_description = Some("A football game.".to_string());
+        wrong.genres = vec!["Sports".to_string()];
+        wrong.metadata_synced = true;
+        wrong.metadata_attempted_at = 1_700_000_000_000;
+        wrong.is_favorite = true;
+        wrong.playtime_minutes = Some(90);
+        let mut store = LibraryStore { games: vec![wrong.clone()] };
+
+        // The same name again: everything stays
+        let same = store.merge_with_scan(ScanReport { games: vec![emulated("eboot")], ..Default::default() });
+        assert_eq!(same.games[0].cover_path, wrong.cover_path);
+        assert!(same.games[0].metadata_synced);
+
+        // The scan now reads the game's own title: cover and description go, the rest stays
+        let renamed = store.merge_with_scan(ScanReport { games: vec![emulated("Bloodborne")], ..Default::default() });
+        let game = &renamed.games[0];
+        assert_eq!(game.title, "Bloodborne");
+        assert_eq!((game.cover_path.as_deref(), game.steamgriddb_id, game.short_description.as_deref()), (None, None, None));
+        assert!(game.genres.is_empty() && !game.metadata_synced && game.metadata_attempted_at == 0);
+        assert!(game.is_favorite, "what the user did with the game is still theirs");
+        assert_eq!(game.playtime_minutes, Some(90));
+
+        // A game the user renamed and gave a cover to is left as they made it
+        let mut edited = wrong.clone();
+        edited.title = "My Bloodborne".to_string();
+        edited.custom_override = true;
+        let mut store = LibraryStore { games: vec![edited] };
+        let kept = store.merge_with_scan(ScanReport { games: vec![emulated("Bloodborne")], ..Default::default() });
+        assert_eq!(kept.games[0].title, "My Bloodborne");
+        assert_eq!(kept.games[0].cover_path, wrong.cover_path);
+        let _ = fs::remove_file(&cover);
     }
 
     #[test]
