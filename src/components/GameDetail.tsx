@@ -545,10 +545,10 @@ function BentoLayout(props: LayoutProps) {
       aria-modal="true"
       aria-labelledby="game-detail-title"
       data-detail-layout="bento"
-      className="detail-sheet motion-sheet detail-grid relative flex max-h-full w-full max-w-5xl"
+      className="detail-sheet motion-sheet detail-grid relative flex max-h-full w-full"
     >
       {wide && (
-        <div className="detail-grid scroll-area flex w-[15.5rem] shrink-0 flex-col overflow-y-auto">
+        <div className="detail-side detail-grid scroll-area flex shrink-0 flex-col overflow-y-auto">
           <div className="tile shrink-0 overflow-hidden">
             <CoverArt game={game} coverUrl={coverUrl} onBroken={onCoverBroken} />
           </div>
@@ -642,7 +642,7 @@ function SheetLayout(props: LayoutProps) {
       aria-modal="true"
       aria-labelledby="game-detail-title"
       data-detail-layout="sheet"
-      className="detail-sheet motion-sheet relative flex max-h-full w-full max-w-3xl overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
+      className="detail-sheet motion-sheet relative flex max-h-full w-full overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
     >
       {/* Ambient wash of the cover art behind the content */}
       {coverUrl && (

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { ChevronDown, Lock, RefreshCw, Trophy } from "lucide-react";
 import { useI18n } from "../i18n";
 import { getGameAchievements, pluginGameData } from "../lib/backend";
@@ -77,9 +77,13 @@ function AchievementRow({ achievement }: { achievement: Achievement }) {
   );
 }
 
+/** Unlocked achievements shown without asking: the latest ones, a few rows of them. */
+const ACHIEVEMENTS_SHOWN_FIRST = 12;
+
 /**
  * Achievement progress of a Steam game. The counts come with the library; the list is read
- * from Steam's cache only when the user asks to see it.
+ * from Steam's cache on this PC when the sheet opens. What the player has unlocked is shown
+ * at once, latest first; the whole list, locked ones included, is one click away.
  */
 export function AchievementsSection({ game }: { game: DetectedGame }) {
   const { t, number } = useI18n();
@@ -87,28 +91,42 @@ export function AchievementsSection({ game }: { game: DetectedGame }) {
   const [details, setDetails] = useState<GameAchievements | null | "loading">(null);
   const total = game.achievementsTotal ?? 0;
   const unlocked = Math.min(game.achievementsUnlocked ?? 0, total);
+  const gameRef = useRef(game);
+  gameRef.current = game;
 
-  // Another game: start closed again
+  // Another game: its own list, closed to the latest unlocked again
   useEffect(() => {
     setIsOpen(false);
-    setDetails(null);
+    if (total <= 0) {
+      setDetails(null);
+      return;
+    }
+    let current = true;
+    const none = { total, unlocked, items: [] };
+    setDetails("loading");
+    getGameAchievements(gameRef.current)
+      .then((loaded) => current && setDetails(loaded ?? none))
+      .catch(() => current && setDetails(none));
+    return () => {
+      current = false;
+    };
+    // The list belongs to the game, not to each update of its counts
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game.id]);
 
   if (total <= 0) return null;
 
-  const toggle = () => {
-    const next = !isOpen;
-    setIsOpen(next);
-    if (next && details === null) {
-      setDetails("loading");
-      getGameAchievements(game)
-        .then((loaded) => setDetails(loaded ?? { total, unlocked, items: [] }))
-        .catch(() => setDetails({ total, unlocked, items: [] }));
-    }
-  };
-
   const percent = Math.round((unlocked / total) * 100);
   const loaded = details !== null && details !== "loading" ? details : null;
+  // The latest unlocked, shown before anyone asks
+  const latest = (loaded?.items ?? [])
+    .filter((achievement) => achievement.unlocked)
+    .sort((a, b) => (b.unlockedAt ?? 0) - (a.unlockedAt ?? 0))
+    .slice(0, ACHIEVEMENTS_SHOWN_FIRST);
+  const shown = isOpen ? (loaded?.items ?? []) : latest;
+  const hasMore = loaded !== null && loaded.items.length > latest.length;
+  // With nothing unlocked, or no list in Steam's cache, there is still something to ask for
+  const canToggle = hasMore || (loaded !== null && loaded.items.length === 0);
 
   return (
     <section id="detail-achievements" className="space-y-2">
@@ -130,30 +148,46 @@ export function AchievementsSection({ game }: { game: DetectedGame }) {
         <div className="h-full rounded-full bg-accent" style={{ width: `${percent}%` }} />
       </div>
 
-      <button
-        id="toggle-achievements-button"
-        type="button"
-        onClick={toggle}
-        aria-expanded={isOpen}
-        className="inline-flex items-center gap-1 text-2xs text-zinc-400 transition-colors hover:text-zinc-100"
-      >
-        <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
-        <span>{isOpen ? t("achievements.hide") : t("achievements.show")}</span>
-      </button>
-
-      {isOpen && details === "loading" && (
+      {details === "loading" && (
         <p className="text-2xs text-zinc-500">{t("achievements.loading")}</p>
       )}
       {isOpen && loaded && loaded.items.length === 0 && (
         <p className="text-2xs leading-relaxed text-zinc-500">{t("achievements.unavailable")}</p>
       )}
+      {shown.length > 0 && (
+        <ul
+          id="achievements-list"
+          data-achievements={isOpen ? "all" : "latest"}
+          className="achievement-list"
+        >
+          {shown.map((achievement) => (
+            <AchievementRow key={achievement.id} achievement={achievement} />
+          ))}
+        </ul>
+      )}
+
+      {canToggle && (
+        <button
+          id="toggle-achievements-button"
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          aria-expanded={isOpen}
+          aria-controls="achievements-list"
+          className="inline-flex items-center gap-1 text-2xs text-zinc-400 transition-colors hover:text-zinc-100"
+        >
+          <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+          <span>
+            {isOpen
+              ? t(latest.length > 0 ? "achievements.showLatest" : "achievements.hide")
+              : latest.length > 0
+                ? t("achievements.showAll", { total: number(loaded?.items.length ?? total) })
+                : t("achievements.show")}
+          </span>
+        </button>
+      )}
+
       {isOpen && loaded && loaded.items.length > 0 && (
         <>
-          <ul className="divide-y divide-oled-border/60">
-            {loaded.items.map((achievement) => (
-              <AchievementRow key={achievement.id} achievement={achievement} />
-            ))}
-          </ul>
           <p className="text-3xs leading-relaxed text-zinc-500">
             {loaded.items.length < loaded.total
               ? `${t("achievements.partial", {

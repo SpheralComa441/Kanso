@@ -11,6 +11,7 @@ import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
 import { PLATFORM_META, canInstall, platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
+import { useWindowedItems } from "../lib/useWindowedItems";
 import type { BadgeEntry, CardInfoItem, DetectedGame } from "../types/game";
 import { Cover } from "./Cover";
 import type { ViewMode } from "./Header";
@@ -159,6 +160,8 @@ export function GameList({
     return facts;
   };
   const { usableCover, markBroken } = useBrokenCovers();
+  // Only the rows on screen exist: a library of thousands costs what a screenful costs
+  const windowed = useWindowedItems<HTMLElement>(games.length, viewMode);
 
   if (isScanning && totalDetected === 0) {
     return (
@@ -211,8 +214,14 @@ export function GameList({
           <p className="text-sm text-zinc-400">{t("list.noMatch")}</p>
         </div>
       ) : viewMode === "grid" ? (
-        <div className="game-grid">
-          {games.map((game, index) => {
+        <div
+          className="game-grid"
+          ref={windowed.containerRef as React.Ref<HTMLDivElement>}
+          style={windowed.style}
+          data-total={games.length}
+        >
+          {games.slice(windowed.start, windowed.end).map((game, offset) => {
+            const index = windowed.start + offset;
             const isLaunching = launchingId === game.id;
             const label = platformLabel(game.platform, t);
             const coverUrl = usableCover(
@@ -225,8 +234,10 @@ export function GameList({
               <article
                 key={game.id}
                 className={`game-card group ${coverUrl ? "" : "game-card-no-art"}`}
-                // Its place in the grid: cards come in one after the other
+                // Its place in the grid: cards come in one after the other with the view;
+                // those that scrolling brings in are simply there
                 style={{ "--i": index } as React.CSSProperties}
+                data-arrived={windowed.arrivesLater() || undefined}
               >
                 {/* 2:3 vertical cover; washed out for a game that is not on disk */}
                 <div className="game-card-cover relative w-full overflow-hidden bg-oled-bg">
@@ -252,14 +263,14 @@ export function GameList({
 
                   {/* Over artwork of any color: fixed dark chips, independent of the theme */}
                   <div className="absolute left-2.5 top-2.5 flex max-w-[calc(100%-3.25rem)] items-center gap-1">
-                    <span className="truncate rounded-md border border-white/15 bg-black/60 px-2 py-0.5 text-3xs font-medium text-white backdrop-blur-md">
+                    <span className="truncate rounded-md border border-white/15 bg-black/75 px-2 py-0.5 text-3xs font-medium text-white">
                       {label}
                     </span>
                     {game.status && (
                       <span
                         data-status={game.status}
                         title={t("game.statusBadge", { status: t(STATUS_LABEL_KEYS[game.status]) })}
-                        className="shrink-0 rounded-md border border-white/15 bg-black/60 p-1 text-white backdrop-blur-md"
+                        className="shrink-0 rounded-md border border-white/15 bg-black/75 p-1 text-white"
                       >
                         <StatusIcon status={game.status} className="h-3 w-3" />
                       </span>
@@ -268,7 +279,7 @@ export function GameList({
                       <span
                         data-running={game.id}
                         title={t("detail.running")}
-                        className="shrink-0 rounded-md border border-emerald-400/40 bg-black/60 p-[0.3125rem] backdrop-blur-md"
+                        className="shrink-0 rounded-md border border-emerald-400/40 bg-black/75 p-[0.3125rem]"
                       >
                         <span className="block h-2 w-2 rounded-full bg-emerald-400" />
                       </span>
@@ -277,7 +288,7 @@ export function GameList({
                       <span
                         data-not-installed={game.id}
                         title={t("game.notInstalled")}
-                        className="shrink-0 rounded-md border border-white/15 bg-black/60 p-1 text-white backdrop-blur-md"
+                        className="shrink-0 rounded-md border border-white/15 bg-black/75 p-1 text-white"
                       >
                         <CloudDownload className="h-3 w-3" aria-hidden="true" />
                       </span>
@@ -296,7 +307,7 @@ export function GameList({
                   <FavoriteButton
                     game={game}
                     onToggle={onToggleFavorite}
-                    className={`absolute right-2.5 top-2.5 rounded-lg border border-white/10 bg-black/65 p-1.5 text-white/80 backdrop-blur-md transition-opacity hover:bg-black/85 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 ${
+                    className={`absolute right-2.5 top-2.5 rounded-lg border border-white/10 bg-black/75 p-1.5 text-white/80 transition-opacity hover:bg-black/85 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 ${
                       game.isFavorite ? "opacity-100" : "opacity-0"
                     }`}
                   />
@@ -396,8 +407,13 @@ export function GameList({
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-oled-border bg-oled-surface/50">
-          <ul className="divide-y divide-oled-border">
-            {games.map((game) => {
+          <ul
+            className="divide-y divide-oled-border"
+            ref={windowed.containerRef as React.Ref<HTMLUListElement>}
+            style={windowed.style}
+            data-total={games.length}
+          >
+            {games.slice(windowed.start, windowed.end).map((game) => {
               const platformMeta = PLATFORM_META[game.platform];
               const label = platformLabel(game.platform, t);
               const isLaunching = launchingId === game.id;

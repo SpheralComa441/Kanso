@@ -316,6 +316,8 @@ export const it = {
   "achievements.count": "{unlocked} di {total}",
   "achievements.show": "Mostra obiettivi",
   "achievements.hide": "Nascondi obiettivi",
+  "achievements.showAll": "Mostra tutti i {total} obiettivi",
+  "achievements.showLatest": "Mostra solo gli ultimi sbloccati",
   "achievements.loading": "Lettura dalla cache di Steam…",
   "achievements.unavailable": "Elenco non disponibile: apri la pagina del gioco nella libreria di Steam e riprova.",
   "achievements.partial": "Steam tiene in cache solo una parte dell'elenco ({shown} di {total}); i conteggi sono completi.",

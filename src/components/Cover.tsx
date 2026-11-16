@@ -38,6 +38,8 @@ export function Cover({ url, alt = "", zoomOnHover = false, onError }: CoverProp
         src={url}
         alt={alt}
         loading="lazy"
+        // Decoded off the main thread: a row of covers arriving does not hold up a frame
+        decoding="async"
         draggable={false}
         onError={onError}
         onLoad={(e) => {
