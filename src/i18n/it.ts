@@ -638,6 +638,14 @@ export const it = {
   "settings.storeForgetLiked": "Svuota",
   "settings.storePrivacy": "Per le offerte non servono account né chiavi e non viene inviato nulla di tuo: Kanso legge gli elenchi pubblici degli store. Le immagini delle offerte sono caricate dai siti degli store.",
   "settings.homePicksHelp": "Offerte scelte in base ai generi che giochi di più, e qualcuna volutamente diversa.",
+
+  "dlss.title": "DLSS",
+  "dlss.superResolution": "Super Resolution",
+  "dlss.frameGeneration": "Frame Generation",
+  "dlss.rayReconstruction": "Ray Reconstruction",
+  "dlss.help": "Le versioni delle librerie NVIDIA che il gioco porta con sé, lette dai file nella sua cartella. Kanso le legge soltanto: non scarica e non sostituisce nulla.",
+  "dlss.copies": "{count} copie nella cartella del gioco",
+  "dlss.mixed": "Il gioco contiene copie di versioni diverse.",
 } as const;
 
 export type MessageKey = keyof typeof it;

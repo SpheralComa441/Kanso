@@ -30,10 +30,12 @@ import type {
   HomeSection,
   PlaceMatch,
   DealStore,
+  DlssLibrary,
   LikedDeal,
   StoreConfig,
 } from "../types/game";
 import {
+  PREVIEW_DLSS,
   PREVIEW_MOCK_DEALS,
   PREVIEW_MOCK_EMULATED_GAMES,
   PREVIEW_MOCK_EMULATORS,
@@ -1050,6 +1052,17 @@ export async function getPlaySessions(sinceMs: number): Promise<PlaySession[]> {
 }
 
 /** The achievements Steam lists for a game; `null` when there is nothing to show. */
+/**
+ * The versions of the DLSS libraries a game carries, read from the files in its folder.
+ * Nothing is downloaded or changed. Empty for a game without DLSS or not on disk.
+ */
+export async function gameDlss(game: DetectedGame): Promise<DlssLibrary[]> {
+  if (isTauri()) {
+    return invoke<DlssLibrary[]>("game_dlss", { gameId: game.id });
+  }
+  return PREVIEW_DLSS[game.id] ?? [];
+}
+
 export async function getGameAchievements(
   game: DetectedGame
 ): Promise<GameAchievements | null> {

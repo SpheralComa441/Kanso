@@ -628,4 +628,12 @@ export const ru: Dictionary = {
   "settings.storeForgetLiked": "Очистить",
   "settings.storePrivacy": "Для скидок не нужны ни аккаунты, ни ключи, и ничего вашего не отправляется: Kanso читает открытые списки магазинов. Картинки скидок загружаются с сайтов магазинов.",
   "settings.homePicksHelp": "Скидки, подобранные по жанрам, в которые вы играете больше всего, и несколько намеренно других.",
+
+  "dlss.title": "DLSS",
+  "dlss.superResolution": "Super Resolution",
+  "dlss.frameGeneration": "Frame Generation",
+  "dlss.rayReconstruction": "Ray Reconstruction",
+  "dlss.help": "Версии библиотек NVIDIA, которые идут с игрой, прочитанные из файлов в её папке. Kanso только читает их: ничего не скачивает и не заменяет.",
+  "dlss.copies": "копий в папке игры: {count}",
+  "dlss.mixed": "В игре есть копии разных версий.",
 };

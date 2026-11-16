@@ -628,4 +628,12 @@ export const en: Dictionary = {
   "settings.storeForgetLiked": "Clear",
   "settings.storePrivacy": "Deals need no account and no key, and nothing of yours is sent: Kanso reads the stores' public lists. The deals' pictures are loaded from the stores' sites.",
   "settings.homePicksHelp": "Deals picked by the genres you play the most, and a few deliberately different.",
+
+  "dlss.title": "DLSS",
+  "dlss.superResolution": "Super Resolution",
+  "dlss.frameGeneration": "Frame Generation",
+  "dlss.rayReconstruction": "Ray Reconstruction",
+  "dlss.help": "The versions of the NVIDIA libraries the game carries, read from the files in its folder. Kanso only reads them: it downloads and replaces nothing.",
+  "dlss.copies": "{count} copies in the game's folder",
+  "dlss.mixed": "The game holds copies at different versions.",
 };

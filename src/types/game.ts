@@ -125,6 +125,18 @@ export interface Achievement {
   progress: number | null;
 }
 
+/** One of the three parts of NVIDIA DLSS, each a library of its own in the game's folder. */
+export type DlssPart = "superResolution" | "frameGeneration" | "rayReconstruction";
+
+/** A part of DLSS found among a game's files, at one version. */
+export interface DlssLibrary {
+  part: DlssPart;
+  /** As the file declares it: "3.7.10", "310.2.1". */
+  version: string;
+  /** How many copies at this version the game carries. */
+  copies: number;
+}
+
 /** What Steam's own cache says about a game's achievements. `items` may be shorter than `total`. */
 export interface GameAchievements {
   total: number;

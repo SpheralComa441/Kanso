@@ -1,4 +1,4 @@
-import type { Deal, DetectedGame, EmulatorInfo } from "../types/game";
+import type { Deal, DetectedGame, DlssLibrary, EmulatorInfo } from "../types/game";
 
 /**
  * Sample library shown only in the browser preview (`npm run dev` outside Tauri),
@@ -374,6 +374,19 @@ function previewBanner(title: string, from: string, to: string): string {
 }
 
 /** Sample deals for the browser preview, shaped like the real store answers. */
+/** What the DLSS libraries of two sample games would read. */
+export const PREVIEW_DLSS: Record<string, DlssLibrary[]> = {
+  "steam:1091500": [
+    { part: "superResolution", version: "3.7.10", copies: 1 },
+    { part: "frameGeneration", version: "3.7.10", copies: 1 },
+    { part: "rayReconstruction", version: "3.5.10", copies: 1 },
+  ],
+  "epic:dc9d2e595d0e4650b35d659f90d41059": [
+    { part: "superResolution", version: "310.2.1", copies: 2 },
+    { part: "superResolution", version: "3.5", copies: 1 },
+  ],
+};
+
 export const PREVIEW_MOCK_DEALS: Deal[] = [
   {
     id: "epic:knightica",

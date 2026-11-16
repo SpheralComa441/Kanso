@@ -633,4 +633,12 @@ export const es: Dictionary = {
   "settings.storeForgetLiked": "Vaciar",
   "settings.storePrivacy": "Para las ofertas no hacen falta cuentas ni claves y no se envía nada tuyo: Kanso lee las listas públicas de las tiendas. Las imágenes de las ofertas se cargan desde los sitios de las tiendas.",
   "settings.homePicksHelp": "Ofertas elegidas según los géneros que más juegas, y alguna distinta a propósito.",
+
+  "dlss.title": "DLSS",
+  "dlss.superResolution": "Super Resolution",
+  "dlss.frameGeneration": "Frame Generation",
+  "dlss.rayReconstruction": "Ray Reconstruction",
+  "dlss.help": "Las versiones de las bibliotecas de NVIDIA que trae el juego, leídas de los archivos de su carpeta. Kanso solo las lee: no descarga ni sustituye nada.",
+  "dlss.copies": "{count} copias en la carpeta del juego",
+  "dlss.mixed": "El juego contiene copias de versiones distintas.",
 };

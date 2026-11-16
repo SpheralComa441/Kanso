@@ -5,6 +5,7 @@ pub mod cleaner;
 pub mod config;
 pub mod db;
 pub mod deals;
+pub mod dlss;
 pub mod emulators;
 pub mod ea_account;
 pub mod epic_account;
