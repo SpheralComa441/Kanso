@@ -220,6 +220,18 @@ pub struct DetectedGame {
     /// first saw it, or known to be owned without ever having been installed here.
     #[serde(default = "default_true")]
     pub is_installed: bool,
+    /// Genres the user gave the game, besides the ones its store page lists. They are the
+    /// user's: a sync that fetches the store's genres again leaves them alone.
+    #[serde(default)]
+    pub custom_genres: Vec<String>,
+    /// The version installed, as the game's client or its files say it: a build number, a
+    /// version string. `None` when nothing on disk says.
+    #[serde(default)]
+    pub version: Option<String>,
+    /// A Steam game on this PC that belongs to someone else's account: played through
+    /// family sharing.
+    #[serde(default)]
+    pub is_family_shared: bool,
     /// Last metadata/cover update timestamp in ms (also used for UI image cache busting).
     #[serde(default)]
     pub updated_at: u64,
@@ -269,7 +281,38 @@ impl DetectedGame {
             achievements_total: None,
             steam_store_appid: None,
             is_installed: true,
+            custom_genres: Vec::new(),
+            version: None,
+            is_family_shared: false,
             updated_at: now_timestamp_ms(),
+        }
+    }
+
+    /// Address that asks the game's own client to uninstall it, for the stores that have
+    /// one. Like the others, built from what is stored for the game, never from the
+    /// interface. The client asks for confirmation itself: Kanso deletes nothing.
+    pub fn uninstall_uri(&self) -> Option<String> {
+        if !self.is_installed {
+            return None;
+        }
+        let app_id = self
+            .platform_app_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let numeric = |id: &&str| id.bytes().all(|b| b.is_ascii_digit());
+        match self.platform {
+            // Two clients take the request and ask for confirmation themselves
+            GamePlatform::Steam => app_id.filter(numeric).map(|id| format!("steam://uninstall/{id}")),
+            GamePlatform::Ubisoft => app_id.filter(numeric).map(|id| format!("uplay://uninstall/{id}")),
+            // The others have no such request: the game, or the library, is opened in the
+            // client (for Xbox games, the installed apps of Windows) to uninstall it there
+            GamePlatform::Gog => app_id.filter(numeric).map(|id| format!("goggalaxy://openGameView/{id}")),
+            GamePlatform::Epic => Some("com.epicgames.launcher://store/library".to_string()),
+            GamePlatform::Ea => Some("origin2://library/open".to_string()),
+            GamePlatform::BattleNet => Some("battlenet://".to_string()),
+            GamePlatform::Xbox => Some("ms-settings:appsfeatures".to_string()),
+            GamePlatform::Standalone | GamePlatform::Emulator => None,
         }
     }
 

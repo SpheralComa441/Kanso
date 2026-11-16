@@ -598,6 +598,17 @@ fn set_game_status(
     })
 }
 
+/// Sets the genres the user gives a game besides the ones its store lists.
+#[tauri::command]
+fn set_game_genres(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    game_id: String,
+    genres: Vec<String>,
+) -> Result<DetectedGame, String> {
+    update_stored_game(&app, &state, &game_id, |store| store.set_custom_genres(&game_id, &genres))
+}
+
 /// Launches a game by library id. The launch target is always read from the local store,
 /// never taken from the webview.
 #[tauri::command]
@@ -645,6 +656,22 @@ fn install_game(app: AppHandle, state: State<'_, AppState>, game_id: String) -> 
     let uri = game
         .install_uri()
         .ok_or_else(|| T::NoInstallTarget.s().to_string())?;
+    app.opener()
+        .open_url(&uri, None::<&str>)
+        .map_err(|e| format!("{} \"{}\": {e}", T::LaunchFailed.s(), game.title))
+}
+
+/// Asks the game's own client to uninstall it, or, for a client that has no such request, to
+/// show the game so that it can be uninstalled there. Kanso deletes nothing itself, and the
+/// address is built from what the library stores for the game.
+#[tauri::command]
+fn uninstall_game(app: AppHandle, state: State<'_, AppState>, game_id: String) -> Result<(), String> {
+    let game = lock_db(&state.db)
+        .get_game(&game_id)?
+        .ok_or_else(|| game_not_found(&game_id))?;
+    let uri = game
+        .uninstall_uri()
+        .ok_or_else(|| T::NoUninstallTarget.s().to_string())?;
     app.opener()
         .open_url(&uri, None::<&str>)
         .map_err(|e| format!("{} \"{}\": {e}", T::LaunchFailed.s(), game.title))
@@ -815,6 +842,29 @@ fn open_themes_folder(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
 }
 
+/// Opens the folder a game is in, in the file manager: the folder of its executable (or of
+/// its game file), else its install folder. Which folder is read from the library, never
+/// taken from the webview, and nothing in it is touched.
+#[tauri::command]
+fn open_game_folder(app: AppHandle, state: State<'_, AppState>, game_id: String) -> Result<(), String> {
+    let game = lock_db(&state.db)
+        .get_game(&game_id)?
+        .ok_or_else(|| game_not_found(&game_id))?;
+    let beside_executable = game
+        .executable_path
+        .as_deref()
+        // A RetroArch game can be a file inside an archive: "archive.zip#game.sfc"
+        .map(|path| path.split('#').next().unwrap_or(path))
+        .and_then(|path| Path::new(path).parent())
+        .filter(|dir| dir.is_dir());
+    let dir = beside_executable
+        .or_else(|| Some(Path::new(&game.install_dir)).filter(|dir| !game.install_dir.trim().is_empty() && dir.is_dir()))
+        .ok_or_else(|| T::FolderNotFound.s().to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
+}
+
 fn launch_game_inner(app: &AppHandle, game: &DetectedGame) -> Result<(), String> {
     // Prefer protocol URI when available (Steam `steam://rungameid/{appid}`, Epic launcher URI)
     if let Some(uri) = game.launch_uri.as_deref().filter(|u| !u.trim().is_empty()) {
@@ -965,6 +1015,7 @@ pub fn run() {
             set_game_hidden,
             launch_game,
             install_game,
+            uninstall_game,
             fetch_deals,
             open_store_page,
             list_themes,
@@ -974,6 +1025,8 @@ pub fn run() {
             export_theme,
             open_themes_folder,
             set_game_status,
+            set_game_genres,
+            open_game_folder,
             playtime::get_game_achievements,
             playtime::get_play_sessions,
             playtime::get_running_games,

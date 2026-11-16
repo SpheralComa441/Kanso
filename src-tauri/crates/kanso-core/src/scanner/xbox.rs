@@ -17,6 +17,8 @@ const GAME_LAUNCH_HELPER: &str = "gamelaunchhelper.exe";
 pub struct XboxGameConfig {
     /// `<Identity Name="...">`, stable per title.
     pub identity_name: String,
+    /// `<Identity Version="...">`: the version of the package installed.
+    pub version: String,
     /// `<ShellVisuals DefaultDisplayName="...">`; empty when it is a resource reference.
     pub display_name: String,
     /// `<Executable Name="...">` entries, in file order.
@@ -117,6 +119,7 @@ pub fn parse_microsoft_game_config(xml: &str) -> XboxGameConfig {
 
     XboxGameConfig {
         identity_name: xml_attribute(xml, "Identity", "Name").unwrap_or_default(),
+        version: xml_attribute(xml, "Identity", "Version").unwrap_or_default(),
         display_name,
         executables,
     }
@@ -217,7 +220,7 @@ pub fn scan_xbox_from_roots(roots: &[PathBuf]) -> SourceScanOutput {
                     .find(|candidate| candidate.is_file())
             };
 
-            output.games.push(DetectedGame::new_detected(
+            let mut game = DetectedGame::new_detected(
                 id,
                 title.to_string(),
                 clean_game_title(title),
@@ -226,7 +229,9 @@ pub fn scan_xbox_from_roots(roots: &[PathBuf]) -> SourceScanOutput {
                 game_dir.to_string_lossy().to_string(),
                 exe.map(|p| p.to_string_lossy().to_string()),
                 None,
-            ));
+            );
+            game.version = super::plain_version(&config.version);
+            output.games.push(game);
         }
     }
 

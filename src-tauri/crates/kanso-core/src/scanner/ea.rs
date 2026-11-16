@@ -73,7 +73,7 @@ pub fn scan_ea_from_entries(uninstall_entries: &[RegistryEntry]) -> SourceScanOu
             .or_else(|| pick_main_executable(install_path, display_name))
             .map(|p| p.to_string_lossy().to_string());
 
-        output.games.push(DetectedGame::new_detected(
+        let mut game = DetectedGame::new_detected(
             id,
             display_name.to_string(),
             clean_game_title(display_name),
@@ -82,7 +82,9 @@ pub fn scan_ea_from_entries(uninstall_entries: &[RegistryEntry]) -> SourceScanOu
             install_dir.to_string(),
             exe,
             None,
-        ));
+        );
+        game.version = installed_version(Path::new(install_dir));
+        output.games.push(game);
     }
 
     output
@@ -244,5 +246,34 @@ mod tests {
             out.games[1].executable_path.as_deref(),
             Some(apex_dir.join("r5apex.exe").to_string_lossy().as_ref())
         );
+    }
+}
+
+/// The version of an EA game, from the installer data EA leaves in the game's folder
+/// (`__Installer/installerdata.xml`, `<gameVersion version="…"/>`).
+fn installed_version(install_dir: &Path) -> Option<String> {
+    let xml = std::fs::read_to_string(install_dir.join("__Installer").join("installerdata.xml")).ok()?;
+    version_in_installer_data(&xml)
+}
+
+fn version_in_installer_data(xml: &str) -> Option<String> {
+    let tag = &xml[xml.find("<gameVersion")?..];
+    let tag = &tag[..tag.find('>')?];
+    let value = &tag[tag.find("version=\"")? + "version=\"".len()..];
+    super::plain_version(&value[..value.find('"')?])
+}
+
+#[cfg(test)]
+mod version_tests {
+    use super::version_in_installer_data;
+
+    #[test]
+    fn reads_the_version_ea_writes_in_its_installer_data() {
+        let xml = r#"<?xml version="1.0"?><DiPManifest version="4.0"><buildMetaData><gameVersion version="1.0.0.3"/></buildMetaData></DiPManifest>"#;
+        assert_eq!(version_in_installer_data(xml).as_deref(), Some("1.0.0.3"));
+        assert_eq!(version_in_installer_data(r#"<game gameVersion="2.1"><x/></game>"#), None, "an attribute of another element is not it");
+        assert_eq!(version_in_installer_data(r#"<gameVersion version=""/>"#), None);
+        assert_eq!(version_in_installer_data("<gameVersion version=\"1.2"), None, "cut short");
+        assert_eq!(version_in_installer_data("not xml"), None);
     }
 }

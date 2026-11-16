@@ -25,6 +25,7 @@ import {
   type LibraryFilters,
 } from "../lib/library";
 import { PLATFORM_ORDER, platformLabel } from "../lib/platforms";
+import type { HideableSection } from "../types/game";
 import type { CategoryKind } from "./CategoryGrid";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
@@ -57,6 +58,8 @@ interface SidebarProps {
   genres: GenreSummary[];
   /** Steam community tags found in the library, most common first. */
   tags: GenreSummary[];
+  /** The parts of the panel the user chose to leave out. */
+  hidden: readonly HideableSection[];
 }
 
 /** Tags shown before "show all": the list can run to a hundred entries. */
@@ -226,6 +229,7 @@ export function Sidebar({
   counts,
   genres,
   tags,
+  hidden,
 }: SidebarProps) {
   const { t } = useI18n();
   const [showAllTags, setShowAllTags] = useState(false);
@@ -303,14 +307,16 @@ export function Sidebar({
       <nav className="app-sidebar-nav scroll-area fade-top flex h-full flex-col gap-5 overflow-y-auto">
         {/* The two pages that are not the library */}
         <div className="space-y-0.5">
-          <NavRow
-            id="nav-home"
-            page
-            label={t("sidebar.home")}
-            active={view === "home"}
-            icon={<Home className="h-3.5 w-3.5 shrink-0" />}
-            onClick={onOpenHome}
-          />
+          {!hidden.includes("home") && (
+            <NavRow
+              id="nav-home"
+              page
+              label={t("sidebar.home")}
+              active={view === "home"}
+              icon={<Home className="h-3.5 w-3.5 shrink-0" />}
+              onClick={onOpenHome}
+            />
+          )}
           <NavRow
             id="nav-stats"
             page
@@ -493,7 +499,7 @@ export function Sidebar({
           )}
         </section>
 
-        {tags.length > 0 && (
+        {tags.length > 0 && !hidden.includes("tags") && (
           <section>
             <SectionToggle
               id="browse-tags"

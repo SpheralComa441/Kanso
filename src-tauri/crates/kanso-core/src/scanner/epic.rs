@@ -26,6 +26,9 @@ struct EpicItemManifest {
     catalog_item_id: String,
     #[serde(rename = "bIsIncompleteInstall", default)]
     is_incomplete_install: bool,
+    /// The version installed, as the publisher names it.
+    #[serde(default)]
+    app_version_string: String,
 }
 
 /// Returns the default Epic Games Launcher manifests folder on Windows:
@@ -92,7 +95,7 @@ pub fn parse_epic_item_manifest(content: &str) -> Result<Option<DetectedGame>, S
         app_name,
     );
 
-    Ok(Some(DetectedGame::new_detected(
+    let mut game = DetectedGame::new_detected(
         format!("epic:{id_suffix}"),
         display_name.to_string(),
         clean_game_title(display_name),
@@ -101,7 +104,9 @@ pub fn parse_epic_item_manifest(content: &str) -> Result<Option<DetectedGame>, S
         install_location.to_string(),
         Some(exe_path),
         launch_uri,
-    )))
+    );
+    game.version = super::plain_version(&manifest.app_version_string);
+    Ok(Some(game))
 }
 
 fn join_install_and_executable(install_location: &str, launch_executable: &str) -> String {

@@ -66,6 +66,9 @@ function seed(game: PreviewSeed): DetectedGame {
     achievementsTotal: null,
     steamStoreAppid: null,
     isInstalled: true,
+    customGenres: [],
+    version: null,
+    isFamilyShared: false,
     updatedAt: 1700000000000,
     ...rest,
   };
@@ -131,6 +134,7 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
     achievementsTotal: 57,
     lastPlayedAt: Date.now() - 95 * 24 * 60 * 60 * 1000,
     title: "Cyberpunk 2077",
+    version: "build 15738292",
     tags: ["Mondo aperto", "Cyberpunk", "Giocatore singolo", "Fantascienza"],
     playtimeMinutes: 4380,
     platform: "steam",
@@ -210,6 +214,8 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
     achievementsUnlocked: 2,
     achievementsTotal: 49,
     title: "Stardew Valley",
+    version: "build 14126492",
+    isFamilyShared: true,
     tags: ["Simulatore di fattoria", "Pixel art", "Co-op online", "Rilassanti"],
     playtimeMinutes: 35,
     platform: "steam",
@@ -270,6 +276,7 @@ export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
     lastPlayedAt: Date.now() - 40 * 24 * 60 * 60 * 1000,
     steamStoreAppid: "367520",
     title: "Hollow Knight",
+    version: "1.5.78.11833",
     tags: ["Metroidvania", "Stile Souls", "Difficili", "Giocatore singolo"],
     platform: "standalone",
     installDir: "E:\\Games\\Hollow Knight",
@@ -290,6 +297,7 @@ export const PREVIEW_MOCK_EMULATORS: EmulatorInfo[] = [
     exePath: "D:\\Emulatori\\Dolphin\\Dolphin.exe",
     folders: [{ path: "D:\\Roms\\GameCube", fromEmulator: true }],
     addedByUser: false,
+    version: "2509",
   },
   {
     id: "duckstation",
@@ -298,6 +306,7 @@ export const PREVIEW_MOCK_EMULATORS: EmulatorInfo[] = [
     exePath: "D:\\Emulatori\\DuckStation\\duckstation-qt-x64-ReleaseLTCG.exe",
     folders: [{ path: "D:\\Roms\\PSX", fromEmulator: true }],
     addedByUser: false,
+    version: "0.1.9226",
   },
   {
     id: "pcsx2",
@@ -306,6 +315,7 @@ export const PREVIEW_MOCK_EMULATORS: EmulatorInfo[] = [
     exePath: "C:\\Program Files\\PCSX2\\pcsx2-qt.exe",
     folders: [],
     addedByUser: false,
+    version: "2.4.0",
   },
 ];
 
@@ -327,6 +337,8 @@ function emulated(
     genres: [],
     shortDescription: null,
     colors,
+    // A game file has no version of its own: it shows its emulator's
+    version: emulator === "dolphin" ? "2509" : "0.1.9226",
     ...more,
   });
 }

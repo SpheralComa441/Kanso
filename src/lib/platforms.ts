@@ -81,6 +81,31 @@ export function isEmulated(game: DetectedGame): boolean {
  * Mirrors what the backend can build an address from (`DetectedGame::install_uri`): a game
  * listed by an account may lack what its client knows it by.
  */
+/**
+ * How an installed game can be uninstalled from Kanso: `uninstall` when its client takes the
+ * request (and asks for confirmation itself), `client` when all Kanso can do is open the
+ * game in its client, `null` when there is no client to ask (a loose program, a game file).
+ * Mirrors `DetectedGame::uninstall_uri` of the backend. Kanso never deletes a game itself.
+ */
+export function uninstallMode(game: DetectedGame): "uninstall" | "client" | null {
+  if (!game.isInstalled) return null;
+  const appId = game.platformAppId?.trim() ?? "";
+  switch (game.platform) {
+    case "steam":
+    case "ubisoft":
+      return /^\d+$/.test(appId) ? "uninstall" : null;
+    case "gog":
+      return /^\d+$/.test(appId) ? "client" : null;
+    case "epic":
+    case "ea":
+    case "Battle.net":
+    case "xbox":
+      return "client";
+    default:
+      return null;
+  }
+}
+
 export function canInstall(game: DetectedGame): boolean {
   if (game.isInstalled) return false;
   const appId = game.platformAppId?.trim() ?? "";

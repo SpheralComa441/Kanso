@@ -1,9 +1,22 @@
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
-import { CloudDownload, Download, Eye, EyeOff, Pencil, Play, Star, X } from "lucide-react";
+import {
+  CloudDownload,
+  Download,
+  Eye,
+  EyeOff,
+  FolderOpen,
+  Pencil,
+  Play,
+  Plus,
+  Star,
+  Trash2,
+  Users,
+  X,
+} from "lucide-react";
 import { useI18n, type I18n } from "../i18n";
 import { getPlaySessions, resolveCoverUrl } from "../lib/backend";
 import { GAME_STATUSES, genreKey } from "../lib/library";
-import { PLATFORM_META, canInstall, platformLabel } from "../lib/platforms";
+import { PLATFORM_META, canInstall, platformLabel, uninstallMode } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame, GameStatus, PlaySession, PluginInfo, ThemeDetail } from "../types/game";
 import { Cover } from "./Cover";
@@ -33,11 +46,19 @@ interface GameDetailProps {
   onToggleFavorite: (game: DetectedGame) => void;
   onToggleHidden: (game: DetectedGame) => void;
   onEdit: (game: DetectedGame) => void;
+  /** Opens the folder the game is in, in the file manager. */
+  onOpenFolder: (game: DetectedGame) => void;
+  /** Asks the game's client to uninstall it, or to show it where that is all it can do. */
+  onUninstall: (game: DetectedGame) => void;
   onSelectGenre: (genreKey: string) => void;
   onSelectTag: (tagKey: string) => void;
   /** Kanso sees one of the game's processes right now. */
   isRunning: boolean;
   onSetStatus: (game: DetectedGame, status: GameStatus | null) => void;
+  /** Replaces the genres the user gave the game (the store's own are not touched). */
+  onSetGenres: (game: DetectedGame, customGenres: string[]) => void;
+  /** The genres of the library, offered while a new one is typed. */
+  knownGenres: string[];
   /** Enabled plugins that add sections to the sheet. */
   plugins: PluginInfo[];
   /** For an emulated game, the name of the emulator that runs it. */
@@ -56,7 +77,7 @@ function launchTarget(game: DetectedGame, t: I18n["t"]): string {
 
 /* ------------------------------------------------- pieces both layouts share */
 
-type Piece = Pick<GameDetailProps, "onSelectGenre" | "onSelectTag" | "onSetStatus"> & {
+type Piece = Pick<GameDetailProps, "onSelectGenre" | "onSelectTag" | "onSetStatus" | "onSetGenres" | "knownGenres"> & {
   game: DetectedGame;
 };
 
@@ -78,6 +99,26 @@ function Badges({
         {/* An emulated game says which emulator runs it, where a store game names its store */}
         {(game.platform === "emulator" && emulatorName) || platformLabel(game.platform, t)}
       </span>
+      {/* What is installed: the game's version, or the version of the emulator that runs it */}
+      {game.isInstalled && game.version && (
+        <span
+          id="detail-version"
+          title={t(game.platform === "emulator" ? "detail.versionEmulator" : "detail.version")}
+          className="inline-block rounded-md border border-oled-border bg-oled-bg/60 px-2 py-0.5 font-mono text-3xs text-zinc-400"
+        >
+          {/^\d/.test(game.version) ? `v${game.version}` : game.version}
+        </span>
+      )}
+      {game.isFamilyShared && (
+        <span
+          id="detail-family-shared-badge"
+          title={t("game.familySharedHelp")}
+          className="inline-flex items-center gap-1.5 rounded-md border border-oled-border bg-oled-bg/60 px-2 py-0.5 text-3xs font-medium text-zinc-300"
+        >
+          <Users className="h-3 w-3" />
+          {t("game.familyShared")}
+        </span>
+      )}
       {!game.isInstalled && (
         <span
           id="detail-not-installed-badge"
@@ -100,26 +141,108 @@ function Badges({
   );
 }
 
-function Genres({ game, onSelectGenre, onSelectTag }: Omit<Piece, "onSetStatus">) {
+function Genres({ game, onSelectGenre, onSelectTag, onSetGenres, knownGenres }: Omit<Piece, "onSetStatus">) {
   const { t } = useI18n();
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+  const own = game.customGenres ?? [];
+  const isOwn = (genre: string) => own.some((entry) => entry.toLowerCase() === genre.toLowerCase());
+  const chip =
+    "rounded-full border border-oled-border bg-oled-bg/60 px-2.5 py-0.5 text-2xs text-zinc-300 transition-colors hover:border-accent/50 hover:text-accent";
+
+  // Another game: nothing half typed is carried over
+  useEffect(() => {
+    setAdding(false);
+    setDraft("");
+  }, [game.id]);
+
+  const add = () => {
+    const name = draft.trim().replace(/\s+/g, " ");
+    setAdding(false);
+    setDraft("");
+    // A genre the game already has is not added twice: there is nothing to change
+    if (!name || game.genres.some((genre) => genre.toLowerCase() === name.toLowerCase())) return;
+    onSetGenres(game, [...own, name]);
+  };
+
   return (
     <>
-      {game.genres.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5" aria-label={t("detail.genres")}>
-          {game.genres.map((genre) => (
-            <li key={genre}>
+      <ul id="detail-genres" className="flex flex-wrap items-center gap-1.5" aria-label={t("detail.genres")}>
+        {game.genres.map((genre) => (
+          <li key={genre} className="flex items-center" data-own-genre={isOwn(genre) ? "" : undefined}>
+            <button
+              type="button"
+              onClick={() => onSelectGenre(genreKey(genre))}
+              title={t("detail.showGenre", { genre })}
+              className={`${chip} ${isOwn(genre) ? "rounded-r-none border-r-0 pr-1.5" : ""}`}
+            >
+              {genre}
+            </button>
+            {/* A genre the user added can be taken away again; the store's own cannot */}
+            {isOwn(genre) && (
               <button
                 type="button"
-                onClick={() => onSelectGenre(genreKey(genre))}
-                title={t("detail.showGenre", { genre })}
-                className="rounded-full border border-oled-border bg-oled-bg/60 px-2.5 py-0.5 text-2xs text-zinc-300 transition-colors hover:border-accent/50 hover:text-accent"
+                onClick={() => onSetGenres(game, own.filter((entry) => entry.toLowerCase() !== genre.toLowerCase()))}
+                aria-label={t("detail.removeGenre", { genre })}
+                title={t("detail.removeGenre", { genre })}
+                className="rounded-r-full border border-oled-border bg-oled-bg/60 py-0.5 pl-1 pr-1.5 text-2xs text-zinc-500 transition-colors hover:border-red-400/50 hover:text-red-300"
               >
-                {genre}
+                <X className="h-3 w-3" />
               </button>
-            </li>
-          ))}
-        </ul>
-      )}
+            )}
+          </li>
+        ))}
+        <li>
+          {adding ? (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                add();
+              }}
+            >
+              <input
+                id="detail-genre-input"
+                autoFocus
+                value={draft}
+                maxLength={40}
+                list="detail-known-genres"
+                placeholder={t("detail.genrePlaceholder")}
+                aria-label={t("detail.addGenre")}
+                onChange={(event) => setDraft(event.target.value)}
+                onBlur={add}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    // Leaves the field, not the sheet
+                    event.stopPropagation();
+                    setDraft("");
+                    setAdding(false);
+                  }
+                }}
+                className="w-36 rounded-full border border-accent/60 bg-oled-bg px-2.5 py-0.5 text-2xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
+              />
+              <datalist id="detail-known-genres">
+                {knownGenres
+                  .filter((genre) => !game.genres.some((own) => own.toLowerCase() === genre.toLowerCase()))
+                  .map((genre) => (
+                    <option key={genre} value={genre} />
+                  ))}
+              </datalist>
+            </form>
+          ) : (
+            <button
+              id="detail-add-genre-button"
+              type="button"
+              onClick={() => setAdding(true)}
+              aria-label={t("detail.addGenre")}
+              title={t("detail.addGenre")}
+              className="inline-flex items-center gap-1 rounded-full border border-dashed border-oled-border px-2 py-0.5 text-2xs text-zinc-500 transition-colors hover:border-accent/50 hover:text-accent"
+            >
+              <Plus className="h-3 w-3" />
+              {game.genres.length === 0 && <span>{t("detail.addGenre")}</span>}
+            </button>
+          )}
+        </li>
+      </ul>
 
       {/* Steam community tags: finer than genres ("Souls-like", "Co-op online") */}
       {game.tags.length > 0 && (
@@ -191,7 +314,7 @@ function CoverArt({ game, coverUrl, onBroken }: { game: DetectedGame; coverUrl: 
 
 type ActionsProps = Pick<
   GameDetailProps,
-  "isLaunching" | "onLaunch" | "onToggleFavorite" | "onToggleHidden" | "onEdit"
+  "isLaunching" | "onLaunch" | "onToggleFavorite" | "onToggleHidden" | "onEdit" | "onOpenFolder" | "onUninstall"
 > & {
   game: DetectedGame;
   playButtonRef: React.RefObject<HTMLButtonElement>;
@@ -206,6 +329,8 @@ function Actions({
   onToggleFavorite,
   onToggleHidden,
   onEdit,
+  onOpenFolder,
+  onUninstall,
   playButtonRef,
   stacked = false,
 }: ActionsProps) {
@@ -213,6 +338,15 @@ function Actions({
   // The main button starts the game, or asks its store's client to install it
   const canLaunch = game.isInstalled ? Boolean(game.launchUri || game.executablePath) : canInstall(game);
   const hideLabel = game.isHidden ? t("detail.unhide") : t("detail.hide");
+  const removal = uninstallMode(game);
+  const removalHelp = t(
+    removal !== "client"
+      ? "detail.uninstallHelp"
+      : game.platform === "xbox"
+        ? "detail.uninstallInWindows"
+        : "detail.uninstallInClient",
+    { client: platformLabel(game.platform, t) }
+  );
   const secondary =
     "inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-medium transition-colors";
 
@@ -275,6 +409,36 @@ function Actions({
           {game.isHidden ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
         </button>
       </div>
+
+      {/* What is on disk: its folder, one click away */}
+      {game.isInstalled && (game.executablePath || game.installDir) && (
+        <div className={stacked ? "flex items-center gap-2" : "contents"}>
+          <button
+            id="detail-folder-button"
+            type="button"
+            onClick={() => onOpenFolder(game)}
+            title={t("detail.openFolderHelp")}
+            className={`${secondary} ${stacked ? "min-w-0 flex-1" : ""} border-oled-border bg-oled-bg/60 text-zinc-300 hover:border-zinc-600`}
+          >
+            <FolderOpen className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{t("detail.openFolder")}</span>
+          </button>
+          {removal && (
+            <button
+              id="detail-uninstall-button"
+              type="button"
+              data-uninstall={removal}
+              onClick={() => onUninstall(game)}
+              title={removalHelp}
+              aria-label={`${t("detail.uninstall")}: ${removalHelp}`}
+              className={`${secondary} border-oled-border bg-oled-bg/60 text-zinc-300 hover:border-red-400/50 hover:text-red-300`}
+            >
+              <Trash2 className="h-3.5 w-3.5 shrink-0" />
+              {!stacked && <span>{t("detail.uninstall")}</span>}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -657,7 +821,13 @@ function BentoLayout(props: LayoutProps) {
           >
             {game.title}
           </h2>
-          <Genres game={game} onSelectGenre={onSelectGenre} onSelectTag={onSelectTag} />
+          <Genres
+            game={game}
+            onSelectGenre={onSelectGenre}
+            onSelectTag={onSelectTag}
+            onSetGenres={props.onSetGenres}
+            knownGenres={props.knownGenres}
+          />
         </div>
 
         {/* Narrow windows have no left column: the actions come right after the title */}
@@ -744,7 +914,13 @@ function SheetLayout(props: LayoutProps) {
             >
               {game.title}
             </h2>
-            <Genres game={game} onSelectGenre={onSelectGenre} onSelectTag={onSelectTag} />
+            <Genres
+            game={game}
+            onSelectGenre={onSelectGenre}
+            onSelectTag={onSelectTag}
+            onSetGenres={props.onSetGenres}
+            knownGenres={props.knownGenres}
+          />
           </div>
 
           <StatusPicker game={game} onSetStatus={onSetStatus} />

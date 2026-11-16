@@ -14,6 +14,7 @@ pub mod i18n;
 pub mod metadata;
 pub mod models;
 pub mod owned;
+pub mod pe_version;
 pub mod playtime;
 pub mod plugins;
 pub mod scanner;

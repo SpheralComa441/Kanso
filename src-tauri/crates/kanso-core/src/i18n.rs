@@ -121,6 +121,7 @@ pub enum T {
     LaunchFailed,
     NoLaunchTarget,
     ExeNotFound,
+    FolderNotFound,
     /// Follows "RetroArch: <n> ".
     RetroArchNoCore,
     RetroArchCoreMissing,
@@ -129,6 +130,7 @@ pub enum T {
     ThemeNotFound,
     GameNotInstalled,
     NoInstallTarget,
+    NoUninstallTarget,
     PluginInvalid,
     PluginNotFound,
     PluginFailed,
@@ -304,6 +306,12 @@ impl T {
                 "Ejecutable no encontrado en el disco",
                 "Исполняемый файл не найден на диске",
             ],
+            T::FolderNotFound => [
+                "La cartella del gioco non è più sul disco",
+                "The game's folder is no longer on disk",
+                "La carpeta del juego ya no está en el disco",
+                "Папка игры больше не найдена на диске",
+            ],
             T::RetroArchNoCore => [
                 "giochi delle sue playlist non hanno ancora un core associato: avviali una volta da RetroArch e compariranno qui",
                 "games of its playlists have no core assigned yet: start them once from RetroArch and they will appear here",
@@ -326,6 +334,7 @@ impl T {
             T::ThemeNotFound => ["Tema non trovato", "Theme not found", "Tema no encontrado", "Тема не найдена"],
             T::GameNotInstalled => ["Il gioco non è installato", "The game is not installed", "El juego no está instalado", "Игра не установлена"],
             T::NoInstallTarget => ["Kanso non può avviare l'installazione per questo store: usa il suo client", "Kanso cannot start the installation for this store: use its client", "Kanso no puede iniciar la instalación para esta tienda: usa su cliente", "Kanso не может запустить установку для этого магазина: используйте его клиент"],
+            T::NoUninstallTarget => ["Questo gioco non può essere disinstallato da qui: usa il client del suo store", "This game cannot be uninstalled from here: use its store's client", "Este juego no se puede desinstalar desde aquí: usa el cliente de su tienda", "Эту игру нельзя удалить отсюда: используйте клиент её магазина"],
             T::PluginInvalid => ["Plugin non valido", "Invalid plugin", "Plugin no válido", "Недопустимый плагин"],
             T::PluginNotFound => ["Plugin non trovato", "Plugin not found", "Plugin no encontrado", "Плагин не найден"],
             T::PluginFailed => ["Il plugin non ha risposto correttamente", "The plugin did not answer correctly", "El plugin no respondió correctamente", "Плагин не ответил корректно"],
