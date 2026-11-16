@@ -5,6 +5,7 @@ mod plugins;
 mod browser_signin;
 mod gamepass;
 mod signin_window;
+mod weather;
 
 use kanso_core::deals::is_allowed_store_url;
 use kanso_core::theme::{
@@ -51,6 +52,8 @@ pub(crate) struct AppState {
     /// Problems found while opening the library at startup, reported with the first scan.
     startup_warnings: Mutex<Vec<String>>,
     deals_cache: Arc<Mutex<Option<CachedDeals>>>,
+    /// The last answer about the weather for the Home page.
+    weather_cache: weather::WeatherCache,
     /// Games Kanso currently sees running, kept by the play time tracker.
     pub(crate) running_games: Arc<Mutex<Vec<String>>>,
     pub(crate) plugins: Arc<plugins::PluginHost>,
@@ -949,6 +952,7 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         db: Arc::clone(&db),
         startup_warnings: Mutex::new(startup_warnings),
         deals_cache: Arc::new(Mutex::new(None)),
+        weather_cache: Arc::default(),
         running_games: Arc::clone(&running_games),
         plugins: Arc::clone(&plugin_host),
         completing_library: Arc::default(),
@@ -1016,6 +1020,9 @@ pub fn run() {
             launch_game,
             install_game,
             uninstall_game,
+            weather::home_weather,
+            weather::search_weather_places,
+            weather::open_weather_source,
             fetch_deals,
             open_store_page,
             list_themes,

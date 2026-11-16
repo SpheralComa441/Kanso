@@ -126,6 +126,7 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
     "cardTitles": "secondary"
   },
   "motion": { "level": "smooth", "sheet": "rise", "view": "rise", "stagger": true },
+  "home": { "sections": ["resume", "upNext", "mostPlayed", "recommendations", "deals"], "effects": "seasonal" },
   "fontFiles": []
 }
 ```
@@ -297,6 +298,21 @@ animazioni spente non si muove da solo e restano le frecce.
 L'immagine dietro la scheda è sempre e solo la copertina del gioco che Kanso ha già in libreria:
 un tema sceglie *come* mostrarla, non *quale* immagine. *The image behind the sheet is always the
 cover Kanso already has for that game: a theme chooses how to show it, never which image.*
+
+### `home` — La pagina Home
+
+Quali parti della Home ci sono, in che ordine, e che cosa si muove dietro. *Which parts of Home
+there are, in which order, and what moves behind it.*
+
+| Chiave / Key | Valori / Values | Significato / Meaning |
+| --- | --- | --- |
+| `sections` | elenco di `resume`, `upNext`, `mostPlayed`, `recommendations`, `deals` | Le parti mostrate, nell'ordine scritto: da riprendere, prossimi giochi, i più giocati, consigli, offerte. Una parte non nominata non viene mostrata; un elenco vuoto lascia la Home vuota |
+| `effects` | `seasonal`, `none` | Lo sfondo che scende dall'alto: qualcosa della stagione, di una festa vicina o, se l'utente lo ha chiesto, del meteo; oppure niente |
+
+Un tema decide ordine e presenza delle parti; l'utente può comunque nasconderne qualunque, e
+spegnere lo sfondo, da *Impostazioni → Home*. Lo sfondo prende i suoi colori dal tema (testo,
+accento, secondo colore) e non si disegna con le animazioni spente. Un tema non può indicare
+immagini, video o indirizzi per lo sfondo: sceglie solo tra i due nomi.
 
 ### `motion` — Animazioni
 

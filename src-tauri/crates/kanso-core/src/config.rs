@@ -66,6 +66,85 @@ const CARD_INFO_DEFAULT: [&str; 3] = ["genres", "playtime", "badges"];
 /// list of tags. Anything else in `config.json` is dropped.
 pub const HIDEABLE_SECTIONS: [&str; 3] = ["home", "store", "tags"];
 
+/// The parts of the Home page the user can leave out.
+pub const HOME_SECTIONS: [&str; 5] = ["resume", "upNext", "mostPlayed", "recommendations", "deals"];
+/// Most games lined up to play next.
+pub const MAX_UP_NEXT: usize = 5;
+
+/// A place the user named for the weather on the Home page. Kept coarse on purpose: the
+/// coordinates are rounded to two decimals (about a kilometre), which is all a forecast
+/// needs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeatherPlace {
+    pub name: String,
+    pub latitude: f64,
+    pub longitude: f64,
+}
+
+// Coordinates that are not numbers never get past `sanitized`: equality holds
+impl Eq for WeatherPlace {}
+
+/// How the user wants the Home page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct HomeConfig {
+    /// Parts left out, from [`HOME_SECTIONS`].
+    pub hidden: Vec<String>,
+    /// The moving background of the season and of the holidays.
+    pub effects: bool,
+    /// Let the background follow the weather at `place`. Off until the user turns it on and
+    /// names a place: it is the one thing on the Home page that asks a site (Open-Meteo)
+    /// about somewhere.
+    pub weather: bool,
+    pub place: Option<WeatherPlace>,
+    /// The games lined up to play next, in order: ids of library games, at most
+    /// [`MAX_UP_NEXT`].
+    pub up_next: Vec<String>,
+}
+
+impl Default for HomeConfig {
+    fn default() -> Self {
+        Self { hidden: Vec::new(), effects: true, weather: false, place: None, up_next: Vec::new() }
+    }
+}
+
+impl HomeConfig {
+    fn sanitized(self) -> Self {
+        let place = self.place.and_then(|place| {
+            let name: String = place.name.trim().chars().filter(|c| !c.is_control()).take(80).collect();
+            let fits = place.latitude.is_finite()
+                && place.longitude.is_finite()
+                && (-90.0..=90.0).contains(&place.latitude)
+                && (-180.0..=180.0).contains(&place.longitude);
+            (!name.is_empty() && fits).then(|| WeatherPlace {
+                name,
+                latitude: (place.latitude * 100.0).round() / 100.0,
+                longitude: (place.longitude * 100.0).round() / 100.0,
+            })
+        });
+        let mut seen = HashSet::new();
+        Self {
+            hidden: HOME_SECTIONS
+                .iter()
+                .filter(|choice| self.hidden.iter().any(|item| item.trim() == **choice))
+                .map(|choice| choice.to_string())
+                .collect(),
+            effects: self.effects,
+            // Without a place there is no weather to ask about
+            weather: self.weather && place.is_some(),
+            place,
+            up_next: self
+                .up_next
+                .iter()
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty() && id.len() <= 200 && !id.chars().any(char::is_control) && seen.insert(id.clone()))
+                .take(MAX_UP_NEXT)
+                .collect(),
+        }
+    }
+}
+
 /// Most emulators remembered, folders per emulator and extensions per emulator.
 const MAX_EMULATORS: usize = 48;
 const MAX_EMULATOR_FOLDERS: usize = 16;
@@ -215,6 +294,8 @@ pub struct AppConfig {
     /// Parts of the side panel the user hid, from [`HIDEABLE_SECTIONS`]. With the Home page
     /// hidden, Kanso opens on the library.
     pub hidden_sections: Vec<String>,
+    /// How the user wants the Home page.
+    pub home: HomeConfig,
     /// Emulators added by the user, and folders added to the ones Kanso found.
     pub emulators: Vec<EmulatorSetting>,
     /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
@@ -241,6 +322,7 @@ impl Default for AppConfig {
             animations: ANIMATION_CHOICES[0].to_string(),
             card_info: CARD_INFO_DEFAULT.iter().map(|item| item.to_string()).collect(),
             hidden_sections: Vec::new(),
+            home: HomeConfig::default(),
             emulators: Vec::new(),
             has_game_pass: false,
             game_pass_catalog: false,
@@ -305,6 +387,7 @@ impl AppConfig {
                 .filter(|choice| self.hidden_sections.iter().any(|item| item.trim() == **choice))
                 .map(|choice| choice.to_string())
                 .collect(),
+            home: self.home.sanitized(),
             emulators: {
                 // One entry per emulator: a later one with the same id is a leftover
                 let mut seen = HashSet::new();
@@ -444,6 +527,13 @@ mod tests {
                 },
             ],
             hidden_sections: vec![" tags ".to_string(), "library".to_string(), "home".to_string(), "tags".to_string()],
+            home: HomeConfig {
+                hidden: vec!["deals".to_string(), "everything".to_string(), "resume".to_string()],
+                effects: false,
+                weather: true,
+                place: Some(WeatherPlace { name: "  Torino\n ".to_string(), latitude: 45.070_312, longitude: 7.686_856 }),
+                up_next: ["steam:1", " steam:2 ", "steam:1", "", "gog:3", "epic:4", "ea:5", "xbox:6"].map(str::to_string).to_vec(),
+            },
             card_info: vec![
                 "badges".to_string(),
                 " genres ".to_string(),
@@ -480,6 +570,23 @@ mod tests {
         assert!(!saved.track_playtime);
         assert_eq!(saved.card_info, ["genres", "badges"], "known names, once, in Kanso's order");
         assert_eq!(saved.hidden_sections, ["home", "tags"], "only what can be hidden, once each");
+        assert_eq!(saved.home.hidden, ["resume", "deals"], "known parts of Home, in Kanso's order");
+        assert!(!saved.home.effects && saved.home.weather);
+        assert_eq!(
+            saved.home.place,
+            Some(WeatherPlace { name: "Torino".to_string(), latitude: 45.07, longitude: 7.69 }),
+            "a place is kept coarse: about a kilometre"
+        );
+        assert_eq!(saved.home.up_next, ["steam:1", "steam:2", "gog:3", "epic:4", "ea:5"], "five at most, each once");
+        // Weather with no place, or a place that is not one, is no weather
+        let nowhere = AppConfig { home: HomeConfig { weather: true, ..HomeConfig::default() }, ..AppConfig::default() }.sanitized();
+        assert!(!nowhere.home.weather && nowhere.home.effects, "the seasonal background is on until switched off");
+        let off_the_map = AppConfig {
+            home: HomeConfig { weather: true, place: Some(WeatherPlace { name: "X".to_string(), latitude: 123.0, longitude: 0.0 }), ..HomeConfig::default() },
+            ..AppConfig::default()
+        }
+        .sanitized();
+        assert_eq!((off_the_map.home.weather, off_the_map.home.place), (false, None));
         assert_eq!(
             saved.emulators[..1],
             [EmulatorSetting {

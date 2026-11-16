@@ -27,6 +27,7 @@ pub mod theme;
 pub mod ubisoft_account;
 pub mod xbox_account;
 pub mod vdf;
+pub mod weather;
 
 pub use achievements::{Achievement, GameAchievements};
 pub use cleaner::{clean_game_title, is_placeholder_title};

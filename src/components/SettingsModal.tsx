@@ -7,6 +7,7 @@ import {
   EyeOff,
   FolderOpen,
   FolderPlus,
+  Home,
   Joystick,
   KeyRound,
   Languages,
@@ -36,6 +37,7 @@ import {
   isRunningInTauri,
   openThemesFolder,
   pickCustomFolder,
+  searchWeatherPlaces,
 } from "../lib/backend";
 import {
   BUILTIN_THEMES,
@@ -50,6 +52,8 @@ import type {
   AccessibilityConfig,
   AnimationsChoice,
   AppConfig,
+  HomeSection,
+  PlaceMatch,
   PluginInfo,
   PluginState,
   Theme,
@@ -63,6 +67,7 @@ import { StoreAccountsSettings } from "./StoreAccountsSettings";
 export type SettingsSection =
   | "general"
   | "appearance"
+  | "home"
   | "accessibility"
   | "library"
   | "accounts"
@@ -72,11 +77,20 @@ export type SettingsSection =
 const SECTIONS: { id: SettingsSection; icon: typeof Palette; label: MessageKey }[] = [
   { id: "general", icon: Settings2, label: "settings.cat.general" },
   { id: "appearance", icon: Palette, label: "settings.cat.appearance" },
+  { id: "home", icon: Home, label: "sidebar.home" },
   { id: "accessibility", icon: Accessibility, label: "a11y.section" },
   { id: "library", icon: Library, label: "settings.cat.library" },
   { id: "accounts", icon: UserRound, label: "accounts.title" },
   { id: "emulators", icon: Joystick, label: "settings.emulators" },
   { id: "plugins", icon: Puzzle, label: "settings.plugins" },
+];
+
+/** The parts of Home the user can leave out, with what each one is. */
+const HOME_SECTION_CHOICES: [HomeSection, MessageKey, MessageKey][] = [
+  ["resume", "home.resume", "settings.homeResumeHelp"],
+  ["upNext", "home.upNext", "settings.homeUpNextHelp"],
+  ["mostPlayed", "home.mostPlayed", "settings.homeMostPlayedHelp"],
+  ["deals", "settings.homeDeals", "settings.homeDealsHelp"],
 ];
 
 interface PanelProps {
@@ -176,6 +190,10 @@ export function SettingsModal({
   const [animations, setAnimations] = useState(initialConfig.animations);
   const [cardInfo, setCardInfo] = useState(initialConfig.cardInfo);
   const [hiddenSections, setHiddenSections] = useState(initialConfig.hiddenSections);
+  const [home, setHome] = useState(initialConfig.home);
+  // Looking for the place whose weather to follow: what was typed, and what was found
+  const [placeQuery, setPlaceQuery] = useState("");
+  const [places, setPlaces] = useState<PlaceMatch[] | "searching" | null>(null);
   const [emulators, setEmulators] = useState(initialConfig.emulators);
   const [hasGamePass, setHasGamePass] = useState(initialConfig.hasGamePass);
   const [gamePassCatalog, setGamePassCatalog] = useState(initialConfig.gamePassCatalog);
@@ -202,6 +220,9 @@ export function SettingsModal({
       setAnimations(initialConfig.animations);
       setCardInfo(initialConfig.cardInfo);
       setHiddenSections(initialConfig.hiddenSections);
+      setHome(initialConfig.home);
+      setPlaceQuery("");
+      setPlaces(null);
       setEmulators(initialConfig.emulators);
       setHasGamePass(initialConfig.hasGamePass);
       setGamePassCatalog(initialConfig.gamePassCatalog);
@@ -214,6 +235,17 @@ export function SettingsModal({
     // Only when the dialog opens: edits in progress must survive background updates
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
+
+  const findPlaces = async () => {
+    if (placeQuery.trim().length < 2) return;
+    setPlaces("searching");
+    try {
+      setPlaces(await searchWeatherPlaces(placeQuery));
+    } catch (err) {
+      setPlaces(null);
+      setErrorMsg(typeof err === "string" ? err : t("settings.homeWeatherError"));
+    }
+  };
 
   const closeWithoutSaving = () => {
     onPreviewTheme(null);
@@ -374,6 +406,7 @@ export function SettingsModal({
         // Kept in Kanso's order, whatever order they were ticked in
         cardInfo: CARD_INFO_CHOICES.filter((item) => cardInfo.includes(item)),
         hiddenSections,
+        home,
         // An entry that says nothing (no executable, folder or argument) is not kept
         emulators: emulators.filter(
           (emulator) => emulator.exePath.trim() || emulator.folders.length > 0 || emulator.args.trim()
@@ -790,6 +823,162 @@ export function SettingsModal({
                   })}
                 </div>
                 <p className="text-2xs leading-relaxed text-zinc-500">{t("cardInfo.help")}</p>
+              </section>
+            </Panel>
+
+            <Panel
+              id="home"
+              active={section === "home"}
+              title={t("sidebar.home")}
+              description={t("settings.cat.homeHelp")}
+            >
+              {/* Which parts of Home are shown */}
+              <section id="settings-home-sections" className="space-y-2">
+                <span className="block text-xs font-medium text-zinc-200">{t("settings.homeSections")}</span>
+                {HOME_SECTION_CHOICES.map(([name, label, help]) => (
+                  <div
+                    key={name}
+                    className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2"
+                  >
+                    <div>
+                      <label htmlFor={`home-section-${name}`} className="block text-xs font-medium text-zinc-200">
+                        {t(label)}
+                      </label>
+                      <p className="text-2xs text-zinc-500">{t(help)}</p>
+                    </div>
+                    <input
+                      id={`home-section-${name}`}
+                      type="checkbox"
+                      checked={!home.hidden.includes(name)}
+                      onChange={(e) =>
+                        setHome((current) => ({
+                          ...current,
+                          hidden: e.target.checked
+                            ? current.hidden.filter((entry) => entry !== name)
+                            : [...current.hidden, name],
+                        }))
+                      }
+                      className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                    />
+                  </div>
+                ))}
+                <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.homeSectionsHelp")}</p>
+              </section>
+
+              {/* What moves behind the top of Home */}
+              <section id="settings-home-effects" className="space-y-2">
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+                  <div>
+                    <label htmlFor="home-effects-checkbox" className="block text-xs font-medium text-zinc-200">
+                      {t("settings.homeEffects")}
+                    </label>
+                    <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.homeEffectsHelp")}</p>
+                  </div>
+                  <input
+                    id="home-effects-checkbox"
+                    type="checkbox"
+                    checked={home.effects}
+                    onChange={(e) => setHome((current) => ({ ...current, effects: e.target.checked }))}
+                    className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                  />
+                </div>
+              </section>
+
+              {/* The weather outside: off until the user turns it on and names a place */}
+              <section id="settings-home-weather" className="space-y-2">
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+                  <div>
+                    <label htmlFor="home-weather-checkbox" className="block text-xs font-medium text-zinc-200">
+                      {t("settings.homeWeather")}
+                    </label>
+                    <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.homeWeatherHelp")}</p>
+                  </div>
+                  <input
+                    id="home-weather-checkbox"
+                    type="checkbox"
+                    checked={home.weather}
+                    disabled={!home.effects}
+                    onChange={(e) => setHome((current) => ({ ...current, weather: e.target.checked }))}
+                    className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                  />
+                </div>
+                {home.weather && home.effects && (
+                  <div className="space-y-2 rounded-lg border border-oled-border bg-oled-bg/50 p-3">
+                    {home.place ? (
+                      <p id="home-weather-place" className="flex items-center justify-between gap-3 text-xs text-zinc-200">
+                        <span className="min-w-0 truncate">{home.place.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => setHome((current) => ({ ...current, place: null }))}
+                          className="shrink-0 text-2xs text-zinc-400 underline-offset-2 hover:text-zinc-100 hover:underline"
+                        >
+                          {t("settings.homeWeatherChange")}
+                        </button>
+                      </p>
+                    ) : (
+                      <>
+                        <div className="flex gap-2">
+                          <input
+                            id="home-weather-search"
+                            type="text"
+                            value={placeQuery}
+                            onChange={(e) => setPlaceQuery(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                void findPlaces();
+                              }
+                            }}
+                            placeholder={t("settings.homeWeatherPlaceholder")}
+                            maxLength={60}
+                            className="min-w-0 flex-1 rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:border-accent/60 focus:outline-none"
+                          />
+                          <button
+                            id="home-weather-search-button"
+                            type="button"
+                            onClick={() => void findPlaces()}
+                            disabled={placeQuery.trim().length < 2 || places === "searching"}
+                            className="rounded-lg border border-oled-border bg-oled-elevated px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:border-zinc-600 disabled:opacity-50"
+                          >
+                            {t("common.search")}
+                          </button>
+                        </div>
+                        {places === "searching" && <p className="text-2xs text-zinc-500">{t("settings.homeWeatherSearching")}</p>}
+                        {Array.isArray(places) &&
+                          (places.length === 0 ? (
+                            <p className="text-2xs text-zinc-500">{t("settings.homeWeatherNone")}</p>
+                          ) : (
+                            <ul id="home-weather-results" className="space-y-1">
+                              {places.map((place) => (
+                                <li key={`${place.latitude},${place.longitude}`}>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setHome((current) => ({
+                                        ...current,
+                                        place: {
+                                          name: place.name,
+                                          latitude: place.latitude,
+                                          longitude: place.longitude,
+                                        },
+                                      }));
+                                      setPlaces(null);
+                                      setPlaceQuery("");
+                                    }}
+                                    className="flex w-full items-baseline gap-2 rounded-md px-2.5 py-1.5 text-left text-xs text-zinc-200 transition-colors hover:bg-oled-elevated"
+                                  >
+                                    <span className="font-medium">{place.name}</span>
+                                    <span className="truncate text-2xs text-zinc-500">{place.region}</span>
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          ))}
+                      </>
+                    )}
+                    <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.homeWeatherPrivacy")}</p>
+                  </div>
+                )}
               </section>
             </Panel>
 

@@ -333,6 +333,59 @@ pub enum ViewMotion {
     Fade,
 }
 
+/// A part of the Home page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HomeSection {
+    /// The games being played, to pick up again.
+    Resume,
+    /// The games the user lined up to play next, and the ones marked "to play".
+    UpNext,
+    /// The games played the longest.
+    MostPlayed,
+    /// Suggestions from the stores, by the genres the user plays.
+    Recommendations,
+    /// Current discounts.
+    Deals,
+}
+
+/// What moves behind the top of the Home page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HomeEffects {
+    /// Something of the season (snow, leaves…), of a holiday when one is near and, if the
+    /// user asked for it, of the weather outside.
+    #[default]
+    Seasonal,
+    #[serde(rename = "none")]
+    Off,
+}
+
+/// The Home page: which of its parts are shown, in which order, and what moves behind it.
+/// The user can still hide any part, and the effect, in Settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeHome {
+    /// The parts shown, in order. A part not named is not shown.
+    pub sections: Vec<HomeSection>,
+    pub effects: HomeEffects,
+}
+
+impl Default for ThemeHome {
+    fn default() -> Self {
+        Self {
+            sections: vec![
+                HomeSection::Resume,
+                HomeSection::UpNext,
+                HomeSection::MostPlayed,
+                HomeSection::Recommendations,
+                HomeSection::Deals,
+            ],
+            effects: HomeEffects::Seasonal,
+        }
+    }
+}
+
 /// The animations of the interface. The user can switch them off or pick another level in
 /// the settings, and the accessibility preference "reduce motion" always wins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -473,6 +526,8 @@ pub struct Theme {
     pub detail: ThemeDetail,
     #[serde(default)]
     pub motion: ThemeMotion,
+    #[serde(default)]
+    pub home: ThemeHome,
     #[serde(default)]
     pub font_files: Vec<ThemeFontFile>,
 }
@@ -1073,6 +1128,28 @@ impl Theme {
             stagger: m.flag("stagger", d.stagger)?,
         };
 
+        let h = Fields::section(&root, "home")?;
+        let d = ThemeHome::default();
+        let home = ThemeHome {
+            sections: match h.get("sections") {
+                None => d.sections,
+                // Names from the list, each once, in the theme's order
+                Some(value @ Value::Array(names)) => {
+                    let mut sections: Vec<HomeSection> = Vec::new();
+                    for name in names {
+                        let section: HomeSection =
+                            serde_json::from_value(name.clone()).map_err(|_| h.wrong("sections", value))?;
+                        if !sections.contains(&section) {
+                            sections.push(section);
+                        }
+                    }
+                    sections
+                }
+                Some(other) => return Err(h.wrong("sections", other)),
+            },
+            effects: h.choice("effects", d.effects)?,
+        };
+
         let i = Fields::section(&root, "icons")?;
         let d = ThemeIcons::default();
         let icons = ThemeIcons {
@@ -1114,6 +1191,7 @@ impl Theme {
             effects,
             detail,
             motion,
+            home,
             font_files: parse_font_files(&root, fonts_dir)?,
         })
     }
@@ -1137,6 +1215,7 @@ impl Theme {
             "effects": self.effects,
             "detail": self.detail,
             "motion": self.motion,
+            "home": self.home,
             "fontFiles": self.font_files,
         });
         let mut text = serde_json::to_string_pretty(&value).unwrap_or_default();
@@ -1524,6 +1603,32 @@ mod tests {
             (r##"{"name":"X","colors":{},"detail":{"cards":"marquee"}}"##, "detail.cards"),
             (r##"{"name":"X","colors":{},"detail":{"keyTitles":"red"}}"##, "detail.keyTitles"),
             (r##"{"name":"X","colors":{},"detail":{"cardTitles":"#fff"}}"##, "detail.cardTitles"),
+        ] {
+            let err = Theme::from_json(raw).expect_err(raw);
+            assert!(err.contains(expected), "{raw} -> {err}");
+        }
+    }
+
+    #[test]
+    fn a_theme_arranges_the_home_page() {
+        let plain = Theme::from_json(r#"{"name":"X","colors":{}}"#).unwrap();
+        assert_eq!(plain.home, ThemeHome::default());
+        assert_eq!(plain.home.sections.len(), 5, "every part, in Kanso's order");
+
+        let own = Theme::from_json(
+            r##"{"name":"X","colors":{},"home":{"sections":["deals","resume","deals","mostPlayed"],"effects":"none"}}"##,
+        )
+        .unwrap();
+        assert_eq!(own.home.sections, [HomeSection::Deals, HomeSection::Resume, HomeSection::MostPlayed], "its order, each part once; the rest is left out");
+        assert_eq!(own.home.effects, HomeEffects::Off);
+        assert_eq!(Theme::from_json(&own.to_json()).unwrap().home, own.home);
+        let bare = Theme::from_json(r##"{"name":"X","colors":{},"home":{"sections":[]}}"##).unwrap();
+        assert!(bare.home.sections.is_empty(), "a theme may leave Home empty");
+
+        for (raw, expected) in [
+            (r##"{"name":"X","colors":{},"home":{"sections":["resume","<script>"]}}"##, "home.sections"),
+            (r##"{"name":"X","colors":{},"home":{"sections":"resume"}}"##, "home.sections"),
+            (r##"{"name":"X","colors":{},"home":{"effects":"url(x.gif)"}}"##, "home.effects"),
         ] {
             let err = Theme::from_json(raw).expect_err(raw);
             assert!(err.contains(expected), "{raw} -> {err}");
