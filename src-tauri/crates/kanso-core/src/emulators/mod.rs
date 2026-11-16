@@ -36,6 +36,8 @@ pub enum Library {
     RetroArchPlaylists,
     /// RPCS3: the folders its list of games names.
     Rpcs3Games,
+    /// PlayStation 4: the folders that hold an `eboot.bin`, in the games folders.
+    Ps4Folders,
 }
 
 /// An emulator Kanso knows.
@@ -110,6 +112,16 @@ pub const KNOWN: &[EmulatorDef] = &[
         extensions: &[],
         args: &["--no-gui", "{rom}"],
         library: Library::Rpcs3Games,
+    },
+    EmulatorDef {
+        id: "shadps4",
+        name: "shadPS4",
+        systems: "PlayStation 4",
+        exe_names: &["shadps4.exe"],
+        install_dirs: &["shadPS4"],
+        extensions: &[],
+        args: &["{rom}"],
+        library: Library::Ps4Folders,
     },
     EmulatorDef {
         id: "ppsspp",
@@ -312,8 +324,12 @@ pub fn known(id: &str) -> Option<&'static EmulatorDef> {
 
 /// The emulator an executable is, by its file name; `None` for any other program.
 pub fn identify(exe_path: &Path) -> Option<&'static EmulatorDef> {
-    let name = exe_path.file_name()?.to_str()?;
-    KNOWN.iter().find(|def| def.runs(name))
+    identify_name(exe_path.file_name()?.to_str()?)
+}
+
+/// The emulator whose executable has this file name.
+pub fn identify_name(file_name: &str) -> Option<&'static EmulatorDef> {
+    KNOWN.iter().find(|def| def.runs(file_name))
 }
 
 /// A folder an emulator's games are read from, and who said so.
@@ -539,6 +555,12 @@ pub fn scan_games(emulators: &[Emulator]) -> SourceScanOutput {
                     output.games.push(emulated_game(emulator, &path.to_string_lossy(), title));
                 }
             }
+            Library::Ps4Folders => {
+                let folders: Vec<PathBuf> = emulator.folders.iter().map(|folder| PathBuf::from(&folder.path)).collect();
+                for RomFile { path, title } in special::ps4_games(&folders) {
+                    output.games.push(emulated_game(emulator, &path.to_string_lossy(), title));
+                }
+            }
         }
     }
     output
@@ -602,6 +624,7 @@ mod tests {
             ("xenia_canary.exe", Some("xenia")),
             ("Mesen.exe", Some("mesen")),
             ("Mesen-S.exe", None),
+            ("shadPS4.exe", Some("shadps4")),
             ("notepad.exe", None),
         ] {
             assert_eq!(identify(Path::new("D:/Emu").join(file).as_path()).map(|def| def.id), id, "{file}");
