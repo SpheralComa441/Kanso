@@ -309,6 +309,200 @@
     background-color: var(--card-hover-border);
   }
 
+  /* ----------------------------------------------------------- small labels */
+
+  /* The label over a figure or a section: the theme's label face, in capitals if it says so */
+  .micro-label {
+    font-family: var(--font-label);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    color: var(--text-faint);
+  }
+
+  :root[data-label-uppercase] .micro-label {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  /* ------------------------------------------------- the sheet of a game */
+
+  /*
+   * What is behind the open sheet: the game's own artwork, blurred, under a veil of the
+   * theme's background color (so text stays legible over any cover), or the plain veil alone.
+   */
+  .detail-art {
+    position: absolute;
+    /* Wider than the window: a blur fades towards the edges of what it blurs */
+    inset: calc(var(--detail-blur) * -2.5);
+    width: calc(100% + var(--detail-blur) * 5);
+    height: calc(100% + var(--detail-blur) * 5);
+    max-width: none;
+    object-fit: cover;
+    filter: blur(var(--detail-blur)) saturate(1.15);
+    pointer-events: none;
+  }
+
+  .detail-veil {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: color-mix(in srgb, var(--bg-primary) var(--detail-dim), transparent);
+    /* A game without artwork: the library behind is softened instead */
+    backdrop-filter: blur(6px);
+  }
+
+  /* The sheet opens with one short movement; the backdrop fades in behind it */
+  .detail-overlay {
+    animation: detail-fade 0.2s ease-out both;
+  }
+
+  .detail-sheet {
+    animation: detail-rise 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  @keyframes detail-fade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes detail-rise {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+  }
+
+  /* Nothing of the game to show: the veil alone has to quieten the library behind */
+  .detail-veil[data-no-art] {
+    background: color-mix(in srgb, var(--bg-primary) max(var(--detail-dim), 86%), transparent);
+    backdrop-filter: blur(14px);
+  }
+
+  :root[data-detail-backdrop="dim"] .detail-art {
+    display: none;
+  }
+
+  :root[data-detail-backdrop="dim"] .detail-veil {
+    background: rgb(0 0 0 / 0.75);
+    backdrop-filter: blur(4px);
+  }
+
+  .detail-grid {
+    gap: var(--detail-gap);
+  }
+
+  /* A tile of the sheet */
+  .tile {
+    position: relative;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-panel);
+    background-color: var(--bg-surface);
+  }
+
+  :root[data-detail-tiles="glass"] .tile {
+    border-color: color-mix(in srgb, var(--text-primary) 14%, transparent);
+    background-color: color-mix(in srgb, var(--bg-surface) 64%, transparent);
+    backdrop-filter: blur(24px) saturate(1.25);
+  }
+
+  :root[data-detail-tiles="outlined"] .tile {
+    border-color: var(--border-strong);
+    background-color: color-mix(in srgb, var(--bg-primary) 90%, transparent);
+  }
+
+  /*
+   * Cut corners (top right and bottom left), as on the cards: the clip removes the border
+   * there, so it is redrawn as a ring that follows the cuts.
+   */
+  :root[data-panel-shape="cut"] .tile {
+    --cut: var(--radius-panel);
+    --ring: 1px;
+    --in: max(calc(var(--cut) + var(--ring) * 0.414), var(--ring));
+    --ring-color: var(--border-subtle);
+    border-radius: 0;
+    border-color: transparent;
+    clip-path: polygon(
+      0 0,
+      calc(100% - var(--cut)) 0,
+      100% var(--cut),
+      100% 100%,
+      var(--cut) 100%,
+      0 calc(100% - var(--cut))
+    );
+  }
+
+  :root[data-panel-shape="cut"] .tile::after {
+    content: "";
+    position: absolute;
+    inset: calc(var(--ring) * -1);
+    z-index: 5;
+    pointer-events: none;
+    background-color: var(--ring-color);
+    clip-path: polygon(
+      evenodd,
+      0 0,
+      calc(100% - var(--cut)) 0,
+      100% var(--cut),
+      100% 100%,
+      var(--cut) 100%,
+      0 calc(100% - var(--cut)),
+      0 0,
+      var(--ring) var(--ring),
+      var(--ring) calc(100% - var(--in)),
+      var(--in) calc(100% - var(--ring)),
+      calc(100% - var(--ring)) calc(100% - var(--ring)),
+      calc(100% - var(--ring)) var(--in),
+      calc(100% - var(--in)) var(--ring),
+      var(--ring) var(--ring)
+    );
+  }
+
+  :root[data-panel-shape="cut"][data-detail-tiles="glass"] .tile {
+    --ring-color: color-mix(in srgb, var(--text-primary) 14%, transparent);
+  }
+
+  :root[data-panel-shape="cut"][data-detail-tiles="outlined"] .tile {
+    --ring-color: var(--border-strong);
+  }
+
+  /* The bars of the activity chart: thin, rounded at the data end, square on the baseline */
+  .activity-bar {
+    width: min(100%, 1.25rem);
+    border-radius: 3px 3px 0 0;
+    background-color: var(--accent-color);
+    transition: opacity 0.15s ease;
+  }
+
+  .activity-day:hover .activity-bar,
+  .activity-day:focus-visible .activity-bar {
+    background-color: var(--accent-hover);
+  }
+
+  .activity-tip {
+    position: absolute;
+    bottom: calc(100% + 0.375rem);
+    left: 50%;
+    z-index: 10;
+    display: none;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-chip);
+    background-color: var(--bg-elevated);
+    padding: 0.25rem 0.5rem;
+    font-size: 0.6875rem;
+    color: var(--text-primary);
+    pointer-events: none;
+  }
+
+  .activity-day:hover .activity-tip,
+  .activity-day:focus-visible .activity-tip {
+    display: block;
+  }
+
   /* Caption over the cover, or no caption at all */
   :root[data-card-caption="none"] .game-card-caption,
   :root[data-card-caption="overlay"] .game-card-no-art .game-card-caption {

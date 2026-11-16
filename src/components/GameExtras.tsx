@@ -13,9 +13,7 @@ import { PluginBlocks } from "./PluginBlocks";
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="text-3xs font-semibold uppercase tracking-[0.12em] text-zinc-500">
-      {children}
-    </h3>
+    <h3 className="micro-label">{children}</h3>
   );
 }
 

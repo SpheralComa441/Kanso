@@ -294,6 +294,10 @@ export interface ThemeTypography {
   headingSpacing: number;
   /** Size of the whole interface relative to the default. */
   scale: number;
+  /** Font stack of the small labels over figures and sections; `null` uses the body font. */
+  labelFont: string | null;
+  /** Small labels in capitals, letter-spaced. */
+  labelUppercase: boolean;
 }
 
 export interface ThemeCards {
@@ -309,6 +313,23 @@ export interface ThemeShapes {
   controlRadius: number;
   panelRadius: number;
   chipRadius: number;
+  /** Corners of panels and tiles: rounded by `panelRadius`, or cut diagonally by it. */
+  panelShape: "rounded" | "cut";
+}
+
+/** The open sheet of a game. */
+export interface ThemeDetail {
+  /** Separate tiles, or one sheet with the cover on one side. */
+  layout: "bento" | "sheet";
+  /** Behind the sheet: the game's own artwork, blurred and veiled, or a plain veil. */
+  backdrop: "art" | "dim";
+  /** Blur of the artwork, in pixels. */
+  backdropBlur: number;
+  /** How much of the background color veils what is behind (0–1). */
+  backdropDim: number;
+  tiles: "filled" | "glass" | "outlined";
+  /** Space between tiles, in pixels. */
+  tileGap: number;
 }
 
 export interface ThemeIcons {
@@ -350,6 +371,7 @@ export interface Theme {
   shapes: ThemeShapes;
   icons: ThemeIcons;
   effects: ThemeEffects;
+  detail: ThemeDetail;
   fontFiles: ThemeFontFile[];
 }
 

@@ -903,6 +903,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
       <GameDetail
         game={detailGame}
+        layout={(previewTheme ?? savedTheme).detail.layout}
         isLaunching={launchingId !== null && launchingId === detailGameId}
         isTopmost={!editingGame && !isSettingsOpen}
         onClose={closeDetail}

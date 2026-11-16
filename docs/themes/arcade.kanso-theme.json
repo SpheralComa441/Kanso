@@ -24,7 +24,9 @@
     "headingWeight": 600,
     "headingUppercase": true,
     "headingSpacing": 0.06,
-    "scale": 1
+    "scale": 1,
+    "labelFont": null,
+    "labelUppercase": true
   },
   "layout": {
     "cardMinWidth": 180,
@@ -46,8 +48,29 @@
     "hover": "glow",
     "caption": "below"
   },
-  "shapes": { "controlRadius": 2, "panelRadius": 4, "chipRadius": 0 },
-  "icons": { "strokeWidth": 2.25, "corners": "sharp", "scale": 1.05, "fill": 0 },
-  "effects": { "backgroundGradient": [], "backgroundAngle": 180 },
+  "shapes": {
+    "controlRadius": 2,
+    "panelRadius": 4,
+    "chipRadius": 0,
+    "panelShape": "rounded"
+  },
+  "icons": {
+    "strokeWidth": 2.25,
+    "corners": "sharp",
+    "scale": 1.05,
+    "fill": 0
+  },
+  "effects": {
+    "backgroundGradient": [],
+    "backgroundAngle": 180
+  },
+  "detail": {
+    "layout": "sheet",
+    "backdrop": "dim",
+    "backdropBlur": 0,
+    "backdropDim": 0.8,
+    "tiles": "filled",
+    "tileGap": 12
+  },
   "fontFiles": []
 }

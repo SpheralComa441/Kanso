@@ -10,6 +10,7 @@ import {
   Settings,
 } from "lucide-react";
 import { useI18n } from "../i18n";
+import { KansoMark } from "./KansoMark";
 import {
   isRunningInTauri,
   watchWindowMaximized,
@@ -275,10 +276,7 @@ export function Header({
           </button>
 
           <div className="flex items-center gap-2.5">
-            <span
-              aria-hidden="true"
-              className="h-3.5 w-3.5 rounded-full border-2 border-accent border-r-transparent"
-            />
+            <KansoMark className="h-6 w-6 shrink-0 text-zinc-100" />
             <h1 className="text-base font-semibold tracking-tight text-zinc-100">
               Kanso
             </h1>
