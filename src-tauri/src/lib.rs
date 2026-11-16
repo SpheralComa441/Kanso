@@ -8,12 +8,13 @@ mod signin_window;
 mod weather;
 
 use kanso_core::deals::is_allowed_store_url;
+use kanso_core::dlss::{find_dlss, DlssLibrary};
 use kanso_core::theme::{
     delete_user_theme, export_theme_file, import_theme_file, list_user_themes, save_user_theme,
 };
 use kanso_core::{
     current_language, is_absent_cover_due, is_metadata_sync_due, now_timestamp_ms, scan_library,
-    set_language, AppConfig, DealsClient, DealsReport, DetectedGame, GameManualUpdate, GamePlatform, GameStatus,
+    set_language, AppConfig, DealStore, DealsClient, DealsReport, DetectedGame, GameManualUpdate, GamePlatform, GameStatus,
     Lang, LibraryDb, LibraryStore, MetadataClient, ScanReport, SgdbGameMatch, Theme, T,
 };
 use serde::Serialize;
@@ -44,6 +45,8 @@ const DEALS_CACHE_TTL_MS: u64 = 30 * 60 * 1000;
 struct CachedDeals {
     lang: Lang,
     country: String,
+    /// The stores that were asked: a store shown again asks afresh.
+    stores: Vec<DealStore>,
     report: DealsReport,
 }
 
@@ -744,8 +747,9 @@ fn setup_system_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Current discounts on Steam, Epic and GOG. Results are reused for half an hour unless
-/// `force_refresh`; `country` (ISO code) selects the regional prices.
+/// Current discounts on Steam, Epic, GOG and, through CheapShark, the other shops. A store
+/// the user left out of the Store page is not asked. Results are reused for half an hour
+/// unless `force_refresh`; `country` (ISO code) selects the regional prices.
 #[tauri::command]
 async fn fetch_deals(
     app: AppHandle,
@@ -753,11 +757,13 @@ async fn fetch_deals(
     country: String,
     force_refresh: bool,
 ) -> Result<DealsReport, String> {
-    let lang = resolve_config_path(&app)
-        .ok()
-        .and_then(|p| AppConfig::load_from_file(&p).ok())
-        .and_then(|c| c.lang())
-        .unwrap_or(FALLBACK_LANGUAGE);
+    let config = resolve_config_path(&app).ok().and_then(|p| AppConfig::load_from_file(&p).ok());
+    let lang = config.as_ref().and_then(|c| c.lang()).unwrap_or(FALLBACK_LANGUAGE);
+    let hidden = config.map(|c| c.store.hidden_stores).unwrap_or_default();
+    let stores: Vec<DealStore> = DealStore::ALL
+        .into_iter()
+        .filter(|store| !hidden.iter().any(|name| name == store.name()))
+        .collect();
     let country = kanso_core::deals::normalize_country(&country);
     let cache = Arc::clone(&state.deals_cache);
 
@@ -765,19 +771,41 @@ async fn fetch_deals(
         let cached = cache.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(entry) = cached.as_ref() {
             let fresh = now_timestamp_ms().saturating_sub(entry.report.fetched_at) < DEALS_CACHE_TTL_MS;
-            if fresh && entry.lang == lang && entry.country == country {
+            if fresh && entry.lang == lang && entry.country == country && entry.stores == stores {
                 return Ok(entry.report.clone());
             }
         }
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let report = DealsClient::new().fetch_all(lang, &country);
+        let mut report = DealsClient::new().fetch_stores(lang, &country, &stores);
+        // Steam's list of discounts does not say what kind of game each one is: its store
+        // service does, for all of them in one request (and for the games of the other shops
+        // that are on Steam too). Without an answer the deals are listed all the same, just
+        // not among the suggestions by genre. With Steam left out, Steam is not asked this
+        // either.
+        let mut steam_ids: Vec<u64> = report
+            .deals
+            .iter()
+            .filter_map(|deal| deal.steam_appid.as_deref()?.parse().ok())
+            .collect();
+        steam_ids.sort_unstable();
+        steam_ids.dedup();
+        if !steam_ids.is_empty() && stores.contains(&DealStore::Steam) {
+            let details = MetadataClient::new().with_language(lang).fetch_steam_app_details(&steam_ids);
+            for detail in details.unwrap_or_default() {
+                let appid = detail.appid.to_string();
+                for deal in report.deals.iter_mut().filter(|deal| deal.steam_appid.as_deref() == Some(appid.as_str())) {
+                    deal.genres = detail.genres.clone();
+                }
+            }
+        }
         // A fully failed fetch (offline) is not worth caching: the next visit retries
         if !report.deals.is_empty() {
             *cache.lock().unwrap_or_else(|p| p.into_inner()) = Some(CachedDeals {
                 lang,
                 country,
+                stores,
                 report: report.clone(),
             });
         }
@@ -865,6 +893,23 @@ fn open_game_folder(app: AppHandle, state: State<'_, AppState>, game_id: String)
         .ok_or_else(|| T::FolderNotFound.s().to_string())?;
     app.opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
+}
+
+/// The versions of the DLSS libraries a game carries (Super Resolution, Frame Generation, Ray
+/// Reconstruction), read from the files in its folder. Which folder is read from the library,
+/// never taken from the webview; the files are only read, and nothing is sent anywhere.
+#[tauri::command]
+async fn game_dlss(state: State<'_, AppState>, game_id: String) -> Result<Vec<DlssLibrary>, String> {
+    let game = lock_db(&state.db)
+        .get_game(&game_id)?
+        .ok_or_else(|| game_not_found(&game_id))?;
+    // A game played through an emulator has no libraries of its own; one not on disk, no files
+    if !game.is_installed || game.platform == GamePlatform::Emulator || game.install_dir.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    tauri::async_runtime::spawn_blocking(move || find_dlss(Path::new(&game.install_dir)))
+        .await
         .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))
 }
 
@@ -1034,6 +1079,7 @@ pub fn run() {
             set_game_status,
             set_game_genres,
             open_game_folder,
+            game_dlss,
             playtime::get_game_achievements,
             playtime::get_play_sessions,
             playtime::get_running_games,

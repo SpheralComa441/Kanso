@@ -125,6 +125,18 @@ export interface Achievement {
   progress: number | null;
 }
 
+/** One of the three parts of NVIDIA DLSS, each a library of its own in the game's folder. */
+export type DlssPart = "superResolution" | "frameGeneration" | "rayReconstruction";
+
+/** A part of DLSS found among a game's files, at one version. */
+export interface DlssLibrary {
+  part: DlssPart;
+  /** As the file declares it: "3.7.10", "310.2.1". */
+  version: string;
+  /** How many copies at this version the game carries. */
+  copies: number;
+}
+
 /** What Steam's own cache says about a game's achievements. `items` may be shorter than `total`. */
 export interface GameAchievements {
   total: number;
@@ -186,6 +198,7 @@ export interface AppConfig {
   /** Parts of the side panel the user hid; with Home hidden, Kanso opens on the library. */
   hiddenSections: HideableSection[];
   home: HomeConfig;
+  store: StoreConfig;
   /** Emulators added by the user, and folders added to the ones Kanso found. */
   emulators: EmulatorSetting[];
   /**
@@ -287,11 +300,14 @@ export interface PluginView {
   gamesStyle: "list" | "cards" | "mystery";
 }
 
-export type DealStore = "steam" | "epic" | "gog";
+/** A store Kanso asks for its deals; "others" is every other shop, as CheapShark lists them. */
+export type DealStore = "steam" | "epic" | "gog" | "others";
 
 export interface Deal {
   id: string;
   store: DealStore;
+  /** The shop selling it, among the "others": "Humble Store", "Fanatical"… */
+  seller: string | null;
   title: string;
   url: string;
   imageUrl: string | null;
@@ -304,6 +320,26 @@ export interface Deal {
   startsAt: number | null;
   endsAt: number | null;
   steamAppid: string | null;
+  /** The game's genres where the store says them; empty when it does not. */
+  genres: string[];
+}
+
+/** A deal the user liked: enough to show it, open it and say when it is about to end. */
+export interface LikedDeal {
+  id: string;
+  store: DealStore;
+  title: string;
+  url: string;
+  endsAt: number | null;
+}
+
+/** How the user wants the Store page. */
+export interface StoreConfig {
+  /** Stores left out. */
+  hiddenStores: DealStore[];
+  /** Deals the user does not want to see, by id. */
+  hiddenDeals: string[];
+  liked: LikedDeal[];
 }
 
 export interface DealsReport {

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CloudDownload, EyeOff, History, LayoutGrid, Star, X } from "lucide-react";
 import { ApiKeyBanner } from "./components/ApiKeyBanner";
 import { CategoryGrid, type CategoryKind } from "./components/CategoryGrid";
-import { DealsView } from "./components/DealsView";
 import { HomeView } from "./components/HomeView";
 import { ambienceFor, isSouthernTimeZone, type WeatherNow } from "./lib/ambience";
 import { EmulatorsView } from "./components/EmulatorsView";
@@ -16,6 +15,7 @@ import {
 } from "./components/PluginCommandDialog";
 import { SettingsModal, type SettingsSection } from "./components/SettingsModal";
 import { Sidebar, type MainView } from "./components/Sidebar";
+import { likedEndingSoon, StoreView } from "./components/StoreView";
 import { StatsView } from "./components/StatsView";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./components/StatusIcon";
 import { ThemeEditor } from "./components/ThemeEditor";
@@ -90,6 +90,7 @@ import type {
   ScanReport,
   Theme,
   HomeConfig,
+  StoreConfig,
 } from "./types/game";
 
 const INITIAL_CONFIG: AppConfig = {
@@ -105,6 +106,7 @@ const INITIAL_CONFIG: AppConfig = {
   cardInfo: [...CARD_INFO_DEFAULT],
   hiddenSections: [],
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
+  store: { hiddenStores: [], hiddenDeals: [], liked: [] },
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
@@ -221,7 +223,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [mainView, setMainView] = useState<MainView>(() =>
     readUiPreference(
       MAIN_VIEW_PREF_KEY,
-      ["home", "library", "stats", "emulators", "genres", "tags"],
+      ["home", "store", "library", "stats", "emulators", "genres", "tags"],
       "library"
     )
   );
@@ -608,7 +610,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   // A page the user hid is not a place to be left on: the library takes over
   const hiddenSections = config.hiddenSections;
   useEffect(() => {
-    if ((mainView === "home" || mainView === "tags") && hiddenSections.includes(mainView)) {
+    if ((mainView === "home" || mainView === "store" || mainView === "tags") && hiddenSections.includes(mainView)) {
       setMainView("library");
       writeUiPreference(MAIN_VIEW_PREF_KEY, "library");
     }
@@ -742,6 +744,31 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         setStatusMessage(typeof err === "string" ? err : t("settings.saveError"));
       });
   };
+  /** Saves a change made on the Store page: a deal liked, or hidden. */
+  const changeStore = (next: StoreConfig) => {
+    const previous = config;
+    onConfigChange({ ...config, store: next });
+    saveSettings({ ...config, language: lang, store: next })
+      .then(onConfigChange)
+      .catch((err) => {
+        onConfigChange(previous);
+        setStatusMessage(typeof err === "string" ? err : t("settings.saveError"));
+      });
+  };
+  const storeHidden = config.hiddenSections.includes("store");
+  /** One Store view or another: the page, or what the Home page shows of it. */
+  const storeView = (compact?: "picks" | "top") => (
+    <StoreView
+      games={homeGames}
+      ownedSteamAppIds={ownedSteamAppIds}
+      store={config.store}
+      onChangeStore={changeStore}
+      onOpenSettings={() => openSettings("store")}
+      onError={setStatusMessage}
+      compact={compact}
+      onOpenStore={storeHidden ? undefined : () => showView("store")}
+    />
+  );
   // What genres, tags, platforms and statuses are counted on: everything, what is on disk
   // ("installed only") or, inside the "not installed" collection, what is not
   const scope = libraryScope(filters.collection, installedOnly);
@@ -930,6 +957,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           isOpen={isSidebarOpen}
           view={mainView}
           onOpenHome={() => showView("home")}
+          onOpenStore={() => showView("store")}
+          storeAlerts={likedEndingSoon(config.store.liked).length}
           onOpenStats={() => showView("stats")}
           onOpenEmulators={() => {
             // The entry always leads to the wall of emulators, also from an emulator's page
@@ -976,8 +1005,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
               onLaunch={handleLaunchGame}
               launchingId={launchingId}
               onOpenSettings={() => openSettings("home")}
-              deals={<DealsView ownedSteamAppIds={ownedSteamAppIds} onError={setStatusMessage} />}
+              deals={storeView("top")}
+              recommendations={storeView("picks")}
             />
+          ) : mainView === "store" ? (
+            storeView()
           ) : mainView === "stats" ? (
             <StatsView
               games={allGames}

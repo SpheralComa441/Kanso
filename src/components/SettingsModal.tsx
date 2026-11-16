@@ -17,6 +17,7 @@ import {
   Puzzle,
   Settings2,
   SlidersHorizontal,
+  Tag,
   Trash2,
   Upload,
   UserRound,
@@ -38,6 +39,7 @@ import {
   openThemesFolder,
   pickCustomFolder,
   searchWeatherPlaces,
+  DEAL_STORES,
 } from "../lib/backend";
 import {
   BUILTIN_THEMES,
@@ -62,12 +64,14 @@ import { CARD_INFO_CHOICES } from "../lib/cardInfo";
 import { EmulatorsSettings } from "./EmulatorsSettings";
 import { PluginsSettings } from "./PluginsSettings";
 import { StoreAccountsSettings } from "./StoreAccountsSettings";
+import { storeLabel } from "./StoreView";
 
 /** The categories the settings are grouped in, in the order the dialog lists them. */
 export type SettingsSection =
   | "general"
   | "appearance"
   | "home"
+  | "store"
   | "accessibility"
   | "library"
   | "accounts"
@@ -78,6 +82,7 @@ const SECTIONS: { id: SettingsSection; icon: typeof Palette; label: MessageKey }
   { id: "general", icon: Settings2, label: "settings.cat.general" },
   { id: "appearance", icon: Palette, label: "settings.cat.appearance" },
   { id: "home", icon: Home, label: "sidebar.home" },
+  { id: "store", icon: Tag, label: "sidebar.store" },
   { id: "accessibility", icon: Accessibility, label: "a11y.section" },
   { id: "library", icon: Library, label: "settings.cat.library" },
   { id: "accounts", icon: UserRound, label: "accounts.title" },
@@ -90,6 +95,7 @@ const HOME_SECTION_CHOICES: [HomeSection, MessageKey, MessageKey][] = [
   ["resume", "home.resume", "settings.homeResumeHelp"],
   ["upNext", "home.upNext", "settings.homeUpNextHelp"],
   ["mostPlayed", "home.mostPlayed", "settings.homeMostPlayedHelp"],
+  ["recommendations", "store.picks", "settings.homePicksHelp"],
   ["deals", "settings.homeDeals", "settings.homeDealsHelp"],
 ];
 
@@ -191,6 +197,7 @@ export function SettingsModal({
   const [cardInfo, setCardInfo] = useState(initialConfig.cardInfo);
   const [hiddenSections, setHiddenSections] = useState(initialConfig.hiddenSections);
   const [home, setHome] = useState(initialConfig.home);
+  const [store, setStore] = useState(initialConfig.store);
   // Looking for the place whose weather to follow: what was typed, and what was found
   const [placeQuery, setPlaceQuery] = useState("");
   const [places, setPlaces] = useState<PlaceMatch[] | "searching" | null>(null);
@@ -221,6 +228,7 @@ export function SettingsModal({
       setCardInfo(initialConfig.cardInfo);
       setHiddenSections(initialConfig.hiddenSections);
       setHome(initialConfig.home);
+      setStore(initialConfig.store);
       setPlaceQuery("");
       setPlaces(null);
       setEmulators(initialConfig.emulators);
@@ -407,6 +415,7 @@ export function SettingsModal({
         cardInfo: CARD_INFO_CHOICES.filter((item) => cardInfo.includes(item)),
         hiddenSections,
         home,
+        store,
         // An entry that says nothing (no executable, folder or argument) is not kept
         emulators: emulators.filter(
           (emulator) => emulator.exePath.trim() || emulator.folders.length > 0 || emulator.args.trim()
@@ -553,6 +562,7 @@ export function SettingsModal({
                 {(
                   [
                     ["home", "settings.showHome", "settings.showHomeHelp"],
+                    ["store", "settings.showStore", "settings.showStoreHelp"],
                     ["tags", "settings.showTags", "settings.showTagsHelp"],
                   ] as const
                 ).map(([name, label, help]) => (
@@ -979,6 +989,82 @@ export function SettingsModal({
                     <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.homeWeatherPrivacy")}</p>
                   </div>
                 )}
+              </section>
+            </Panel>
+
+            <Panel id="store" active={section === "store"} title={t("sidebar.store")} description={t("settings.cat.storeHelp")}>
+              {/* Which stores are asked for their deals */}
+              <section id="settings-store-stores" className="space-y-2">
+                <div>
+                  <span className="block text-xs font-medium text-zinc-200">{t("settings.storeStores")}</span>
+                  <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.storeStoresHelp")}</p>
+                </div>
+                {DEAL_STORES.map((name) => (
+                  <div
+                    key={name}
+                    className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2"
+                  >
+                    <div>
+                      <label htmlFor={`store-show-${name}`} className="block text-xs font-medium text-zinc-200">
+                        {storeLabel(name, t)}
+                      </label>
+                      <p className="text-2xs text-zinc-500">{t(`settings.storeFrom.${name}`)}</p>
+                    </div>
+                    <input
+                      id={`store-show-${name}`}
+                      type="checkbox"
+                      checked={!store.hiddenStores.includes(name)}
+                      onChange={(e) =>
+                        setStore((current) => ({
+                          ...current,
+                          hiddenStores: e.target.checked
+                            ? current.hiddenStores.filter((entry) => entry !== name)
+                            : [...current.hiddenStores, name],
+                        }))
+                      }
+                      className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                    />
+                  </div>
+                ))}
+              </section>
+
+              {/* What the user set aside on the page */}
+              <section id="settings-store-kept" className="space-y-2">
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+                  <div>
+                    <span className="block text-xs font-medium text-zinc-200">
+                      {t("settings.storeHiddenDeals", { count: store.hiddenDeals.length })}
+                    </span>
+                    <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.storeHiddenDealsHelp")}</p>
+                  </div>
+                  <button
+                    id="store-restore-hidden-button"
+                    type="button"
+                    disabled={store.hiddenDeals.length === 0}
+                    onClick={() => setStore((current) => ({ ...current, hiddenDeals: [] }))}
+                    className="shrink-0 rounded-lg border border-oled-border bg-oled-surface px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-oled-elevated disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {t("settings.storeRestore")}
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+                  <div>
+                    <span className="block text-xs font-medium text-zinc-200">
+                      {t("settings.storeLiked", { count: store.liked.length })}
+                    </span>
+                    <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.storeLikedHelp")}</p>
+                  </div>
+                  <button
+                    id="store-forget-liked-button"
+                    type="button"
+                    disabled={store.liked.length === 0}
+                    onClick={() => setStore((current) => ({ ...current, liked: [] }))}
+                    className="shrink-0 rounded-lg border border-oled-border bg-oled-surface px-3 py-1.5 text-xs font-medium text-zinc-200 transition-colors hover:bg-oled-elevated disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {t("settings.storeForgetLiked")}
+                  </button>
+                </div>
+                <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.storePrivacy")}</p>
               </section>
             </Panel>
 

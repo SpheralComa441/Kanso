@@ -145,6 +145,81 @@ impl HomeConfig {
     }
 }
 
+/// The stores whose deals the Store page lists.
+pub const DEAL_STORES: [&str; 4] = ["steam", "epic", "gog", "others"];
+/// Most deals the user can keep as liked, and most they can hide.
+const MAX_LIKED_DEALS: usize = 60;
+const MAX_HIDDEN_DEALS: usize = 300;
+
+/// A deal the user liked: enough of it to show it again, to open it and to say when it is
+/// about to end, even once the store no longer lists it among its discounts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LikedDeal {
+    /// The deal's id, as the Store page knows it: `steam:2406770`.
+    pub id: String,
+    pub store: String,
+    pub title: String,
+    /// The store's page of the game. Opening it goes through the same check as any deal:
+    /// `https` on the store's own domain.
+    pub url: String,
+    /// When the offer ends, in milliseconds since the epoch; `None` when the store does not
+    /// say.
+    pub ends_at: Option<u64>,
+}
+
+/// How the user wants the Store page.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct StoreConfig {
+    /// Stores left out, from [`DEAL_STORES`].
+    pub hidden_stores: Vec<String>,
+    /// Deals the user does not want to see, by id.
+    pub hidden_deals: Vec<String>,
+    pub liked: Vec<LikedDeal>,
+}
+
+impl StoreConfig {
+    fn sanitized(self) -> Self {
+        let plain = |text: &str, max: usize| -> String { text.trim().chars().filter(|c| !c.is_control()).take(max).collect() };
+        let is_id = |id: &str| !id.is_empty() && id.len() <= 120 && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ':' | '-' | '_' | '.'));
+        let mut seen = HashSet::new();
+        let liked = self
+            .liked
+            .into_iter()
+            .filter_map(|deal| {
+                let id = deal.id.trim().to_string();
+                let store = deal.store.trim().to_ascii_lowercase();
+                let url = plain(&deal.url, 500);
+                (is_id(&id) && DEAL_STORES.contains(&store.as_str()) && url.starts_with("https://") && seen.insert(id.clone())).then(|| LikedDeal {
+                    id,
+                    store,
+                    title: plain(&deal.title, 160),
+                    url,
+                    ends_at: deal.ends_at,
+                })
+            })
+            .take(MAX_LIKED_DEALS)
+            .collect();
+        let mut seen = HashSet::new();
+        Self {
+            hidden_stores: DEAL_STORES
+                .iter()
+                .filter(|choice| self.hidden_stores.iter().any(|item| item.trim() == **choice))
+                .map(|choice| choice.to_string())
+                .collect(),
+            hidden_deals: self
+                .hidden_deals
+                .iter()
+                .map(|id| id.trim().to_string())
+                .filter(|id| is_id(id) && seen.insert(id.clone()))
+                .take(MAX_HIDDEN_DEALS)
+                .collect(),
+            liked,
+        }
+    }
+}
+
 /// Most emulators remembered, folders per emulator and extensions per emulator.
 const MAX_EMULATORS: usize = 48;
 const MAX_EMULATOR_FOLDERS: usize = 16;
@@ -296,6 +371,8 @@ pub struct AppConfig {
     pub hidden_sections: Vec<String>,
     /// How the user wants the Home page.
     pub home: HomeConfig,
+    /// How the user wants the Store page.
+    pub store: StoreConfig,
     /// Emulators added by the user, and folders added to the ones Kanso found.
     pub emulators: Vec<EmulatorSetting>,
     /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
@@ -323,6 +400,7 @@ impl Default for AppConfig {
             card_info: CARD_INFO_DEFAULT.iter().map(|item| item.to_string()).collect(),
             hidden_sections: Vec::new(),
             home: HomeConfig::default(),
+            store: StoreConfig::default(),
             emulators: Vec::new(),
             has_game_pass: false,
             game_pass_catalog: false,
@@ -388,6 +466,7 @@ impl AppConfig {
                 .map(|choice| choice.to_string())
                 .collect(),
             home: self.home.sanitized(),
+            store: self.store.sanitized(),
             emulators: {
                 // One entry per emulator: a later one with the same id is a leftover
                 let mut seen = HashSet::new();
@@ -476,6 +555,7 @@ mod tests {
         assert!(initial.custom_folders.is_empty());
 
         let input = AppConfig {
+            store: StoreConfig::default(),
             steamgriddb_api_key: "  sgdb_secret_key_123  ".to_string(),
             custom_folders: vec![
                 r"D:\Games\".to_string(),
@@ -578,6 +658,29 @@ mod tests {
             "a place is kept coarse: about a kilometre"
         );
         assert_eq!(saved.home.up_next, ["steam:1", "steam:2", "gog:3", "epic:4", "ea:5"], "five at most, each once");
+        // The Store page: known stores, plain ids, liked deals that can be opened safely
+        let store = AppConfig {
+            store: StoreConfig {
+                hidden_stores: vec!["gog".to_string(), "amazon".to_string(), "steam".to_string()],
+                hidden_deals: vec![" steam:10 ".to_string(), "steam:10".to_string(), "x y".to_string(), "<b>".to_string(), "gog:1207".to_string()],
+                liked: vec![
+                    LikedDeal { id: "steam:2406770".to_string(), store: "Steam".to_string(), title: "  Hades\u{7} II ".to_string(), url: "https://store.steampowered.com/app/2406770".to_string(), ends_at: Some(1_795_208_400_000) },
+                    LikedDeal { id: "steam:2406770".to_string(), store: "steam".to_string(), title: "again".to_string(), url: "https://store.steampowered.com/app/2406770".to_string(), ends_at: None },
+                    LikedDeal { id: "gog:1".to_string(), store: "gog".to_string(), title: "Plain link".to_string(), url: "http://www.gog.com/game/x".to_string(), ends_at: None },
+                    LikedDeal { id: "x:1".to_string(), store: "elsewhere".to_string(), title: "Unknown store".to_string(), url: "https://example.com".to_string(), ends_at: None },
+                ],
+            },
+            ..AppConfig::default()
+        }
+        .sanitized()
+        .store;
+        assert_eq!(store.hidden_stores, ["steam", "gog"]);
+        assert_eq!(store.hidden_deals, ["steam:10", "gog:1207"]);
+        assert_eq!(
+            store.liked,
+            [LikedDeal { id: "steam:2406770".to_string(), store: "steam".to_string(), title: "Hades II".to_string(), url: "https://store.steampowered.com/app/2406770".to_string(), ends_at: Some(1_795_208_400_000) }],
+            "each once; a link that is not https, or a store Kanso does not list, is dropped"
+        );
         // Weather with no place, or a place that is not one, is no weather
         let nowhere = AppConfig { home: HomeConfig { weather: true, ..HomeConfig::default() }, ..AppConfig::default() }.sanitized();
         assert!(!nowhere.home.weather && nowhere.home.effects, "the seasonal background is on until switched off");
