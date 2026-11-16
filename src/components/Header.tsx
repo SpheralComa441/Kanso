@@ -44,6 +44,11 @@ interface HeaderProps {
   hasApiKey: boolean;
   /** How many dialogs are open: the bar is dimmed like the app behind them. */
   overlayDepth: number;
+  /**
+   * The first of them is a game's sheet, whose backdrop fills the window: the bar shows that
+   * instead of a veil of its own.
+   */
+  sheetOpen: boolean;
   /** The theme editor previews its own draft: Settings would fight over it. */
   settingsDisabled: boolean;
   onScan: () => void;
@@ -224,6 +229,7 @@ export function Header({
   isSyncingMetadata,
   hasApiKey,
   overlayDepth,
+  sheetOpen,
   settingsDisabled,
   onScan,
   onOpenSettings,
@@ -245,7 +251,8 @@ export function Header({
   return (
     <header
       data-tauri-drag-region="deep"
-      data-veiled={overlayDepth > 0 ? "" : undefined}
+      data-veiled={overlayDepth > 0 ? (sheetOpen && overlayDepth === 1 ? "sheet" : "") : undefined}
+      data-sheet={sheetOpen ? "" : undefined}
       className={`app-header relative flex shrink-0 items-stretch ${
         isRunningInTauri() ? "" : "pr-4"
       }`}
@@ -253,7 +260,7 @@ export function Header({
       {/* The right padding keeps the last action clear of the window buttons' hover area */}
       <div
         ref={contentRef}
-        className={`flex min-w-0 flex-1 items-center gap-3 pl-4 ${
+        className={`app-header-content flex min-w-0 flex-1 items-center gap-3 pl-4 ${
           isRunningInTauri() ? "pr-3" : ""
         }`}
       >
@@ -277,7 +284,7 @@ export function Header({
 
           <div className="flex items-center gap-2.5">
             <KansoMark className="h-6 w-6 shrink-0 text-zinc-100" />
-            <h1 className="text-base font-semibold tracking-tight text-zinc-100">
+            <h1 className="wordmark text-base font-semibold tracking-tight text-zinc-100">
               Kanso
             </h1>
             <span className="rounded-md border border-oled-border bg-oled-surface px-2 py-0.5 text-xs font-medium tabular-nums text-zinc-400">
@@ -384,7 +391,7 @@ export function Header({
       </div>
 
       {/* One veil per open dialog, matching their backdrops; it still drags the window */}
-      {Array.from({ length: overlayDepth }, (_, index) => (
+      {Array.from({ length: Math.max(0, overlayDepth - Number(sheetOpen)) }, (_, index) => (
         <div
           key={index}
           aria-hidden="true"

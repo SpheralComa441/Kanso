@@ -72,5 +72,11 @@
     "tiles": "filled",
     "tileGap": 12
   },
+  "motion": {
+    "level": "lively",
+    "sheet": "zoom",
+    "view": "slide",
+    "stagger": true
+  },
   "fontFiles": []
 }

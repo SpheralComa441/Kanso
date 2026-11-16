@@ -40,9 +40,11 @@ import {
   TEXT_SCALE_OPTIONS,
   isBuiltinTheme,
   resolveTheme,
+  ANIMATION_CHOICES,
 } from "../lib/themes";
 import type {
   AccessibilityConfig,
+  AnimationsChoice,
   AppConfig,
   PluginInfo,
   PluginState,
@@ -65,6 +67,8 @@ interface SettingsModalProps {
   onPreviewTheme: (theme: Theme | null) => void;
   /** Same for accessibility choices: tried at once, kept only when saved. */
   onPreviewAccessibility: (accessibility: AccessibilityConfig | null) => void;
+  /** Shows the app with this choice for the animations while the dialog is open. */
+  onPreviewAnimations: (animations: AnimationsChoice | null) => void;
   onCustomizeTheme: (theme: Theme) => void;
   plugins: PluginInfo[];
   pluginWarnings: string[];
@@ -86,6 +90,7 @@ export function SettingsModal({
   onThemesChanged,
   onPreviewTheme,
   onPreviewAccessibility,
+  onPreviewAnimations,
   onCustomizeTheme,
   plugins,
   pluginWarnings,
@@ -106,6 +111,7 @@ export function SettingsModal({
     initialConfig.accessibility
   );
   const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
+  const [animations, setAnimations] = useState(initialConfig.animations);
   const [hasGamePass, setHasGamePass] = useState(initialConfig.hasGamePass);
   const [gamePassCatalog, setGamePassCatalog] = useState(initialConfig.gamePassCatalog);
   const [pluginStates, setPluginStates] = useState<Record<string, PluginState>>(
@@ -127,6 +133,7 @@ export function SettingsModal({
       setThemeId(initialConfig.themeId);
       setAccessibility(initialConfig.accessibility);
       setTrackPlaytime(initialConfig.trackPlaytime);
+      setAnimations(initialConfig.animations);
       setHasGamePass(initialConfig.hasGamePass);
       setGamePassCatalog(initialConfig.gamePassCatalog);
       setPluginStates(initialConfig.plugins);
@@ -142,6 +149,7 @@ export function SettingsModal({
   const closeWithoutSaving = () => {
     onPreviewTheme(null);
     onPreviewAccessibility(null);
+    onPreviewAnimations(null);
     onClose();
   };
 
@@ -268,11 +276,13 @@ export function SettingsModal({
         accessibility,
         trackPlaytime,
         plugins: pluginStates,
+        animations,
         hasGamePass,
         gamePassCatalog,
       });
       onPreviewTheme(null);
       onPreviewAccessibility(null);
+      onPreviewAnimations(null);
       onClose();
     } catch (err) {
       setErrorMsg(typeof err === "string" ? err : t("settings.saveError"));
@@ -287,7 +297,7 @@ export function SettingsModal({
 
   return (
     <div
-      className="below-header fixed inset-x-0 bottom-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+      className="below-header fixed inset-x-0 bottom-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm motion-backdrop"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) closeWithoutSaving();
       }}
@@ -296,7 +306,7 @@ export function SettingsModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-modal-title"
-        className="flex max-h-full w-full max-w-xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
+        className="motion-sheet flex max-h-full w-full max-w-xl flex-col overflow-hidden rounded-xl border border-oled-border bg-oled-surface shadow-2xl"
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-oled-border px-6 py-4">
@@ -480,6 +490,41 @@ export function SettingsModal({
             <p className="text-2xs leading-relaxed text-zinc-500">
               {t("theme.help")}
             </p>
+          </section>
+
+          {/* Animations: the theme says how things move, the user how much */}
+          <section id="settings-animations" className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span id="animations-label" className="text-xs font-medium text-zinc-200">
+                {t("motion.title")}
+              </span>
+              <div
+                role="group"
+                aria-labelledby="animations-label"
+                className="flex items-center gap-0.5 rounded-lg border border-oled-border bg-oled-bg p-0.5"
+              >
+                {ANIMATION_CHOICES.map((choice) => (
+                  <button
+                    key={choice}
+                    id={`animations-${choice}`}
+                    type="button"
+                    onClick={() => {
+                      setAnimations(choice);
+                      onPreviewAnimations(choice);
+                    }}
+                    aria-pressed={animations === choice}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                      animations === choice
+                        ? "bg-oled-elevated text-zinc-100"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    {t(`motion.${choice}`)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <p className="text-2xs leading-relaxed text-zinc-500">{t("motion.help")}</p>
           </section>
 
           {/* Accessibility: applies on top of any theme */}

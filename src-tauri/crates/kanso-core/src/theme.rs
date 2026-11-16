@@ -190,6 +190,9 @@ pub enum CardCaption {
     Below,
     /// Title over the bottom of the cover.
     Overlay,
+    /// Cover only; under the pointer (or keyboard focus) the cover blurs and the game's
+    /// title, genres and figures show over it.
+    Hover,
     /// Cover only.
     #[serde(rename = "none")]
     Off,
@@ -264,6 +267,70 @@ pub enum DetailTiles {
     Glass,
     /// The background color and a stronger border.
     Outlined,
+}
+
+/// How much the interface moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MotionLevel {
+    /// Nothing moves.
+    #[serde(rename = "none")]
+    Off,
+    /// Short fades, hardly any movement.
+    Subtle,
+    /// Fades with a short movement.
+    #[default]
+    Smooth,
+    /// Longer, wider movements with a little bounce.
+    Lively,
+}
+
+/// How a sheet or a dialog comes in (and goes out, the other way).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SheetMotion {
+    /// From slightly below.
+    #[default]
+    Rise,
+    /// Growing from slightly smaller.
+    Zoom,
+    /// From the side.
+    Slide,
+    Fade,
+}
+
+/// How the content changes when another entry of the side panel is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ViewMotion {
+    #[default]
+    Rise,
+    /// From the side of the panel.
+    Slide,
+    Fade,
+}
+
+/// The animations of the interface. The user can switch them off or pick another level in
+/// the settings, and the accessibility preference "reduce motion" always wins.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeMotion {
+    pub level: MotionLevel,
+    pub sheet: SheetMotion,
+    pub view: ViewMotion,
+    /// Cards come in one after the other when a view opens.
+    pub stagger: bool,
+}
+
+impl Default for ThemeMotion {
+    fn default() -> Self {
+        Self {
+            level: MotionLevel::Smooth,
+            sheet: SheetMotion::Rise,
+            view: ViewMotion::Rise,
+            stagger: true,
+        }
+    }
 }
 
 /// The open sheet of a game.
@@ -363,6 +430,8 @@ pub struct Theme {
     pub effects: ThemeEffects,
     #[serde(default)]
     pub detail: ThemeDetail,
+    #[serde(default)]
+    pub motion: ThemeMotion,
     #[serde(default)]
     pub font_files: Vec<ThemeFontFile>,
 }
@@ -892,6 +961,15 @@ impl Theme {
             tile_gap: g.int("tileGap", d.tile_gap, 0, 28)?,
         };
 
+        let m = Fields::section(&root, "motion")?;
+        let d = ThemeMotion::default();
+        let motion = ThemeMotion {
+            level: m.choice("level", d.level)?,
+            sheet: m.choice("sheet", d.sheet)?,
+            view: m.choice("view", d.view)?,
+            stagger: m.flag("stagger", d.stagger)?,
+        };
+
         let i = Fields::section(&root, "icons")?;
         let d = ThemeIcons::default();
         let icons = ThemeIcons {
@@ -932,6 +1010,7 @@ impl Theme {
             icons,
             effects,
             detail,
+            motion,
             font_files: parse_font_files(&root, fonts_dir)?,
         })
     }
@@ -954,6 +1033,7 @@ impl Theme {
             "icons": self.icons,
             "effects": self.effects,
             "detail": self.detail,
+            "motion": self.motion,
             "fontFiles": self.font_files,
         });
         let mut text = serde_json::to_string_pretty(&value).unwrap_or_default();
@@ -1223,6 +1303,24 @@ mod tests {
         assert_eq!(theme.detail.backdrop_dim, 0.35);
         assert_eq!(theme.detail.tile_gap, 28);
 
+        // Animations: a level and a way of moving, from closed lists
+        assert_eq!(plain.motion, ThemeMotion::default());
+        assert_eq!(plain.motion.level, MotionLevel::Smooth);
+        let moving = Theme::from_json(
+            r#"{"name":"X","colors":{},"cards":{"caption":"hover"},
+                "motion":{"level":"lively","sheet":"zoom","view":"slide","stagger":false}}"#,
+        )
+        .unwrap();
+        assert_eq!(moving.cards.caption, CardCaption::Hover);
+        assert_eq!(
+            moving.motion,
+            ThemeMotion { level: MotionLevel::Lively, sheet: SheetMotion::Zoom, view: ViewMotion::Slide, stagger: false }
+        );
+        let still = Theme::from_json(r#"{"name":"X","colors":{},"motion":{"level":"none"}}"#).unwrap();
+        assert_eq!(still.motion.level, MotionLevel::Off);
+        assert!(still.to_json().contains("\"level\": \"none\""));
+        assert_eq!(Theme::from_json(&moving.to_json()).unwrap().motion, moving.motion);
+
         // An exported theme spells the new sections out, and reads back the same
         let exported = theme.to_json();
         assert!(exported.contains("\"detail\""));
@@ -1262,6 +1360,11 @@ mod tests {
             (r#"{"name":"X","colors":{},"detail":{"backdropBlur":"18px"}}"#, "detail.backdropBlur"),
             (r#"{"name":"X","colors":{},"detail":{"tiles":"backdrop-filter: none"}}"#, "detail.tiles"),
             (r#"{"name":"X","colors":{},"detail":"bento"}"#, "detail"),
+            (r#"{"name":"X","colors":{},"motion":{"level":"1s ease infinite"}}"#, "motion.level"),
+            (r#"{"name":"X","colors":{},"motion":{"sheet":"@keyframes x"}}"#, "motion.sheet"),
+            (r#"{"name":"X","colors":{},"motion":{"view":"spin"}}"#, "motion.view"),
+            (r#"{"name":"X","colors":{},"motion":{"stagger":"yes"}}"#, "motion.stagger"),
+            (r#"{"name":"X","colors":{},"cards":{"caption":"always"}}"#, "cards.caption"),
             (r#"{"kansoTheme":3,"name":"X","colors":{}}"#, "kansoTheme"),
             (r#"["not", "a", "theme"]"#, "Tema non valido"),
             ("not json", "Tema non valido"),

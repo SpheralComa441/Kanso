@@ -52,6 +52,9 @@ impl AccessibilityConfig {
     }
 }
 
+/// What the user may choose for the animations; the first is the default.
+const ANIMATION_CHOICES: [&str; 5] = ["theme", "off", "subtle", "smooth", "lively"];
+
 /// Most plugins whose state is remembered.
 const MAX_PLUGIN_STATES: usize = 64;
 /// Longest value of a plugin setting (an API key, a country code, ...).
@@ -111,6 +114,9 @@ pub struct AppConfig {
     /// The user says they have Xbox Game Pass for PC, linked to their Battle.net account:
     /// the games it makes installable there are listed (see
     /// [`crate::battlenet_account::game_pass_games`]). Kanso cannot find this out by itself.
+    /// How much the interface moves: `theme` (as the active theme says), `off`, `subtle`,
+    /// `smooth` or `lively`.
+    pub animations: String,
     pub has_game_pass: bool,
     /// The user asked for the games of the Game Pass catalog for PC to be listed as not
     /// installed (see [`crate::gamepass`]): a few hundred games, from Microsoft's public
@@ -129,6 +135,7 @@ impl Default for AppConfig {
             accessibility: AccessibilityConfig::default(),
             track_playtime: true,
             plugins: BTreeMap::new(),
+            animations: ANIMATION_CHOICES[0].to_string(),
             has_game_pass: false,
             game_pass_catalog: false,
         }
@@ -177,6 +184,10 @@ impl AppConfig {
                 .filter(|id| !id.is_empty()),
             accessibility: self.accessibility.sanitized(),
             track_playtime: self.track_playtime,
+            // Anything else is not a choice: back to what the theme says
+            animations: Some(self.animations.trim().to_ascii_lowercase())
+                .filter(|choice| ANIMATION_CHOICES.contains(&choice.as_str()))
+                .unwrap_or_else(|| ANIMATION_CHOICES[0].to_string()),
             has_game_pass: self.has_game_pass,
             game_pass_catalog: self.game_pass_catalog,
             plugins: self
@@ -274,6 +285,7 @@ mod tests {
             track_playtime: false,
             has_game_pass: true,
             game_pass_catalog: true,
+            animations: " Lively ".to_string(),
             plugins: BTreeMap::from([
                 (
                     "price-history".to_string(),

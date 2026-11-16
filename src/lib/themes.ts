@@ -2,6 +2,8 @@ import arcadeTheme from "../../docs/themes/arcade.kanso-theme.json";
 import auroraTheme from "../../docs/themes/aurora.kanso-theme.json";
 import type {
   AccessibilityConfig,
+  AnimationsChoice,
+  MotionLevel,
   Theme,
   ThemeCards,
   ThemeColors,
@@ -10,6 +12,7 @@ import type {
   ThemeFontFile,
   ThemeIcons,
   ThemeLayout,
+  ThemeMotion,
   ThemeShapes,
   ThemeTypography,
 } from "../types/game";
@@ -64,6 +67,8 @@ const DEFAULT_DETAIL: ThemeDetail = {
   tileGap: 12,
 };
 
+const DEFAULT_MOTION: ThemeMotion = { level: "smooth", sheet: "rise", view: "rise", stagger: true };
+
 /** A theme whose optional sections may be missing or partial (theme files, older data). */
 export type ThemeInput = Pick<Theme, "name" | "colors"> & {
   id?: string;
@@ -78,6 +83,7 @@ export type ThemeInput = Pick<Theme, "name" | "colors"> & {
   icons?: Partial<Record<keyof ThemeIcons, unknown>>;
   effects?: Partial<ThemeEffects>;
   detail?: Partial<Record<keyof ThemeDetail, unknown>>;
+  motion?: Partial<Record<keyof ThemeMotion, unknown>>;
   fontFiles?: ThemeFontFile[];
 };
 
@@ -98,15 +104,16 @@ export function withThemeDefaults(input: ThemeInput): Theme {
     icons: { ...DEFAULT_ICONS, ...input.icons } as ThemeIcons,
     effects: { ...DEFAULT_EFFECTS, ...input.effects },
     detail: { ...DEFAULT_DETAIL, ...input.detail } as ThemeDetail,
+    motion: { ...DEFAULT_MOTION, ...input.motion } as ThemeMotion,
     fontFiles: input.fontFiles ?? [],
   };
 }
 
 /*
- * Kanso's own look, drawn from its logo: a monogram of straight strokes and diagonal cuts, in
- * dark slate with one vivid color. The six themes below share the logo's shapes (cut
- * corners, sharp icons, an angular face for titles) and differ in that one color, as the
- * logo's own versions do.
+ * Kanso's own look. The six themes below take their colors from the logo's own versions
+ * (the same slate with one vivid color each) and share everything else: soft, rounded
+ * shapes, covers without a caption that tell about the game under the pointer, and gentle
+ * movement.
  */
 const LOGO_STYLE = {
   fontFamily: "Manrope",
@@ -117,10 +124,11 @@ const LOGO_STYLE = {
     labelFont: "JetBrains Mono",
     labelUppercase: true,
   },
-  layout: { cardRadius: 10 },
-  cards: { shape: "cut", hover: "glow" },
-  shapes: { controlRadius: 4, panelRadius: 10, chipRadius: 3, panelShape: "cut" },
-  icons: { corners: "sharp" },
+  layout: { cardRadius: 16 },
+  cards: { shape: "rounded", hover: "lift", caption: "hover", shadow: "soft" },
+  shapes: { controlRadius: 10, panelRadius: 18, chipRadius: 8, panelShape: "rounded" },
+  icons: { corners: "round" },
+  motion: { level: "smooth", sheet: "rise", view: "rise", stagger: true },
 } satisfies Partial<ThemeInput>;
 
 /** The slate of the logo, as a ramp of surfaces and of the text read on them. */
@@ -337,6 +345,29 @@ export const READABLE_FONTS: Record<NonNullable<AccessibilityConfig["readableFon
   opendyslexic: "OpenDyslexic",
 };
 
+/* -------------------------------------------------------------- animations */
+
+/** What the user may choose for the animations, in the order Settings lists them. */
+export const ANIMATION_CHOICES: AnimationsChoice[] = ["theme", "off", "subtle", "smooth", "lively"];
+
+/** Reads the animations choice from stored data; anything odd means "as the theme says". */
+export function withAnimationsChoice(input: unknown): AnimationsChoice {
+  return ANIMATION_CHOICES.includes(input as AnimationsChoice) ? (input as AnimationsChoice) : "theme";
+}
+
+/**
+ * Durations (ms), the distance things travel (px), how small a sheet starts, the pause
+ * between one card and the next (ms) and the curve of the movement, for each level.
+ */
+const MOTION_LEVELS: Record<
+  Exclude<MotionLevel, "none">,
+  { fast: number; base: number; slow: number; distance: number; scale: number; stagger: number; ease: string }
+> = {
+  subtle: { fast: 90, base: 140, slow: 180, distance: 4, scale: 0.995, stagger: 0, ease: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+  smooth: { fast: 130, base: 220, slow: 300, distance: 14, scale: 0.975, stagger: 18, ease: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
+  lively: { fast: 170, base: 320, slow: 460, distance: 30, scale: 0.93, stagger: 32, ease: "cubic-bezier(0.34, 1.4, 0.64, 1)" },
+};
+
 /** Reads accessibility preferences from stored data, tolerating missing or odd values. */
 export function withAccessibilityDefaults(input: unknown): AccessibilityConfig {
   const raw = (input ?? {}) as Partial<Record<keyof AccessibilityConfig, unknown>>;
@@ -373,15 +404,17 @@ const GLOW_HOVER_SHADOW =
  * names — so nothing a theme file contains reaches the page as arbitrary CSS.
  *
  * The user's accessibility preferences are applied on top and win over the theme: text size,
- * contrast, legible font, motion, scrollbars.
+ * contrast, legible font, motion, scrollbars. So does their choice for the animations: the
+ * theme says how things move, the user may say how much, or not at all.
  */
 export function applyTheme(
   theme: Theme,
-  accessibility: AccessibilityConfig = DEFAULT_ACCESSIBILITY
+  accessibility: AccessibilityConfig = DEFAULT_ACCESSIBILITY,
+  animations: AnimationsChoice = "theme"
 ): void {
   const root = document.documentElement;
   const set = (name: string, value: string) => root.style.setProperty(name, value);
-  const { typography, layout, cards, shapes, icons, effects, detail } = theme;
+  const { typography, layout, cards, shapes, icons, effects, detail, motion } = theme;
   const scale = typography.scale * (accessibility.textScale / 100);
   // Pixel sizes follow the interface scale, like everything sized in rem
   const px = (value: number) => `${Math.round(value * scale * 100) / 100}px`;
@@ -481,10 +514,25 @@ export function applyTheme(
   set("--icon-scale", String(icons.scale));
   set("--icon-fill", String(icons.fill));
 
-  // Remaining accessibility switches; the OS-wide "reduce motion" setting counts too
+  // Animations: the user's level, else the theme's; "reduce motion" (here or in the system)
+  // switches everything off
   const osReducesMotion =
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
-  root.toggleAttribute("data-reduce-motion", accessibility.reduceMotion || osReducesMotion);
+  const chosen: MotionLevel =
+    animations === "theme" ? motion.level : animations === "off" ? "none" : animations;
+  const level: MotionLevel = accessibility.reduceMotion || osReducesMotion ? "none" : chosen;
+  root.dataset.motion = level;
+  root.dataset.motionSheet = motion.sheet;
+  root.dataset.motionView = motion.view;
+  const moves = level === "none" ? MOTION_LEVELS.subtle : MOTION_LEVELS[level];
+  set("--motion-fast", `${moves.fast}ms`);
+  set("--motion-base", `${moves.base}ms`);
+  set("--motion-slow", `${moves.slow}ms`);
+  set("--motion-distance", `${moves.distance}px`);
+  set("--motion-scale", String(moves.scale));
+  set("--motion-ease", moves.ease);
+  set("--motion-stagger", `${motion.stagger ? moves.stagger : 0}ms`);
+  root.toggleAttribute("data-reduce-motion", level === "none");
   root.toggleAttribute("data-strong-focus", accessibility.strongFocus);
 }
 

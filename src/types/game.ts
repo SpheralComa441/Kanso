@@ -140,6 +140,8 @@ export interface AppConfig {
    * The user says they have Xbox Game Pass for PC linked to Battle.net: the games it makes
    * installable there are listed. Kanso cannot find this out by itself.
    */
+  /** How much the interface moves: as the theme says, not at all, or a level of the user's. */
+  animations: AnimationsChoice;
   hasGamePass: boolean;
   /** List the games of the Game Pass catalog for PC (Microsoft's public catalog). */
   gamePassCatalog: boolean;
@@ -306,7 +308,11 @@ export interface ThemeCards {
   borderWidth: number;
   shadow: "none" | "soft" | "strong" | "glow";
   hover: "lift" | "zoom" | "glow" | "none";
-  caption: "below" | "overlay" | "none";
+  /**
+   * Title and genres under the cover; over its bottom; or only under the pointer (the cover
+   * blurs and the game's title, genres and figures show over it); or never.
+   */
+  caption: "below" | "overlay" | "hover" | "none";
 }
 
 export interface ThemeShapes {
@@ -316,6 +322,22 @@ export interface ThemeShapes {
   /** Corners of panels and tiles: rounded by `panelRadius`, or cut diagonally by it. */
   panelShape: "rounded" | "cut";
 }
+
+/** How much the interface moves, and how. */
+export interface ThemeMotion {
+  level: MotionLevel;
+  /** How a sheet or a dialog comes in. */
+  sheet: "rise" | "zoom" | "slide" | "fade";
+  /** How the content changes when another entry of the side panel is chosen. */
+  view: "rise" | "slide" | "fade";
+  /** Cards come in one after the other when a view opens. */
+  stagger: boolean;
+}
+
+export type MotionLevel = "none" | "subtle" | "smooth" | "lively";
+
+/** The user's choice for the animations: what the theme says, off, or a level of their own. */
+export type AnimationsChoice = "theme" | "off" | "subtle" | "smooth" | "lively";
 
 /** The open sheet of a game. */
 export interface ThemeDetail {
@@ -372,6 +394,7 @@ export interface Theme {
   icons: ThemeIcons;
   effects: ThemeEffects;
   detail: ThemeDetail;
+  motion: ThemeMotion;
   fontFiles: ThemeFontFile[];
 }
 

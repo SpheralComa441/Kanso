@@ -135,8 +135,37 @@
 
   /* The top bar is the window's title bar: no line under it unless the theme asks for one */
   .app-header {
+    /* Above the backdrop of an open game sheet, which fills the whole window */
+    z-index: 45;
     height: var(--header-height);
     border-bottom: var(--divider-width) solid var(--border-subtle);
+  }
+
+  /* Behind a dialog the bar's own contents step back; they return as it closes */
+  .app-header-content {
+    transition: opacity var(--motion-base) ease;
+  }
+
+  /*
+   * A game's sheet is open: the bar shows what is behind the sheet (the game's artwork,
+   * blurred) instead of its own contents, so the window is one picture from top to bottom.
+   */
+  .app-header[data-sheet] .app-header-content {
+    opacity: 0;
+  }
+
+  :root[data-detail-backdrop="art"] .app-header[data-veiled="sheet"] .window-control {
+    color: var(--text-secondary);
+  }
+
+  :root[data-detail-backdrop="art"] .app-header[data-veiled="sheet"] .window-control:hover {
+    background-color: color-mix(in srgb, var(--text-primary) 14%, transparent);
+    color: var(--text-primary);
+  }
+
+  :root[data-detail-backdrop="art"] .app-header[data-veiled="sheet"] .window-control[data-action="close"]:hover {
+    background-color: #e81123;
+    color: #fff;
   }
 
   .app-sidebar {
@@ -309,6 +338,166 @@
     background-color: var(--card-hover-border);
   }
 
+  /* -------------------------------------------------------------- animations */
+
+  /*
+   * Everything that moves takes its duration, distance and curve from the --motion-*
+   * variables, which the theme and the user's settings fill in (src/lib/themes.ts). With
+   * animations off they are all cut to nothing by the rule at the top of this file.
+   */
+
+  /* What is behind a sheet or a dialog fades in */
+  .motion-backdrop {
+    animation: motion-fade var(--motion-base) ease-out both;
+  }
+
+  /* A sheet or a dialog comes in the way the theme says: from below, growing, from the side */
+  .motion-sheet {
+    animation: sheet-rise var(--motion-slow) var(--motion-ease) both;
+  }
+
+  :root[data-motion-sheet="zoom"] .motion-sheet {
+    animation-name: sheet-zoom;
+  }
+
+  :root[data-motion-sheet="slide"] .motion-sheet {
+    animation-name: sheet-slide;
+  }
+
+  :root[data-motion-sheet="fade"] .motion-sheet {
+    animation-name: motion-fade;
+  }
+
+  /* ...and leaves the same way, faster */
+  .motion-closing {
+    animation: motion-fade-out var(--motion-base) ease-in both;
+    pointer-events: none;
+  }
+
+  .motion-closing .motion-sheet {
+    animation: sheet-leave var(--motion-base) ease-in both;
+  }
+
+  /* Another entry of the side panel: the content comes in */
+  .motion-view {
+    animation: view-rise var(--motion-base) var(--motion-ease) both;
+  }
+
+  :root[data-motion-view="slide"] .motion-view {
+    animation-name: view-slide;
+  }
+
+  :root[data-motion-view="fade"] .motion-view {
+    animation-name: motion-fade;
+  }
+
+  /* ...and its cards one after the other, the first twenty or so; the rest are there at once */
+  .motion-view .game-card {
+    animation: card-in var(--motion-slow) var(--motion-ease) backwards;
+    animation-delay: calc(min(var(--i, 0), 24) * var(--motion-stagger));
+  }
+
+  /* A list that unfolds in the side panel */
+  .motion-list {
+    animation: list-unfold var(--motion-base) var(--motion-ease) both;
+    transform-origin: top;
+  }
+
+  /* An entry of the side panel answers the pointer, and the chosen one is marked by a bar */
+  .nav-item {
+    position: relative;
+    transition:
+      background-color var(--motion-fast) ease,
+      color var(--motion-fast) ease,
+      padding-left var(--motion-fast) ease;
+  }
+
+  .nav-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 3px;
+    height: 0;
+    border-radius: 999px;
+    background-color: var(--accent-color);
+    transform: translateY(-50%);
+    transition: height var(--motion-base) var(--motion-ease);
+  }
+
+  .nav-item[aria-current="page"]::before,
+  .nav-item[aria-pressed="true"]::before {
+    height: 60%;
+  }
+
+  @keyframes motion-fade {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes motion-fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+
+  @keyframes sheet-rise {
+    from {
+      opacity: 0;
+      transform: translateY(var(--motion-distance)) scale(var(--motion-scale));
+    }
+  }
+
+  @keyframes sheet-zoom {
+    from {
+      opacity: 0;
+      transform: scale(calc(var(--motion-scale) - 0.04));
+    }
+  }
+
+  @keyframes sheet-slide {
+    from {
+      opacity: 0;
+      transform: translateX(calc(var(--motion-distance) * 2.5));
+    }
+  }
+
+  @keyframes sheet-leave {
+    to {
+      opacity: 0;
+      transform: translateY(calc(var(--motion-distance) * 0.5)) scale(var(--motion-scale));
+    }
+  }
+
+  @keyframes view-rise {
+    from {
+      opacity: 0;
+      transform: translateY(var(--motion-distance));
+    }
+  }
+
+  @keyframes view-slide {
+    from {
+      opacity: 0;
+      transform: translateX(calc(var(--motion-distance) * 1.5));
+    }
+  }
+
+  @keyframes card-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--motion-distance)) scale(var(--motion-scale));
+    }
+  }
+
+  @keyframes list-unfold {
+    from {
+      opacity: 0;
+      transform: translateY(calc(var(--motion-distance) * -0.5));
+    }
+  }
+
   /* ----------------------------------------------------------- small labels */
 
   /* The label over a figure or a section: the theme's label face, in capitals if it says so */
@@ -353,26 +542,9 @@
     backdrop-filter: blur(6px);
   }
 
-  /* The sheet opens with one short movement; the backdrop fades in behind it */
+  /* The sheet's backdrop fills the window, bar included; its contents start below the bar */
   .detail-overlay {
-    animation: detail-fade 0.2s ease-out both;
-  }
-
-  .detail-sheet {
-    animation: detail-rise 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  }
-
-  @keyframes detail-fade {
-    from {
-      opacity: 0;
-    }
-  }
-
-  @keyframes detail-rise {
-    from {
-      opacity: 0;
-      transform: translateY(10px) scale(0.985);
-    }
+    padding-top: calc(var(--header-height) + 1.5rem);
   }
 
   /* Nothing of the game to show: the veil alone has to quieten the library behind */
@@ -532,6 +704,73 @@
   :root[data-card-caption="overlay"] .game-card:hover .game-card-caption,
   :root[data-card-caption="overlay"] .game-card:focus-within .game-card-caption {
     opacity: 0;
+  }
+
+  /*
+   * "hover": covers without a caption. Under the pointer, or reached with the keyboard, the
+   * cover blurs and darkens and the game's title, genres and figures show over it, with the
+   * button that starts or installs it. A game with no artwork shows its title all the time.
+   */
+  .game-card-info {
+    display: none;
+  }
+
+  :root[data-card-caption="hover"] .game-card-caption {
+    display: none;
+  }
+
+  :root[data-card-caption="hover"] .game-card-info {
+    display: block;
+  }
+
+  :root[data-card-caption="hover"] .game-card-art,
+  :root[data-card-caption="hover"] .game-card-no-art .game-card-blank {
+    transition:
+      transform var(--motion-slow) ease,
+      filter var(--motion-base) ease;
+  }
+
+  :root[data-card-caption="hover"] .game-card:hover .game-card-art,
+  :root[data-card-caption="hover"] .game-card:has(:focus-visible) .game-card-art {
+    filter: blur(10px) brightness(0.5) saturate(1.1);
+    transform: scale(1.12);
+  }
+
+  /* The veil that carries the text: over the whole cover, not only its foot */
+  :root[data-card-caption="hover"] .game-card-hover {
+    inset: 0;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: stretch;
+    gap: 0.625rem;
+    background: linear-gradient(to top, rgb(0 0 0 / 0.72), rgb(0 0 0 / 0.38) 55%, rgb(0 0 0 / 0.3));
+    transition: opacity var(--motion-base) ease;
+  }
+
+  :root[data-card-caption="hover"] .game-card-hover > * {
+    transform: translateY(calc(var(--motion-distance) * 0.6));
+    transition: transform var(--motion-base) var(--motion-ease);
+  }
+
+  :root[data-card-caption="hover"] .game-card:hover .game-card-hover > *,
+  :root[data-card-caption="hover"] .game-card:has(:focus-visible) .game-card-hover > * {
+    transform: none;
+  }
+
+  /* Reached with the keyboard a card tells the same; one left behind by a click does not */
+  :root[data-card-caption="hover"] .game-card:has(:focus-visible) .game-card-hover {
+    opacity: 1;
+  }
+
+  /*
+   * The name next to the logo. The logo's own typeface, Afronaut, is a commercial font that
+   * cannot be distributed with an open-source app: Kanso names it and uses it where it is
+   * installed on the PC, and falls back to the theme's heading font everywhere else. No
+   * faux bold: Afronaut has a single weight.
+   */
+  .wordmark {
+    font-family: "Afronaut", "Afronaut Test", var(--font-heading);
+    font-synthesis-weight: none;
   }
 
   /* --------------------------------------------------------- category tiles */
