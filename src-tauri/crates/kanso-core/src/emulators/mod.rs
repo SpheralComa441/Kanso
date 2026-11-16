@@ -777,8 +777,9 @@ mod tests {
         );
         let zelda = &scanned.games[0];
         assert!(zelda.id.starts_with("emu:dolphin:") && zelda.id.len() == "emu:dolphin:".len() + 16, "{}", zelda.id);
-        assert_eq!(zelda.executable_path.as_deref(), Some(rom.to_string_lossy().as_ref()));
-        assert_eq!(zelda.install_dir, s.root.join("Roms/GC").to_string_lossy());
+        // Compared as paths: on Windows the same file can be written with either separator
+        assert_eq!(zelda.executable_path.as_deref().map(Path::new), Some(rom.as_path()));
+        assert_eq!(Path::new(&zelda.install_dir), s.root.join("Roms/GC"));
         assert!(zelda.is_installed && zelda.launch_uri.is_none());
         assert_eq!(scan_games(&emulators).games[0].id, zelda.id, "the same file is the same game at every scan");
         assert_eq!(scanned.warnings.len(), 1, "one game of RetroArch has no core yet: {:?}", scanned.warnings);
