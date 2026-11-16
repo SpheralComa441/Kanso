@@ -1,0 +1,23 @@
+{
+  "kansoPlugin": 1,
+  "id": "nexus-mods",
+  "name": {
+    "en": "Mods on Nexus Mods",
+    "it": "Mod su Nexus Mods",
+    "es": "Mods en Nexus Mods",
+    "ru": "Моды на Nexus Mods"
+  },
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "How many mods a game has on Nexus Mods, with a link to its mods page in your browser. It downloads Nexus Mods' public list of games and looks your game up in it on this PC: no account, and nothing about your library is sent.",
+    "it": "Quante mod ha un gioco su Nexus Mods, con il link alla sua pagina delle mod nel browser. Scarica l'elenco pubblico dei giochi di Nexus Mods e vi cerca il gioco su questo PC: nessun account, e nulla della tua libreria viene inviato.",
+    "es": "Cuántos mods tiene un juego en Nexus Mods, con el enlace a su página de mods en el navegador. Descarga la lista pública de juegos de Nexus Mods y busca el juego en ella en este PC: sin cuenta, y no se envía nada de tu biblioteca.",
+    "ru": "Сколько модов у игры на Nexus Mods и ссылка на страницу её модов в браузере. Плагин скачивает общедоступный список игр Nexus Mods и ищет в нём игру на этом ПК: без учётной записи, и о вашей библиотеке ничего не отправляется."
+  },
+  "homepage": "https://www.nexusmods.com",
+  "hosts": ["data.nexusmods.com"],
+  "provides": { "gameDetails": true },
+  "cacheHours": 72,
+  "enabledByDefault": false
+}

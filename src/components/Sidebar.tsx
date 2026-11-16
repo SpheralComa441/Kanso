@@ -6,6 +6,7 @@ import {
   HardDrive,
   History,
   Home,
+  Joystick,
   LayoutGrid,
   Library,
   Star,
@@ -28,7 +29,7 @@ import type { CategoryKind } from "./CategoryGrid";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
 /** The library, or one of the pages beside it; `genres` and `tags` are the walls of tiles. */
-export type MainView = "home" | "library" | "stats" | CategoryKind;
+export type MainView = "home" | "library" | "stats" | "emulators" | CategoryKind;
 
 const SECTION_PREF_KEYS: Record<CategoryKind, string> = {
   genres: "kanso.ui.sidebar.genres",
@@ -40,6 +41,10 @@ interface SidebarProps {
   view: MainView;
   onOpenHome: () => void;
   onOpenStats: () => void;
+  /** Shows the emulators of this PC. */
+  onOpenEmulators: () => void;
+  /** How many emulators there are: the entry says so. */
+  emulatorCount: number;
   /** Shows the tiles of the genres or of the tags. */
   onOpenOverview: (kind: CategoryKind) => void;
   filters: LibraryFilters;
@@ -209,6 +214,8 @@ export function Sidebar({
   view,
   onOpenHome,
   onOpenStats,
+  onOpenEmulators,
+  emulatorCount,
   onOpenOverview,
   filters,
   onFiltersChange,
@@ -307,6 +314,14 @@ export function Sidebar({
             active={view === "stats"}
             icon={<ChartNoAxesColumn className="h-3.5 w-3.5 shrink-0" />}
             onClick={onOpenStats}
+          />
+          <NavRow
+            id="nav-emulators"
+            label={t("sidebar.emulators")}
+            count={emulatorCount > 0 ? emulatorCount : undefined}
+            active={view === "emulators"}
+            icon={<Joystick className="h-3.5 w-3.5 shrink-0" />}
+            onClick={onOpenEmulators}
           />
         </div>
 

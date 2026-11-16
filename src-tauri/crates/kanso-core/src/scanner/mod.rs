@@ -15,6 +15,7 @@ pub mod xbox;
 
 use crate::config::AppConfig;
 use crate::db::sort_games_by_title;
+use crate::emulators::{self, own_settings::Places, Emulator};
 use crate::models::{DetectedGame, ScanReport, SourceScanOutput};
 use exe_pick::normalize_dir_key;
 
@@ -27,11 +28,18 @@ use exe_pick::normalize_dir_key;
 /// 6. Battle.net (`HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall`)
 /// 7. Xbox app / PC Game Pass (`<drive>:\XboxGames\*\Content\MicrosoftGame.config`)
 /// 8. User-configured Standalone / Custom folders (`*.exe` with exclusion rules)
+/// 9. Emulators and the game files they run (see [`crate::emulators`])
 ///
 /// A game is listed once: when a later source reports an install folder an earlier one already
 /// claimed (e.g. an EA or Ubisoft title bought and installed through Steam), the later entry
 /// is dropped.
 pub fn scan_all_installed_games(config: &AppConfig) -> ScanReport {
+    scan_library(config).0
+}
+
+/// [`scan_all_installed_games`], together with the emulators found on the way: the interface
+/// lists them, and starting an emulated game needs to know its emulator.
+pub fn scan_library(config: &AppConfig) -> (ScanReport, Vec<Emulator>) {
     let mut sources: Vec<SourceScanOutput> = Vec::new();
 
     if let Some(steam_root) = steam::detect_steam_root() {
@@ -50,12 +58,44 @@ pub fn scan_all_installed_games(config: &AppConfig) -> ScanReport {
 
     // Custom folders come last so they never duplicate what a store already reported
     let known_dirs: Vec<String> = report.games.iter().map(|g| g.install_dir.clone()).collect();
-    let standalone_out = standalone::scan_custom_folders(&config.custom_folders, &known_dirs);
-    report.games.extend(standalone_out.games);
+    let mut standalone_out = standalone::scan_custom_folders(&config.custom_folders, &known_dirs);
+    // An emulator kept in a games folder is an emulator, not a game
+    let (emulator_exes, loose_games) = split_off_emulators(std::mem::take(&mut standalone_out.games));
+    report.games.extend(loose_games);
     report.warnings.extend(standalone_out.warnings);
 
+    let places = Places::of_this_pc();
+    let mut found = emulator_exes;
+    found.extend(emulators::find_installed(&places, &registry::read_uninstall_entries()));
+    let emulators = emulators::resolve(&config.emulators, &found, &places);
+    let emulated = emulators::scan_games(&emulators);
+    report.games.extend(emulated.games);
+    report.warnings.extend(emulated.warnings);
+
     sort_games_by_title(&mut report.games);
-    report
+    (report, emulators)
+}
+
+/// The emulators of this PC without scanning for games: those added in Settings and those
+/// installed where programs usually go. Portable copies in the user's games folders are only
+/// found by a scan.
+pub fn find_emulators(config: &AppConfig) -> Vec<Emulator> {
+    let places = Places::of_this_pc();
+    let found = emulators::find_installed(&places, &registry::read_uninstall_entries());
+    emulators::resolve(&config.emulators, &found, &places)
+}
+
+/// Separates the executables of known emulators from the loose games of the custom folders.
+fn split_off_emulators(games: Vec<DetectedGame>) -> (Vec<std::path::PathBuf>, Vec<DetectedGame>) {
+    let mut exes = Vec::new();
+    let mut kept = Vec::new();
+    for game in games {
+        match game.executable_path.as_deref().map(std::path::PathBuf::from) {
+            Some(exe) if emulators::identify(&exe).is_some() => exes.push(exe),
+            _ => kept.push(game),
+        }
+    }
+    (exes, kept)
 }
 
 /// The games the store clients on this PC list for the account, installed or not, read from
@@ -165,6 +205,20 @@ mod tests {
         let ids: Vec<&str> = report.games.iter().map(|g| g.id.as_str()).collect();
         assert_eq!(ids, vec!["steam:1", "steam:2", "ubisoft:635", "ea:apex-legends-2"]);
         assert_eq!(report.warnings, vec!["avviso"]);
+    }
+
+    #[test]
+    fn an_emulator_in_a_games_folder_is_not_listed_as_a_game() {
+        let mut dolphin = game("standalone:a", GamePlatform::Standalone, "D:/Games/Dolphin");
+        dolphin.executable_path = Some("D:/Games/Dolphin/Dolphin.exe".to_string());
+        let mut celeste = game("standalone:b", GamePlatform::Standalone, "D:/Games/Celeste");
+        celeste.executable_path = Some("D:/Games/Celeste/Celeste.exe".to_string());
+        let nameless = game("standalone:c", GamePlatform::Standalone, "D:/Games/Odd");
+
+        let (exes, games) = split_off_emulators(vec![dolphin, celeste, nameless]);
+        assert_eq!(exes, [std::path::PathBuf::from("D:/Games/Dolphin/Dolphin.exe")]);
+        let ids: Vec<&str> = games.iter().map(|g| g.id.as_str()).collect();
+        assert_eq!(ids, ["standalone:b", "standalone:c"]);
     }
 
     #[test]

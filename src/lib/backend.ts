@@ -7,6 +7,9 @@ import type {
   BadgeEntry,
   DealsReport,
   DetectedGame,
+  EmulatorIdentity,
+  EmulatorInfo,
+  EmulatorSetting,
   GameAchievements,
   GameDataAnswer,
   GameManualUpdate,
@@ -23,7 +26,12 @@ import type {
   Theme,
   WindowSignIn,
 } from "../types/game";
-import { PREVIEW_MOCK_DEALS, PREVIEW_MOCK_GAMES } from "./previewData";
+import {
+  PREVIEW_MOCK_DEALS,
+  PREVIEW_MOCK_EMULATED_GAMES,
+  PREVIEW_MOCK_EMULATORS,
+  PREVIEW_MOCK_GAMES,
+} from "./previewData";
 import {
   previewAchievements,
   previewCommand,
@@ -55,6 +63,7 @@ const DEFAULT_CONFIG: AppConfig = {
   plugins: {},
   animations: "theme",
   cardInfo: [...CARD_INFO_DEFAULT],
+  emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
 };
@@ -82,7 +91,9 @@ function withPluginDefaults(raw: unknown): Record<string, PluginState> {
  */
 function previewLibrary(): DetectedGame[] {
   const supplied = (globalThis as { __KANSO_PREVIEW_GAMES__?: unknown }).__KANSO_PREVIEW_GAMES__;
-  return Array.isArray(supplied) ? (supplied as DetectedGame[]) : PREVIEW_MOCK_GAMES;
+  return Array.isArray(supplied)
+    ? (supplied as DetectedGame[])
+    : [...PREVIEW_MOCK_GAMES, ...PREVIEW_MOCK_EMULATED_GAMES];
 }
 
 // Same ordering the desktop backend applies to a real scan
@@ -140,6 +151,7 @@ export async function getSettings(): Promise<AppConfig> {
       plugins: withPluginDefaults(parsed.plugins),
       animations: withAnimationsChoice(parsed.animations),
       cardInfo: withCardInfo(parsed.cardInfo),
+      emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
       gamePassCatalog: parsed.gamePassCatalog === true,
     };
@@ -162,6 +174,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     plugins: withPluginDefaults(config.plugins),
     animations: withAnimationsChoice(config.animations),
     cardInfo: withCardInfo(config.cardInfo),
+    emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
     gamePassCatalog: config.gamePassCatalog === true,
   };
@@ -561,6 +574,78 @@ export async function installGame(game: DetectedGame): Promise<void> {
     return;
   }
   throw new Error(`Installazione disponibile nell'app Windows (${game.title}).`);
+}
+
+/** Stored emulator settings read back: well-formed entries only. */
+function withEmulatorSettings(raw: unknown): EmulatorSetting[] {
+  if (!Array.isArray(raw)) return [];
+  const texts = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+  return raw
+    .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null)
+    .filter((entry) => typeof entry.id === "string" && entry.id.trim() !== "")
+    .map((entry) => ({
+      id: String(entry.id).trim(),
+      name: typeof entry.name === "string" ? entry.name : "",
+      exePath: typeof entry.exePath === "string" ? entry.exePath : "",
+      folders: texts(entry.folders),
+      extensions: texts(entry.extensions),
+      args: typeof entry.args === "string" ? entry.args : "",
+    }));
+}
+
+/**
+ * The emulators on this PC: the ones Kanso found and the ones added in Settings, each with
+ * the folders its games are read from. Their games come with the library (`platform:
+ * "emulator"`, `platformAppId` naming the emulator).
+ */
+export async function listEmulators(): Promise<EmulatorInfo[]> {
+  if (isTauri()) {
+    return invoke<EmulatorInfo[]>("list_emulators");
+  }
+  const config = await getSettings();
+  const added: EmulatorInfo[] = config.emulators
+    .filter((setting) => !PREVIEW_MOCK_EMULATORS.some((known) => known.id === setting.id))
+    .map((setting) => ({
+      id: setting.id,
+      name: setting.name || setting.id,
+      systems: "",
+      exePath: setting.exePath,
+      folders: setting.folders.map((path) => ({ path, fromEmulator: false })),
+      addedByUser: true,
+    }));
+  return [...PREVIEW_MOCK_EMULATORS, ...added];
+}
+
+/** Opens the emulator itself, with no game. */
+export async function launchEmulator(emulator: EmulatorInfo): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("launch_emulator", { emulatorId: emulator.id });
+    return;
+  }
+  throw new Error(`Avvio disponibile nell'applicazione desktop Windows (${emulator.name}).`);
+}
+
+/** What Kanso recognises an executable as; `null` for a program it does not know. */
+export async function identifyEmulator(exePath: string): Promise<EmulatorIdentity | null> {
+  if (isTauri()) {
+    return invoke<EmulatorIdentity | null>("identify_emulator", { exePath });
+  }
+  const file = exePath.replace(/\\/g, "/").split("/").pop()?.toLowerCase() ?? "";
+  if (file.startsWith("dolphin")) {
+    return { id: "dolphin", name: "Dolphin", systems: "GameCube · Wii", extensions: ["iso", "rvz", "gcz", "wbfs"], args: '-b -e "{rom}"' };
+  }
+  return null;
+}
+
+export async function pickEmulatorExecutable(): Promise<string | null> {
+  if (!isTauri()) return null;
+  const selected = await open({
+    directory: false,
+    multiple: false,
+    filters: [{ name: "Windows", extensions: ["exe"] }],
+  });
+  return typeof selected === "string" && selected.trim().length > 0 ? selected : null;
 }
 
 export async function pickCustomFolder(): Promise<string | null> {

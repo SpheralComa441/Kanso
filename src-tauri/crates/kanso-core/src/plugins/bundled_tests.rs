@@ -568,3 +568,96 @@ fn price_history_needs_the_users_key_and_shows_current_and_lowest_price() {
     let nothing = bench.details(&plugin, &config_with("price-history", &[("apiKey", "good-key")]), Lang::En, &other_game("gog:q", "Q"));
     assert!(nothing.is_empty());
 }
+
+/// Nexus Mods' public list of games, with the fields the real file has.
+fn nexus_list() -> String {
+    let game = |id: u32, name: &str, domain: &str, mods: u32| {
+        json!({
+            "id": id, "name": name, "name_lower": name.to_lowercase(),
+            "forum_url": "https://forums.nexusmods.com/", "nexusmods_url": format!("https://www.nexusmods.com/{domain}"),
+            "genre": "RPG", "file_count": 10, "downloads": 1000, "domain_name": domain,
+            "approved_date": 1, "mods": mods, "collections": 2
+        })
+    };
+    json!([
+        game(110, "Skyrim", "skyrim", 73225),
+        game(1704, "Skyrim Special Edition", "skyrimspecialedition", 144507),
+        game(952, "The Witcher 3: Wild Hunt", "witcher3", 10935),
+        game(1151, "Fallout 4", "fallout4", 78035),
+        game(130, "Fallout New Vegas", "newvegas", 42545),
+        game(3474, "Baldur's Gate 3", "baldursgate3", 20495),
+        game(1627, "Dark Souls 3", "darksouls3", 1702),
+        game(7001, "The Elder Scrolls VI: Sentinel", "sentinel", 0),
+        game(7002, "Odd | Name", "../odd", 5),
+        "not an entry"
+    ])
+    .to_string()
+}
+
+#[test]
+fn nexus_mods_counts_the_mods_of_a_game_without_naming_it_to_anyone() {
+    let bench = Bench::new(|request| {
+        assert_eq!(request.url, "https://data.nexusmods.com/file/nexus-data/games.json", "the public list, and nothing else");
+        assert_eq!(request.method, "GET");
+        let header = |name: &str| request.headers.iter().find(|(key, _)| key.eq_ignore_ascii_case(name)).map(|(_, value)| value.as_str());
+        assert_eq!(header("Application-Name"), Some("Kanso"), "it says who is asking, as Nexus Mods asks");
+        assert_eq!(header("Application-Version"), Some("0.1.0"));
+        status(200, &nexus_list())
+    });
+    let plugin = plugin("nexus-mods");
+    assert_eq!(plugin.manifest.hosts, ["data.nexusmods.com"]);
+    assert!(!is_enabled(&plugin, &AppConfig::default()), "it contacts a new site: the user turns it on");
+    let config = config_with("nexus-mods", &[]);
+
+    // The same name, punctuation aside
+    let fallout = other_game("gog:fnv", "Fallout: New Vegas");
+    let data = bench.details(&plugin, &config, Lang::It, &fallout);
+    assert_eq!(stat(&data, "Mod disponibili"), Some("42.545"));
+    assert_eq!(links(&data), ["https://www.nexusmods.com/games/newvegas/mods"], "one link: the game's mods page");
+    assert_eq!(data.badge, None, "nothing on the cards: only in the sheet");
+    assert_eq!(bench.transport.urls().len(), 1);
+
+    // The list is kept: the next games ask nobody
+    // A store's long title, Nexus Mods' everyday name: the edition must not be lost on the way
+    let mut skyrim = steam_game("489830", "The Elder Scrolls V: Skyrim Special Edition");
+    skyrim.clean_title = "The Elder Scrolls V: Skyrim".to_string();
+    let data = bench.details(&plugin, &config, Lang::En, &skyrim);
+    assert_eq!(stat(&data, "Mods available"), Some("144,507"), "Special Edition, not the 2011 game");
+    assert_eq!(links(&data), ["https://www.nexusmods.com/games/skyrimspecialedition/mods"]);
+    let hint = data.sections.iter().flat_map(|s| &s.blocks).find_map(|block| match block {
+        Block::Stats { items } => items[0].hint.clone(),
+        _ => None,
+    });
+    assert_eq!(hint.as_deref(), Some("On Nexus Mods as “Skyrim Special Edition”"), "a match under another name says so");
+    // An edition suffix the store adds
+    let mut witcher = other_game("gog:w3", "The Witcher 3: Wild Hunt - Game of the Year Edition");
+    witcher.clean_title = "The Witcher 3: Wild Hunt".to_string();
+    assert_eq!(links(&bench.details(&plugin, &config, Lang::It, &witcher)), ["https://www.nexusmods.com/games/witcher3/mods"]);
+    // A number written the Roman way in one place and with digits in the other
+    let souls = steam_game("374320", "DARK SOULS III");
+    assert_eq!(links(&bench.details(&plugin, &config, Lang::It, &souls)), ["https://www.nexusmods.com/games/darksouls3/mods"]);
+    assert_eq!(bench.transport.urls().len(), 1, "still the one download");
+
+    // No page for the game, no mods for it, or a malformed entry: nothing is shown
+    for title in ["Celeste", "The Elder Scrolls VI: Sentinel", "Odd Name", "42"] {
+        let answer = bench.engine.game_data(&bench.db, &plugin, &config, Lang::It, &other_game("gog:x", title), true, 2_000);
+        assert_eq!(answer.error, None, "{title}");
+        assert!(answer.data.is_none_or(|data| data.is_empty()), "{title}");
+    }
+
+    // A game file run by an emulator is left alone
+    let mut emulated = other_game("emu:dolphin:1", "Fallout 4");
+    emulated.platform = GamePlatform::Emulator;
+    let answer = bench.engine.game_data(&bench.db, &plugin, &config, Lang::It, &emulated, true, 3_000);
+    assert!(answer.error.is_none() && answer.data.is_none_or(|data| data.is_empty()));
+    assert_eq!(bench.transport.urls().len(), 1);
+}
+
+#[test]
+fn nexus_mods_says_so_when_the_list_cannot_be_read() {
+    let bench = Bench::new(|_| status(503, "busy"));
+    let plugin = plugin("nexus-mods");
+    let config = config_with("nexus-mods", &[]);
+    let answer = bench.engine.game_data(&bench.db, &plugin, &config, Lang::It, &other_game("gog:f4", "Fallout 4"), true, 1_000);
+    assert!(answer.error.is_some() && answer.data.is_none(), "an error, not an empty section");
+}

@@ -116,7 +116,12 @@ impl LibraryStore {
             .games
             .iter()
             .filter(|game| !on_disk.contains(game.id.as_str()))
-            .filter(|game| game.platform != GamePlatform::Standalone || has_user_data(game))
+            .filter(|game| {
+                // A loose executable, or a game file of an emulator, that is no longer there
+                // and that the user never touched is simply gone
+                !matches!(game.platform, GamePlatform::Standalone | GamePlatform::Emulator)
+                    || has_user_data(game)
+            })
             .cloned()
             .map(|mut game| {
                 game.is_installed = false;
@@ -130,7 +135,9 @@ impl LibraryStore {
         // or the game would be listed twice.
         let mut taken_over: HashSet<String> = HashSet::new();
         for scanned in &mut report.games {
-            if scanned.platform == GamePlatform::Standalone || existing_by_id.contains_key(&scanned.id) {
+            if matches!(scanned.platform, GamePlatform::Standalone | GamePlatform::Emulator)
+                || existing_by_id.contains_key(&scanned.id)
+            {
                 continue;
             }
             let title = title_key(&scanned.clean_title);
