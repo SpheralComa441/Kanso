@@ -24,9 +24,10 @@ const MAX_TITLE_CHARS: usize = 200;
 const MAX_SUMMARY_CHARS: usize = 280;
 
 /// What a source writes about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NewsTopic {
+    #[default]
     Gaming,
     Hardware,
 }
@@ -45,6 +46,85 @@ pub struct NewsSource {
     /// The hosts its articles are on: a link elsewhere is not kept. A host stands for its
     /// subdomains too.
     pub hosts: &'static [&'static str],
+}
+
+/// A feed the user added by hand in the settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CustomFeed {
+    pub name: String,
+    /// The feed's address, `https`.
+    pub url: String,
+    pub topic: NewsTopic,
+}
+
+/// Most feeds a user can add.
+pub const MAX_CUSTOM_FEEDS: usize = 12;
+
+impl CustomFeed {
+    /// The host of the feed's address, without the label sites put in front of their feeds
+    /// (`www.`, `feeds.`, `rss.`): the site its articles are on.
+    pub fn site_host(&self) -> Option<String> {
+        let rest = self.url.strip_prefix("https://")?;
+        let host = rest.split(['/', '?', '#']).next()?.to_ascii_lowercase();
+        if host.is_empty() || host.contains(['@', ':']) || !host.contains('.') {
+            return None;
+        }
+        let site = ["www.", "feeds.", "feed.", "rss."]
+            .iter()
+            .find_map(|label| host.strip_prefix(label).filter(|rest| rest.contains('.')))
+            .unwrap_or(&host);
+        Some(site.to_string())
+    }
+
+    /// The feed as it may be kept: a plain name, an `https` address with nothing odd in it.
+    /// `None` when the address is not one.
+    pub fn sanitized(self) -> Option<Self> {
+        let url = self.url.trim().to_string();
+        if !is_picture_url(&url) || url.len() > 300 {
+            return None;
+        }
+        let feed = Self { name: String::new(), url, topic: self.topic };
+        let host = feed.site_host()?;
+        let name: String = self.name.trim().chars().filter(|c| !c.is_control()).take(40).collect();
+        Some(Self { name: if name.is_empty() { host } else { name }, ..feed })
+    }
+}
+
+/// A feed to read, whether one Kanso knows or one the user added.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Feed {
+    pub id: String,
+    pub name: String,
+    pub topic: NewsTopic,
+    pub feed_url: String,
+    /// The hosts its articles are on: a link elsewhere is not kept.
+    pub hosts: Vec<String>,
+}
+
+impl From<&NewsSource> for Feed {
+    fn from(source: &NewsSource) -> Self {
+        Self {
+            id: source.id.to_string(),
+            name: source.name.to_string(),
+            topic: source.topic,
+            feed_url: source.feed_url.to_string(),
+            hosts: source.hosts.iter().map(|host| host.to_string()).collect(),
+        }
+    }
+}
+
+impl Feed {
+    /// The `index`-th feed the user added. Its articles are expected on the feed's own site.
+    pub fn custom(index: usize, feed: &CustomFeed) -> Option<Self> {
+        Some(Self {
+            id: format!("custom-{index}"),
+            name: feed.name.clone(),
+            topic: feed.topic,
+            feed_url: feed.url.clone(),
+            hosts: vec![feed.site_host()?],
+        })
+    }
 }
 
 /// One piece of news.
@@ -120,7 +200,7 @@ pub fn default_sources(lang: Lang) -> Vec<&'static NewsSource> {
 
 /// Whether `url` is an `https` address on `host` or one of its subdomains, with nothing odd
 /// in it.
-fn is_on_host(url: &str, hosts: &[&str]) -> bool {
+fn is_on_host<H: AsRef<str>>(url: &str, hosts: &[H]) -> bool {
     let Some(rest) = url.strip_prefix("https://") else { return false };
     if url.len() > 600 || url.chars().any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '<' | '>' | '\\')) {
         return false;
@@ -131,13 +211,15 @@ fn is_on_host(url: &str, hosts: &[&str]) -> bool {
         return false;
     }
     let host = authority.to_ascii_lowercase();
-    hosts.iter().any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+    hosts.iter().any(|allowed| host == allowed.as_ref() || host.ends_with(&format!(".{}", allowed.as_ref())))
 }
 
 /// Whether `url` may be opened as a piece of news: `https`, on the site of a source Kanso
-/// knows. Links come from remote feeds, so they are checked again before the browser opens.
-pub fn is_allowed_news_url(url: &str) -> bool {
+/// knows or of a feed the user added. Links come from remote feeds, so they are checked
+/// again before the browser opens.
+pub fn is_allowed_news_url(url: &str, custom: &[CustomFeed]) -> bool {
     NEWS_SOURCES.iter().any(|source| is_on_host(url, source.hosts))
+        || custom.iter().filter_map(CustomFeed::site_host).any(|host| is_on_host(url, &[host]))
 }
 
 /// Whether `url` can be shown as a picture: `https`, on any host, with nothing odd in it.
@@ -419,7 +501,7 @@ pub fn parse_feed_date(raw: &str) -> Option<u64> {
 
 /// The news of a feed, RSS or Atom: what can be shown safely of each item, newest first.
 /// Items without a title or without a link to the source's own site are left out.
-pub fn parse_feed(xml: &str, source: &NewsSource) -> Vec<NewsItem> {
+pub fn parse_feed(xml: &str, source: &Feed) -> Vec<NewsItem> {
     let rss = blocks(xml, "item");
     let is_atom = rss.is_empty();
     let entries = if is_atom { blocks(xml, "entry") } else { rss };
@@ -439,7 +521,7 @@ pub fn parse_feed(xml: &str, source: &NewsSource) -> Vec<NewsItem> {
             }?
             .trim()
             .to_string();
-            if title.is_empty() || !is_on_host(&url, source.hosts) || !seen.insert(url.clone()) {
+            if title.is_empty() || !is_on_host(&url, &source.hosts) || !seen.insert(url.clone()) {
                 return None;
             }
             let short = ["description", "summary"].iter().find_map(|name| content(block, name));
@@ -452,8 +534,8 @@ pub fn parse_feed(xml: &str, source: &NewsSource) -> Vec<NewsItem> {
                 .and_then(|raw| parse_feed_date(&raw));
             Some(NewsItem {
                 id: format!("{}:{url}", source.id),
-                source: source.id.to_string(),
-                source_name: source.name.to_string(),
+                source: source.id.clone(),
+                source_name: source.name.clone(),
                 topic: source.topic,
                 title,
                 summary,
@@ -503,22 +585,22 @@ impl NewsClient {
         Ok(String::from_utf8_lossy(&bytes).into_owned())
     }
 
-    /// The news of the sources named, newest first; a source that fails is reported without
-    /// hiding the rest. Sources are asked at the same time.
-    pub fn fetch(&self, sources: &[&'static NewsSource]) -> NewsReport {
-        let answers: Vec<(&NewsSource, Result<Vec<NewsItem>, String>)> = std::thread::scope(|scope| {
-            let workers: Vec<_> = sources
+    /// The news of the feeds named, newest first; a feed that fails is reported without
+    /// hiding the rest. Feeds are asked at the same time.
+    pub fn fetch(&self, feeds: &[Feed]) -> NewsReport {
+        let answers: Vec<(&Feed, Result<Vec<NewsItem>, String>)> = std::thread::scope(|scope| {
+            let workers: Vec<_> = feeds
                 .iter()
-                .map(|source| scope.spawn(move || (*source, self.fetch_text(source.feed_url).map(|xml| parse_feed(&xml, source)))))
+                .map(|feed| scope.spawn(move || (feed, self.fetch_text(&feed.feed_url).map(|xml| parse_feed(&xml, feed)))))
                 .collect();
             workers.into_iter().filter_map(|worker| worker.join().ok()).collect()
         });
         let mut report = NewsReport { fetched_at: now_timestamp_ms(), ..Default::default() };
-        for (source, answer) in answers {
+        for (feed, answer) in answers {
             match answer {
                 // A feed that answers with no news at all did not really answer
                 Ok(items) if !items.is_empty() => report.items.extend(items),
-                _ => report.failed_sources.push(source.id.to_string()),
+                _ => report.failed_sources.push(feed.name.clone()),
             }
         }
         report.items.sort_by_key(|item| std::cmp::Reverse(item.published_at));
@@ -530,15 +612,15 @@ impl NewsClient {
 mod tests {
     use super::*;
 
-    const SOURCE: NewsSource = NewsSource {
-        id: "example",
-        name: "Example Games",
-        lang: Lang::En,
-        topic: NewsTopic::Gaming,
-        feed_url: "https://www.example.com/feed",
-        site_url: "https://www.example.com/",
-        hosts: &["example.com"],
-    };
+    fn source() -> Feed {
+        Feed {
+            id: "example".into(),
+            name: "Example Games".into(),
+            topic: NewsTopic::Gaming,
+            feed_url: "https://www.example.com/feed".into(),
+            hosts: vec!["example.com".into()],
+        }
+    }
 
     #[test]
     fn reads_an_rss_feed() {
@@ -566,7 +648,7 @@ mod tests {
 <item><title></title><link>https://www.example.com/untitled</link></item>
 <item><title>Again</title><link>https://www.example.com/news/new-gpu?utm=rss</link></item>
 </channel></rss>"#;
-        let items = parse_feed(xml, &SOURCE);
+        let items = parse_feed(xml, &source());
         assert_eq!(items.len(), 2, "only items with a title and a link to the source's own site, each once");
         let first = &items[0];
         assert_eq!(first.title, "New GPU beats everything & more");
@@ -601,7 +683,7 @@ mod tests {
   <content type="html"><![CDATA[<p>Body only.</p>]]></content>
 </entry>
 </feed>"#;
-        let items = parse_feed(xml, &SOURCE);
+        let items = parse_feed(xml, &source());
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].url, "https://www.example.com/plain", "23:00 UTC is the newer one");
         assert_eq!(items[0].summary, "Body only.");
@@ -613,10 +695,10 @@ mod tests {
 
     #[test]
     fn what_is_not_a_feed_gives_no_news() {
-        assert!(parse_feed("", &SOURCE).is_empty());
-        assert!(parse_feed("<html><body>Blocked</body></html>", &SOURCE).is_empty());
-        assert!(parse_feed("<rss><channel><item><title>Cut off", &SOURCE).is_empty());
-        assert!(parse_feed("<items><itemized>no</itemized></items>", &SOURCE).is_empty());
+        assert!(parse_feed("", &source()).is_empty());
+        assert!(parse_feed("<html><body>Blocked</body></html>", &source()).is_empty());
+        assert!(parse_feed("<rss><channel><item><title>Cut off", &source()).is_empty());
+        assert!(parse_feed("<items><itemized>no</itemized></items>", &source()).is_empty());
     }
 
     #[test]
@@ -649,18 +731,44 @@ mod tests {
             assert!(source.site_url.starts_with("https://"), "{}", source.id);
             assert!(!source.hosts.is_empty() && source.hosts.iter().all(|host| !host.contains('/') && host.contains('.')), "{}", source.id);
             assert!(source.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'), "{}", source.id);
-            assert!(is_allowed_news_url(&format!("https://{}/article", source.hosts[0])), "{}", source.id);
+            assert!(is_allowed_news_url(&format!("https://{}/article", source.hosts[0]), &[]), "{}", source.id);
             assert!(is_on_host(source.site_url, source.hosts), "{}: the site is on its own hosts", source.id);
         }
         let ids: HashSet<&str> = NEWS_SOURCES.iter().map(|source| source.id).collect();
         assert_eq!(ids.len(), NEWS_SOURCES.len(), "ids are unique");
-        assert!(!is_allowed_news_url("https://evil.example.org/article"));
-        assert!(!is_allowed_news_url("javascript:alert(1)"));
+        assert!(!is_allowed_news_url("https://evil.example.org/article", &[]));
+        assert!(!is_allowed_news_url("javascript:alert(1)", &[]));
         assert!(!is_on_host("https://user@example.com/x", &["example.com"]));
         assert!(!is_on_host("https://example.com:8443/x", &["example.com"]));
         assert!(!is_on_host("https://notexample.com/x", &["example.com"]));
         assert!(!is_on_host("https://example.com/a b", &["example.com"]));
         assert!(is_on_host("https://news.example.com/x?y=1#z", &["example.com"]));
+    }
+
+    #[test]
+    fn a_feed_added_by_hand_is_read_like_the_others() {
+        let added = CustomFeed { name: "  My\u{7} site  ".into(), url: " https://feeds.example.org/news.xml ".into(), topic: NewsTopic::Hardware };
+        let kept = added.sanitized().expect("a plain https address is kept");
+        assert_eq!((kept.name.as_str(), kept.url.as_str()), ("My site", "https://feeds.example.org/news.xml"));
+        assert_eq!(kept.site_host().as_deref(), Some("example.org"), "the site, not the label its feeds live under");
+        let feed = Feed::custom(3, &kept).unwrap();
+        assert_eq!((feed.id.as_str(), feed.hosts.as_slice(), feed.topic), ("custom-3", &["example.org".to_string()][..], NewsTopic::Hardware));
+        let items = parse_feed(
+            "<rss><channel><item><title>On the site</title><link>https://www.example.org/a</link></item>\
+             <item><title>Elsewhere</title><link>https://other.example.net/b</link></item></channel></rss>",
+            &feed,
+        );
+        assert_eq!(items.len(), 1, "articles are kept only on the feed's own site");
+        assert_eq!(items[0].id, "custom-3:https://www.example.org/a");
+        // Its articles may be opened; nobody else's
+        assert!(is_allowed_news_url("https://www.example.org/a", std::slice::from_ref(&kept)));
+        assert!(!is_allowed_news_url("https://www.example.org/a", &[]));
+        assert!(!is_allowed_news_url("https://example.org.evil.net/a", std::slice::from_ref(&kept)));
+        // A feed with no name is called by its site; what is not an https address is not kept
+        assert_eq!(CustomFeed { name: String::new(), url: "https://www.site.example/feed".into(), topic: NewsTopic::Gaming }.sanitized().unwrap().name, "site.example");
+        for bad in ["http://example.org/feed", "https://", "https://localhost/feed", "https://user@example.org/feed", "https://example.org:8080/feed", "file:///etc/passwd", "https://example.org/a b"] {
+            assert!(CustomFeed { name: "x".into(), url: bad.into(), topic: NewsTopic::Gaming }.sanitized().is_none(), "{bad}");
+        }
     }
 
     #[test]

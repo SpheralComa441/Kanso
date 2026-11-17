@@ -1,9 +1,52 @@
 // The sites whose public feeds Kanso can read. Part of `news.rs` (included there).
 //
-// Provisional list: replaced by the feeds verified to answer.
+// The Russian feeds were read live while this was written, and 3DNews says in so many words
+// that anyone may use its RSS feeds. The Italian, English and Spanish ones could not be
+// reached from the development environment: their addresses are the ones the sites publish,
+// to be confirmed from the app. A source that does not answer is reported on the page and
+// can be turned off; a feed can also be added by hand in the settings.
+//
+// Left out on purpose, because their own terms ask for consent before any reuse: Hardware
+// Upgrade, StopGame, iXBT, Igromania.
 
-/// Every source Kanso knows, grouped by language.
+/// Every source Kanso knows, grouped by language: gaming first, then hardware.
 pub const NEWS_SOURCES: &[NewsSource] = &[
+    NewsSource {
+        id: "multiplayer",
+        name: "Multiplayer.it",
+        lang: Lang::It,
+        topic: NewsTopic::Gaming,
+        feed_url: "https://multiplayer.it/feed/rss/news/",
+        site_url: "https://multiplayer.it/",
+        hosts: &["multiplayer.it"],
+    },
+    NewsSource {
+        id: "spaziogames",
+        name: "SpazioGames",
+        lang: Lang::It,
+        topic: NewsTopic::Gaming,
+        feed_url: "https://www.spaziogames.it/feed",
+        site_url: "https://www.spaziogames.it/",
+        hosts: &["spaziogames.it"],
+    },
+    NewsSource {
+        id: "tomshw-it",
+        name: "Tom's Hardware Italia",
+        lang: Lang::It,
+        topic: NewsTopic::Hardware,
+        feed_url: "https://www.tomshw.it/feed",
+        site_url: "https://www.tomshw.it/",
+        hosts: &["tomshw.it"],
+    },
+    NewsSource {
+        id: "hdblog-hardware",
+        name: "HDblog Hardware",
+        lang: Lang::It,
+        topic: NewsTopic::Hardware,
+        feed_url: "https://hardware.hdblog.it/feed/",
+        site_url: "https://hardware.hdblog.it/",
+        hosts: &["hdblog.it"],
+    },
     NewsSource {
         id: "pcgamer",
         name: "PC Gamer",
@@ -12,5 +55,104 @@ pub const NEWS_SOURCES: &[NewsSource] = &[
         feed_url: "https://www.pcgamer.com/rss/",
         site_url: "https://www.pcgamer.com/",
         hosts: &["pcgamer.com"],
+    },
+    NewsSource {
+        id: "rockpapershotgun",
+        name: "Rock Paper Shotgun",
+        lang: Lang::En,
+        topic: NewsTopic::Gaming,
+        feed_url: "https://www.rockpapershotgun.com/feed",
+        site_url: "https://www.rockpapershotgun.com/",
+        hosts: &["rockpapershotgun.com"],
+    },
+    NewsSource {
+        id: "tomshardware",
+        name: "Tom's Hardware",
+        lang: Lang::En,
+        topic: NewsTopic::Hardware,
+        feed_url: "https://www.tomshardware.com/feeds/all",
+        site_url: "https://www.tomshardware.com/",
+        hosts: &["tomshardware.com"],
+    },
+    NewsSource {
+        id: "techpowerup",
+        name: "TechPowerUp",
+        lang: Lang::En,
+        topic: NewsTopic::Hardware,
+        feed_url: "https://www.techpowerup.com/rss/news",
+        site_url: "https://www.techpowerup.com/",
+        hosts: &["techpowerup.com"],
+    },
+    NewsSource {
+        id: "vandal",
+        name: "Vandal",
+        lang: Lang::Es,
+        topic: NewsTopic::Gaming,
+        feed_url: "https://vandal.elespanol.com/xml.cgi",
+        site_url: "https://vandal.elespanol.com/",
+        hosts: &["vandal.elespanol.com"],
+    },
+    NewsSource {
+        id: "3djuegos",
+        name: "3DJuegos",
+        lang: Lang::Es,
+        topic: NewsTopic::Gaming,
+        feed_url: "https://www.3djuegos.com/index.xml",
+        site_url: "https://www.3djuegos.com/",
+        hosts: &["3djuegos.com"],
+    },
+    NewsSource {
+        id: "elchapuzas",
+        name: "El Chapuzas Informático",
+        lang: Lang::Es,
+        topic: NewsTopic::Hardware,
+        feed_url: "https://elchapuzasinformatico.com/feed/",
+        site_url: "https://elchapuzasinformatico.com/",
+        hosts: &["elchapuzasinformatico.com"],
+    },
+    NewsSource {
+        id: "hardzone",
+        name: "HardZone",
+        lang: Lang::Es,
+        topic: NewsTopic::Hardware,
+        feed_url: "https://hardzone.es/feed/",
+        site_url: "https://hardzone.es/",
+        hosts: &["hardzone.es"],
+    },
+    NewsSource {
+        id: "3dnews-games",
+        name: "3DNews — игры",
+        lang: Lang::Ru,
+        topic: NewsTopic::Gaming,
+        feed_url: "https://3dnews.ru/games/rss",
+        site_url: "https://3dnews.ru/games",
+        hosts: &["3dnews.ru"],
+    },
+    NewsSource {
+        id: "vgtimes-games",
+        name: "VGTimes",
+        lang: Lang::Ru,
+        topic: NewsTopic::Gaming,
+        feed_url: "https://vgtimes.ru/gaming-news/rss.xml",
+        site_url: "https://vgtimes.ru/gaming-news/",
+        hosts: &["vgtimes.ru"],
+    },
+    NewsSource {
+        id: "3dnews-hardware",
+        name: "3DNews — железо",
+        lang: Lang::Ru,
+        topic: NewsTopic::Hardware,
+        feed_url: "https://3dnews.ru/hardware-news/rss",
+        site_url: "https://3dnews.ru/hardware-news",
+        hosts: &["3dnews.ru"],
+    },
+    NewsSource {
+        id: "vgtimes-hardware",
+        name: "VGTimes — железо",
+        lang: Lang::Ru,
+        topic: NewsTopic::Hardware,
+        feed_url: "https://vgtimes.ru/tech-and-hardware/rss.xml",
+        site_url: "https://vgtimes.ru/tech-and-hardware/",
+        hosts: &["vgtimes.ru"],
     },
 ];

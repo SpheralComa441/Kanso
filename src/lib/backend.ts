@@ -33,6 +33,7 @@ import type {
   DlssChange,
   DlssLibrary,
   DlssSource,
+  CustomFeed,
   DlssStatus,
   NewsReport,
   NewsSourceInfo,
@@ -85,6 +86,7 @@ const DEFAULT_CONFIG: AppConfig = {
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   store: { hiddenStores: [], hiddenDeals: [], liked: [] },
   newsSources: null,
+  newsFeeds: [],
   dlssUpdates: false,
   emulators: [],
   hasGamePass: false,
@@ -178,6 +180,7 @@ export async function getSettings(): Promise<AppConfig> {
       home: withHomeConfig(parsed.home),
       store: withStoreConfig(parsed.store),
       newsSources: withNewsSources(parsed.newsSources),
+      newsFeeds: withNewsFeeds(parsed.newsFeeds),
       dlssUpdates: parsed.dlssUpdates === true,
       emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
@@ -206,6 +209,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     home: withHomeConfig(config.home),
     store: withStoreConfig(config.store),
     newsSources: withNewsSources(config.newsSources),
+    newsFeeds: withNewsFeeds(config.newsFeeds),
     dlssUpdates: config.dlssUpdates === true,
     emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
@@ -1072,6 +1076,30 @@ export async function getPlaySessions(sinceMs: number): Promise<PlaySession[]> {
 function withNewsSources(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
   return [...new Set(value.filter((id): id is string => typeof id === "string" && /^[a-z0-9-]{1,40}$/.test(id)))];
+}
+
+/** Most feeds a user can add by hand. */
+export const MAX_CUSTOM_FEEDS = 12;
+
+/** Whether `url` can be a feed's address: https, a real host, nothing odd in it. */
+export function isFeedUrl(url: string): boolean {
+  return /^https:\/\/[a-z0-9.-]+\.[a-z0-9-]+(\/[^\s"<>\\]*)?$/i.test(url) && url.length <= 300;
+}
+
+/** The feeds added by hand as the backend would keep them. */
+function withNewsFeeds(value: unknown): CustomFeed[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .filter((feed): feed is CustomFeed => Boolean(feed) && typeof feed.url === "string")
+    .map((feed) => ({
+      name: String(feed.name ?? "").trim().slice(0, 40),
+      url: feed.url.trim(),
+      topic: feed.topic === "hardware" ? ("hardware" as const) : ("gaming" as const),
+    }))
+    .filter((feed) => isFeedUrl(feed.url) && !seen.has(feed.url) && Boolean(seen.add(feed.url)))
+    .map((feed) => ({ ...feed, name: feed.name || feed.url.replace(/^https:\/\/(www\.|feeds?\.|rss\.)?/, "").split("/")[0] }))
+    .slice(0, MAX_CUSTOM_FEEDS);
 }
 
 /** Every site whose feed Kanso can read. */

@@ -635,7 +635,7 @@ export function HomeAmbience({ kind, themeKey }: HomeAmbienceProps) {
 
   return (
     <div ref={holderRef} className="home-ambience-holder" aria-hidden="true">
-      <canvas ref={canvasRef} className="home-ambience" data-ambience={kind} />
+      <canvas ref={canvasRef} className="home-ambience" data-ambience={kind} aria-hidden="true" />
     </div>
   );
 }

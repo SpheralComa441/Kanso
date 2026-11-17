@@ -110,6 +110,7 @@ const INITIAL_CONFIG: AppConfig = {
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   store: { hiddenStores: [], hiddenDeals: [], liked: [] },
   newsSources: null,
+  newsFeeds: [],
   dlssUpdates: false,
   emulators: [],
   hasGamePass: false,
@@ -1026,7 +1027,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
             storeView()
           ) : mainView === "news" ? (
             <NewsView
-              sourcesKey={`${lang}|${config.newsSources === null ? "default" : config.newsSources.join(",")}`}
+              sourcesKey={`${lang}|${config.newsSources === null ? "default" : config.newsSources.join(",")}|${config.newsFeeds.map((feed) => feed.url).join(",")}`}
               onOpenSettings={() => openSettings("news")}
               onError={setStatusMessage}
             />

@@ -201,7 +201,7 @@ export function NewsView({ sourcesKey, onOpenSettings, onError }: NewsViewProps)
 
       {report && report.failedSources.length > 0 && report.items.length > 0 && (
         <p id="news-failed" role="status" className="text-2xs text-amber-200">
-          {t("news.failedSources", { count: report.failedSources.length })}
+          {t("news.failedSources", { sources: report.failedSources.join(", ") })}
         </p>
       )}
 

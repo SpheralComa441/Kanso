@@ -128,6 +128,14 @@ export interface Achievement {
 /** What a news source writes about. */
 export type NewsTopic = "gaming" | "hardware";
 
+/** A feed the user added by hand. */
+export interface CustomFeed {
+  name: string;
+  /** The feed's address, https. */
+  url: string;
+  topic: NewsTopic;
+}
+
 /** One piece of news, from a publisher's public feed. */
 export interface NewsItem {
   id: string;
@@ -269,6 +277,8 @@ export interface AppConfig {
   store: StoreConfig;
   /** The news sources the user chose, by id; `null` until they choose (then: the language's own). */
   newsSources: string[] | null;
+  /** Feeds the user added by hand, read along with the sources chosen. */
+  newsFeeds: CustomFeed[];
   /**
    * Whether Kanso may ask NVIDIA's public repository for the newest DLSS and download its
    * libraries from there. Off until the user turns it on.

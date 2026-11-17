@@ -10,10 +10,10 @@
   "version": "1.1.0",
   "author": "Kanso",
   "description": {
-    "en": "How many mods a game has on Nexus Mods, with a link to its mods page in your browser. No account. It downloads Nexus Mods' public list of games and looks your game up in it on this PC, so nothing about your library is sent; only when that list cannot be had does it ask Nexus Mods about the one game whose sheet is open, by its title.",
-    "it": "Quante mod ha un gioco su Nexus Mods, con il link alla sua pagina delle mod nel browser. Nessun account. Scarica l'elenco pubblico dei giochi di Nexus Mods e vi cerca il gioco su questo PC, quindi nulla della tua libreria viene inviato; solo quando quell'elenco non è disponibile chiede a Nexus Mods del solo gioco di cui è aperta la scheda, per titolo.",
-    "es": "Cuántos mods tiene un juego en Nexus Mods, con el enlace a su página de mods en el navegador. Sin cuenta. Descarga la lista pública de juegos de Nexus Mods y busca el juego en ella en este PC, así que no se envía nada de tu biblioteca; solo cuando esa lista no está disponible pregunta a Nexus Mods por el único juego cuya ficha está abierta, por su título.",
-    "ru": "Сколько модов у игры на Nexus Mods и ссылка на страницу её модов в браузере. Без учётной записи. Плагин скачивает общедоступный список игр Nexus Mods и ищет в нём игру на этом ПК, так что о вашей библиотеке ничего не отправляется; только если список недоступен, он спрашивает Nexus Mods об одной игре, чья карточка открыта, по названию."
+    "en": "How many mods a game has on Nexus Mods, with a link to its mods page in your browser. No account needed. It uses Nexus Mods' public list of games; when that is not available, it looks up by title the game whose sheet is open.",
+    "it": "Quante mod ha un gioco su Nexus Mods, con il link alla sua pagina delle mod nel browser. Non serve un account. Usa l'elenco pubblico dei giochi di Nexus Mods; se non è disponibile, cerca per titolo il gioco di cui è aperta la scheda.",
+    "es": "Cuántos mods tiene un juego en Nexus Mods, con el enlace a su página de mods en el navegador. No hace falta cuenta. Usa la lista pública de juegos de Nexus Mods; si no está disponible, busca por título el juego cuya ficha está abierta.",
+    "ru": "Сколько модов у игры на Nexus Mods, со ссылкой на страницу её модов в браузере. Аккаунт не нужен. Использует открытый список игр Nexus Mods; если он недоступен, ищет по названию игру, карточка которой открыта."
   },
   "homepage": "https://www.nexusmods.com",
   "hosts": [

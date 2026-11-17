@@ -376,6 +376,8 @@ pub struct AppConfig {
     /// The news sources the user chose, by id; `None` until they choose, and then the News
     /// page reads the sources of the interface's language.
     pub news_sources: Option<Vec<String>>,
+    /// Feeds the user added by hand, read along with the sources chosen.
+    pub news_feeds: Vec<crate::news::CustomFeed>,
     /// Whether Kanso may ask NVIDIA's public repository which version of DLSS is the newest
     /// and download its libraries from there. Off until the user turns it on: with it off
     /// Kanso only reads the versions in the games' folders and contacts nobody about DLSS.
@@ -409,6 +411,7 @@ impl Default for AppConfig {
             home: HomeConfig::default(),
             store: StoreConfig::default(),
             news_sources: None,
+            news_feeds: Vec::new(),
             dlss_updates: false,
             emulators: Vec::new(),
             has_game_pass: false,
@@ -484,6 +487,15 @@ impl AppConfig {
                     .map(|source| source.id.to_string())
                     .collect()
             }),
+            news_feeds: {
+                let mut seen = HashSet::new();
+                self.news_feeds
+                    .into_iter()
+                    .filter_map(crate::news::CustomFeed::sanitized)
+                    .filter(|feed| seen.insert(feed.url.clone()))
+                    .take(crate::news::MAX_CUSTOM_FEEDS)
+                    .collect()
+            },
             dlss_updates: self.dlss_updates,
             emulators: {
                 // One entry per emulator: a later one with the same id is a leftover
@@ -576,6 +588,11 @@ mod tests {
             store: StoreConfig::default(),
             dlss_updates: true,
             news_sources: Some(vec![" pcgamer ".to_string(), "no-such-site".to_string(), "pcgamer".to_string()]),
+            news_feeds: vec![
+                crate::news::CustomFeed { name: " Mine ".to_string(), url: "https://www.example.org/feed".to_string(), ..Default::default() },
+                crate::news::CustomFeed { name: "Again".to_string(), url: "https://www.example.org/feed".to_string(), ..Default::default() },
+                crate::news::CustomFeed { name: "Plain".to_string(), url: "http://www.example.org/feed".to_string(), ..Default::default() },
+            ],
             steamgriddb_api_key: "  sgdb_secret_key_123  ".to_string(),
             custom_folders: vec![
                 r"D:\Games\".to_string(),
@@ -661,6 +678,8 @@ mod tests {
         assert!(saved.dlss_updates);
         assert_eq!(initial.news_sources, None, "no choice yet: the sources of the language");
         assert_eq!(saved.news_sources.as_deref(), Some(&["pcgamer".to_string()][..]), "known sources only, each once");
+        assert_eq!(saved.news_feeds.len(), 1, "feeds added by hand: https only, each once");
+        assert_eq!(saved.news_feeds[0].name, "Mine");
         assert_eq!(saved.steamgriddb_api_key, "sgdb_secret_key_123");
         assert_eq!(saved.custom_folders, vec![r"D:\Games\", r"E:\IndieGames"]);
         assert!(saved.has_api_key());

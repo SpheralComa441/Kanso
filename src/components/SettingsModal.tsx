@@ -209,6 +209,7 @@ export function SettingsModal({
   const [store, setStore] = useState(initialConfig.store);
   const [dlssUpdates, setDlssUpdates] = useState(initialConfig.dlssUpdates);
   const [newsSourcesChosen, setNewsSourcesChosen] = useState(initialConfig.newsSources);
+  const [newsFeeds, setNewsFeeds] = useState(initialConfig.newsFeeds);
   // Looking for the place whose weather to follow: what was typed, and what was found
   const [placeQuery, setPlaceQuery] = useState("");
   const [places, setPlaces] = useState<PlaceMatch[] | "searching" | null>(null);
@@ -242,6 +243,7 @@ export function SettingsModal({
       setStore(initialConfig.store);
       setDlssUpdates(initialConfig.dlssUpdates);
       setNewsSourcesChosen(initialConfig.newsSources);
+      setNewsFeeds(initialConfig.newsFeeds);
       setPlaceQuery("");
       setPlaces(null);
       setEmulators(initialConfig.emulators);
@@ -431,6 +433,7 @@ export function SettingsModal({
         store,
         dlssUpdates,
         newsSources: newsSourcesChosen,
+        newsFeeds,
         // An entry that says nothing (no executable, folder or argument) is not kept
         emulators: emulators.filter(
           (emulator) => emulator.exePath.trim() || emulator.folders.length > 0 || emulator.args.trim()
@@ -1085,7 +1088,14 @@ export function SettingsModal({
             </Panel>
 
             <Panel id="news" active={section === "news"} title={t("sidebar.news")} description={t("settings.cat.newsHelp")}>
-              <NewsSettings active={isOpen && section === "news"} value={newsSourcesChosen} onChange={setNewsSourcesChosen} language={language} />
+              <NewsSettings
+                active={isOpen && section === "news"}
+                value={newsSourcesChosen}
+                onChange={setNewsSourcesChosen}
+                language={language}
+                feeds={newsFeeds}
+                onFeedsChange={setNewsFeeds}
+              />
             </Panel>
 
             <Panel id="dlss" active={section === "dlss"} title={t("dlss.title")} description={t("settings.cat.dlssHelp")}>
