@@ -59,10 +59,23 @@ function numberFrom(text) {
 // other to propose.
 function choose(games, now, day, yesterdays) {
   const kinds = [waiting, (game) => forgotten(game, now), () => true];
+  // True once a group was passed over because it held only yesterday's game: that game has
+  // one day in two, and the group after it the days in between
+  let everyOtherDay = false;
   for (const installed of [true, false]) {
     for (const kind of kinds) {
       const pool = games.filter((game) => (game.installed !== false) === installed && kind(game));
-      if (pool.every((game) => game.id === yesterdays)) continue;
+      if (pool.every((game) => game.id === yesterdays)) {
+        if (pool.length > 0) everyOtherDay = true;
+        continue;
+      }
+      if (everyOtherDay) {
+        // From one day to the next the number grows by one, and this group is used every
+        // second day: half the number grows by one a turn, so every game has its turn.
+        // Yesterday's game has its own days and is not counted here.
+        const others = pool.filter((game) => game.id !== yesterdays);
+        return others[Math.floor(numberFrom(day) / 2) % others.length];
+      }
       // The date points at one game of the whole group, and yesterday's gives way to the one
       // after it. (Taken out before counting, the game after it would hardly ever come up:
       // from one day to the next the number grows by one, and so would its place.)

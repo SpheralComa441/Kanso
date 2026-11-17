@@ -1029,7 +1029,8 @@
   /*
    * "hover": covers without a caption. Under the pointer, or reached with the keyboard, the
    * cover blurs and darkens and the game's title, genres and figures show over it, with the
-   * button that starts or installs it. A game with no artwork shows its title all the time.
+   * button that starts or installs it. A game with no artwork shows its title all the time,
+   * except under the pointer, where the title makes room for the lines.
    */
   .game-card-info {
     display: none;
@@ -1054,6 +1055,20 @@
   :root[data-card-caption="hover"] .game-card:has(:focus-visible) .game-card-art {
     filter: blur(10px) brightness(0.5) saturate(1.1);
     transform: scale(1.12);
+  }
+
+  /*
+   * A game with no artwork: its title makes room for the lines whenever the veil shows
+   * (the veil also stays after a click on its button, while the focus is in it)
+   */
+  :root[data-card-caption="hover"] .game-card-blank > p {
+    transition: opacity var(--motion-base) ease;
+  }
+
+  :root[data-card-caption="hover"] .game-card:hover .game-card-blank > p,
+  :root[data-card-caption="hover"] .game-card:has(:focus-visible) .game-card-blank > p,
+  :root[data-card-caption="hover"] .game-card:has(.game-card-hover:focus-within) .game-card-blank > p {
+    opacity: 0;
   }
 
   /* The veil that carries the text: over the whole cover, not only its foot */
@@ -1098,6 +1113,40 @@
 
   :root[data-card-caption="hover"] .home-card-badges {
     display: none;
+  }
+
+  /*
+   * On Home the top of a ranked cover holds its place in the shelf and the queue's controls:
+   * the lines keep clear of them, and those that do not fit the cover are left out whole,
+   * last first. The panel is a column that wraps: what does not fit between the top and the
+   * button goes to a second column, which lies outside the panel and is not drawn.
+   */
+  :root[data-card-caption="hover"] .home-card:has(.home-rank) .game-card-hover {
+    padding-top: 2.5rem;
+  }
+
+  :root[data-card-caption="hover"] .home-card .game-card-info {
+    display: flex;
+    flex-flow: column wrap;
+    justify-content: flex-end;
+    align-content: flex-start;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  :root[data-card-caption="hover"] .home-card .game-card-info > *,
+  :root[data-card-caption="hover"] .home-card .game-card-facts > * {
+    flex: none;
+    width: 100%;
+  }
+
+  /* Each figure is a line of its own, so one can be left out without the others */
+  :root[data-card-caption="hover"] .home-card .game-card-facts {
+    display: contents;
+  }
+
+  :root[data-card-caption="hover"] .home-card .game-card-info > * ~ .game-card-facts > :first-child {
+    margin-top: 0.5rem;
   }
 
   /*

@@ -246,12 +246,15 @@ with the blocks above, and its `games`, each with *Open sheet* and, where it app
   under them; `list` rows sit side by side.
 - **Nothing to show.** Return `null` (or a view with no sections and no games in the library):
   the part is not drawn at all, heading included, until the plugin has something again.
-- **When it runs.** Only while the Home page is on screen, never at startup on another page,
+- **When it runs.** Only while Home is the page shown, never at startup on another page,
   and only if the theme has a place for plugins there. Each plugin is asked on its own: a slow
   one does not hold back the page or the other plugins. Nothing is drawn for a plugin until it
-  has answered. While Home stays on screen the plugins are asked again every quarter of an
-  hour, and when the window comes back; an answer still within its `cacheHours` comes from the
-  cache, so the plugin itself runs only when that has expired.
+  has answered. While Home stays the page shown the plugins are asked again every quarter of
+  an hour, and when the window comes back. This goes on while the window is minimized or
+  waits in the tray (for instance while a game runs), so that Home is up to date when the user
+  returns. An answer still within its `cacheHours` comes from the cache, so the plugin itself
+  runs, and contacts its hosts, at most once per `cacheHours` for as long as Kanso is left on
+  Home.
 - **Who decides.** The user switches the plugin on in *Settings → Plugins*, and from then on
   finds its part listed in *Settings → Home* next to Kanso's own, where it can be left out
   without switching the plugin off. The theme decides where on the page the parts of plugins
@@ -273,9 +276,10 @@ with the blocks above, and its `games`, each with *Open sheet* and, where it app
 - When a call fails, the last good answer stays on screen with a note; with nothing cached the
   section (on Home: one line with the plugin's name) shows the error and *Try again*, with the
   plugin's log lines under *Technical details*. Either way a failure is not retried for 30
-  minutes unless the user presses the refresh icon (an older good answer is shown as it is
-  meanwhile), and in the background a plugin that fails three times in a row is left alone
-  until the next pass.
+  minutes unless the user presses the refresh icon (an older good answer is served from the
+  cache meanwhile; on Home the note and the log lines stay until a new attempt answers, as
+  long as the app is not closed), and in the background a plugin that fails three times in a
+  row is left alone until the next pass.
 - Return `null` when a game simply has no data: that answer is cached too, so the service is not
   asked again at every opening.
 

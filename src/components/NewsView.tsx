@@ -85,8 +85,10 @@ function NewsRow({ item, index, pictures, summaries, onOpen }: NewsCardProps & {
   const [imageFailed, setImageFailed] = useState(false);
   const hasPicture = Boolean(item.imageUrl) && !imageFailed;
   return (
+    // The row wraps where it is too narrow for its words (small window, larger text): the
+    // text then goes under the picture and keeps the width it needs to be read
     <li
-      className="motion-row group relative flex items-start gap-4 px-3.5 py-3 transition-colors hover:bg-oled-elevated/60"
+      className="motion-row group relative flex flex-wrap items-start gap-x-4 gap-y-3 px-3.5 py-3 transition-colors hover:bg-oled-elevated/60"
       style={{ "--i": index } as React.CSSProperties}
       data-news={item.id}
       data-topic={item.topic}
@@ -109,7 +111,7 @@ function NewsRow({ item, index, pictures, summaries, onOpen }: NewsCardProps & {
           )}
         </div>
       )}
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+      <div className="flex min-w-[12rem] flex-1 flex-col gap-1.5">
         <div className="flex items-center gap-2 text-3xs">
           <span className={`inline-block rounded border px-1.5 py-px font-medium ${TOPIC_BADGE[item.topic]}`}>{t(`news.${item.topic}`)}</span>
           <span className="truncate font-medium text-zinc-300">{item.sourceName}</span>

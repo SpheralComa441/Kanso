@@ -382,7 +382,8 @@ export function StoreView({
   const [report, setReport] = useState<DealsReport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  // The tab the user picked; until then, and whenever it is no longer offered, the first one
+  // The tab the user picked; until then, and whenever it is no longer offered, the first one.
+  // The pick is forgotten when the Liked tab a theme leaves out goes away with its last deal
   const [pickedTab, setPickedTab] = useState<StoreTab | null>(null);
   const [sort, setSort] = useState<Sort>("discount");
 
@@ -408,6 +409,12 @@ export function StoreView({
 
   const shownStores = DEAL_STORES.filter((name) => !store.hiddenStores.includes(name));
   const likedIds = useMemo(() => new Set(store.liked.map((deal) => deal.id)), [store.liked]);
+  // The Liked tab a theme leaves out goes away with the last liked deal: the pick goes with it,
+  // or the next deal liked from another tab would bring the user back here
+  const likedTabGone = pickedTab === "liked" && store.liked.length === 0 && !theme.tabs.includes("liked");
+  useEffect(() => {
+    if (likedTabGone) setPickedTab(null);
+  }, [likedTabGone]);
   // What the page works on: the stores the user keeps, less the deals they hid
   const deals = useMemo(() => {
     const hidden = new Set(store.hiddenDeals);

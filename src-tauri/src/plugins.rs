@@ -238,7 +238,7 @@ pub(crate) async fn plugin_game_data(
 }
 
 /// What a plugin adds to the Home page: cached while fresh, asked again with `force`. The
-/// interface asks one plugin at a time while Home is on screen, so a slow one does not hold
+/// interface asks one plugin at a time while Home is the page shown, so a slow one does not hold
 /// the others back. A plugin that is switched off, adds nothing to Home, or whose part the
 /// user left out in Settings is not run.
 #[tauri::command]

@@ -14,7 +14,10 @@ export interface HomePluginPartData {
   refresh: () => void;
 }
 
-/** How often the plugins are asked again while Home stays on screen. */
+/**
+ * How often the plugins are asked again while Home stays the page shown, whether the window
+ * is visible, minimized or in the tray.
+ */
 const ASK_AGAIN_MS = 15 * 60 * 1000;
 /** The window coming back asks again too, unless the plugins were asked a moment ago. */
 const ASK_BACK_MIN_MS = 60 * 1000;
@@ -28,12 +31,13 @@ interface PartState {
  * What the plugins add to the Home page: one entry per plugin that is switched on, provides a
  * part of Home and was not left out by the user, in the plugins' order.
  *
- * The plugins are asked only while `shown` (Home is on screen, and its theme has a place for
- * them), each on its own: one that is slow or fails does not hold the others back. What they
- * answered stays here between visits to the page, so that coming back to Home draws it at
- * once while the backend is asked again (it answers from its cache while that is fresh).
- * While Home stays on screen they are asked again every quarter of an hour and when the
- * window comes back, quietly: Home is about today, also when it is left open for days.
+ * The plugins are asked only while `shown` (Home is the page shown, and its theme has a place
+ * for them), each on its own: one that is slow or fails does not hold the others back. What
+ * they answered stays here between visits to the page, so that coming back to Home draws it
+ * at once while the backend is asked again (it answers from its cache while that is fresh).
+ * While Home stays the page shown, whether the window is visible, minimized or in the tray,
+ * they are asked again every quarter of an hour and when the window comes back, quietly:
+ * Home is about today, also when it is left open for days.
  */
 export function useHomePlugins(
   plugins: PluginInfo[],
@@ -44,6 +48,8 @@ export function useHomePlugins(
   const [states, setStates] = useState<Record<string, PartState>>({});
   // The last request made to each plugin: an answer to an earlier one is not put on screen
   const tickets = useRef<Record<string, number>>({});
+  // Requests still on their way, by plugin
+  const running = useRef<Record<string, number>>({});
 
   // By content: the settings are a new object after every save, whatever changed in them
   const hiddenKey = hidden.join("\n");
@@ -56,18 +62,37 @@ export function useHomePlugins(
   // `quiet`: asked in passing, as time goes by. Nothing on screen says so, and nothing
   // changes unless the answer did
   const load = (plugin: PluginInfo, force: boolean, quiet = false) => {
+    // A request already on its way answers at least as well. A quiet one must not take over
+    // from it: the answer to the user's own refresh, a failure included, is the one shown
+    if (quiet && (running.current[plugin.id] ?? 0) > 0) return;
     const ticket = (tickets.current[plugin.id] ?? 0) + 1;
     tickets.current[plugin.id] = ticket;
+    running.current[plugin.id] = (running.current[plugin.id] ?? 0) + 1;
+    const done = () => {
+      running.current[plugin.id] = Math.max(0, (running.current[plugin.id] ?? 1) - 1);
+    };
     const settle = (answer: HomeDataAnswer) => {
       if (tickets.current[plugin.id] !== ticket) return;
       setStates((current) => {
-        const previous = current[plugin.id]?.answer?.data ?? null;
+        const shown = current[plugin.id]?.answer ?? null;
+        // The backend remembers a failure for a while and meanwhile answers from its cache,
+        // without the failure: the same answer again (same `fetchedAt`, no log lines) keeps
+        // the error and its log lines on screen until a new attempt replaces them
+        const remembered =
+          !force &&
+          shown !== null &&
+          shown.error !== null &&
+          shown.fetchedAt === answer.fetchedAt &&
+          answer.logs.length === 0 &&
+          (answer.error === null || answer.error === shown.error);
+        const next = remembered ? { ...answer, error: shown.error, logs: shown.logs } : answer;
+        const previous = shown?.data ?? null;
         // The same view again is the same object: nothing on screen starts over (cards
         // already turned stay turned)
-        const same = previous !== null && JSON.stringify(previous) === JSON.stringify(answer.data);
+        const same = previous !== null && JSON.stringify(previous) === JSON.stringify(next.data);
         return {
           ...current,
-          [plugin.id]: { answer: same ? { ...answer, data: previous } : answer, isLoading: false },
+          [plugin.id]: { answer: same ? { ...next, data: previous } : next, isLoading: false },
         };
       });
     };
@@ -77,9 +102,14 @@ export function useHomePlugins(
         [plugin.id]: { answer: current[plugin.id]?.answer ?? null, isLoading: true },
       }));
     }
-    pluginHomeData(plugin.id, force)
-      .then(settle)
-      .catch((error) =>
+    // Two-argument `then`: the count goes down once per request, whatever its ticket
+    pluginHomeData(plugin.id, force).then(
+      (answer) => {
+        done();
+        settle(answer);
+      },
+      (error) => {
+        done();
         settle({
           pluginId: plugin.id,
           pluginName: plugin.name,
@@ -87,8 +117,9 @@ export function useHomePlugins(
           error: typeof error === "string" ? error : t("plugins.actionError"),
           logs: [],
           fetchedAt: Date.now(),
-        })
-      );
+        });
+      }
+    );
   };
 
   useEffect(() => {
@@ -99,9 +130,11 @@ export function useHomePlugins(
       for (const plugin of offered) load(plugin, false, quiet);
     };
     ask(false);
-    // Home can stay on screen for days (the window waits in the tray while a game runs):
-    // the plugins are asked again as time passes, and when the window comes back. The
-    // backend answers from its cache while that is fresh, so asking costs next to nothing
+    // Home can stay the page shown for days (the window waits in the tray while a game
+    // runs): the plugins are asked again as time passes, also while the window is hidden,
+    // so that Home is up to date when the user returns, and when the window comes back.
+    // The backend answers from its cache while that is fresh, so asking costs next to
+    // nothing
     const timer = window.setInterval(() => ask(true), ASK_AGAIN_MS);
     const back = () => {
       if (document.visibilityState === "visible" && Date.now() - asked >= ASK_BACK_MIN_MS) ask(true);

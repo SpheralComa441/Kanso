@@ -266,6 +266,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   /** The level of animations being tried in Settings, before it is saved. */
   const [previewAnimations, setPreviewAnimations] = useState<AnimationsChoice | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  /** The list of plugins was read once: until then nobody knows which ones there are. */
+  const [pluginsListed, setPluginsListed] = useState(false);
   const [pluginWarnings, setPluginWarnings] = useState<string[]>([]);
   /** Short labels plugins have for the game cards, by game id. */
   const [badges, setBadges] = useState<Record<string, BadgeEntry[]>>({});
@@ -361,6 +363,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       setPluginWarnings(listed.warnings);
     } catch {
       setPlugins([]);
+    } finally {
+      // Before the labels, which take longer: Home waits for this to say it has nothing
+      setPluginsListed(true);
     }
     await reloadBadges();
   }, [reloadBadges]);
@@ -1080,6 +1085,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
               deals={storeView("top")}
               recommendations={storeView("picks")}
               pluginParts={homePluginParts}
+              pluginsListed={pluginsListed}
               badges={badges}
               cardInfo={config.cardInfo}
             />

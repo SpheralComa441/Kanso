@@ -302,6 +302,25 @@ fn daily_pick_proposes_one_game_a_day_on_home_from_the_backlog_first() {
     assert!(days.windows(2).all(|pair| pair[0] != pair[1]), "{days:?}");
     assert_eq!(days.iter().filter(|id| *id == "gog:never-a").count(), 3, "every other day: {days:?}");
     assert!(days.iter().all(|id| id == "gog:never-a" || id == "gog:old"), "the long untouched one in between: {days:?}");
+    // The group that gets the days in between proposes all of its games, not the same half
+    // of them for weeks: the date's number grows by one a day, the group is used every two
+    let mut old_b = old.clone();
+    old_b.id = "gog:old-b".to_string();
+    old_b.title = "Dimenticato B".to_string();
+    let shared = [never("gog:never-a", "Mai aperto A"), old.clone(), old_b];
+    let between = offline();
+    let mut days = Vec::new();
+    for n in 0..60 {
+        days.push(between.home(&plugin, &config, Lang::It, &shared, noon + n * day).games[0].id.clone());
+    }
+    assert!(days.windows(2).all(|pair| pair[0] != pair[1]), "{days:?}");
+    assert_eq!(days.iter().filter(|id| *id == "gog:never-a").count(), 30, "every other day: {days:?}");
+    for id in ["gog:old", "gog:old-b"] {
+        let count = days.iter().filter(|day| *day == id).count();
+        assert!((10..=20).contains(&count), "{id} has its share of the days in between: {count} in {days:?}");
+        let longest = days.split(|day| day == id).map(<[String]>::len).max().unwrap_or(0);
+        assert!(longest <= 12, "{id} is not left out for weeks: {longest} days in {days:?}");
+    }
     // With a single game to propose, that one is the pick every day
     let single = offline();
     for n in 0..3 {

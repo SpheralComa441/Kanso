@@ -40,6 +40,8 @@ interface HomeViewProps {
   recommendations: ReactNode;
   /** What the plugins add to the page, in their order; drawn where the theme puts "plugins". */
   pluginParts: HomePluginPartData[];
+  /** The list of plugins was read once: until then nobody knows whether one has a part for Home. */
+  pluginsListed: boolean;
   /** Short labels plugins have for the games, by game id. */
   badges: Record<string, BadgeEntry[]>;
   /** What a cover tells under the pointer besides the title, as the user chose. */
@@ -85,7 +87,7 @@ interface ShelfCardProps {
   controls?: ReactNode;
 }
 
-/** What every cover of the page tells under the pointer, as the user chose for the library. */
+/** What the covers of the page's shelves tell under the pointer, as the user chose for the library. */
 interface CardTelling {
   cardInfo: readonly CardInfoItem[];
   badges: Record<string, BadgeEntry[]>;
@@ -348,6 +350,7 @@ export function HomeView({
   deals,
   recommendations,
   pluginParts,
+  pluginsListed,
   badges,
   cardInfo,
 }: HomeViewProps) {
@@ -608,9 +611,11 @@ export function HomeView({
   };
 
   const drawn = shown.map((section) => sections[section]).filter((section) => section !== null);
-  // A plugin that has not answered yet may still have something for the page: until it
-  // has, nobody can say there is nothing to show
-  const awaitingPlugins = shown.includes("plugins") && pluginParts.some((part) => part.answer === null);
+  // A plugin that has not answered yet may still have something for the page, and so may one
+  // not listed yet (at startup the plugins are read after the settings): until they have,
+  // nobody can say there is nothing to show
+  const awaitingPlugins =
+    shown.includes("plugins") && (!pluginsListed || pluginParts.some((part) => part.answer === null));
 
   return (
     <CardTellingContext.Provider value={telling}>
