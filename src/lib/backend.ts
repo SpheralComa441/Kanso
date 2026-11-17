@@ -12,6 +12,8 @@ import type {
   EmulatorSetting,
   GameAchievements,
   GameDataAnswer,
+  HomeDataAnswer,
+  HomePluginPart,
   GameManualUpdate,
   GamePlatform,
   GameStatus,
@@ -54,6 +56,7 @@ import {
   previewAchievements,
   previewCommand,
   previewGameData,
+  previewHomeData,
   previewPlugins,
   previewSessions,
 } from "./previewExtras";
@@ -61,6 +64,7 @@ import {
   DEFAULT_ACCESSIBILITY,
   withAccessibilityDefaults,
   withAnimationsChoice,
+  THEME_FORMAT_VERSION,
   withThemeDefaults,
   type ThemeInput,
 } from "./themes";
@@ -70,6 +74,11 @@ import { CARD_INFO_DEFAULT, withCardInfo } from "./cardInfo";
 const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
 
 const PREVIEW_THEMES_KEY = "kanso.browser_preview.themes";
+/**
+ * Optional answers for the parts plugins add to Home, by plugin id, in place of the preview's
+ * samples: lets a check of the interface show a list, covered cards, words, or a failure.
+ */
+const PREVIEW_HOME_PARTS_KEY = "kanso.browser_preview.home_parts";
 
 const DEFAULT_CONFIG: AppConfig = {
   steamgriddbApiKey: "",
@@ -708,6 +717,16 @@ export const HOME_SECTIONS: HomeSection[] = ["resume", "upNext", "mostPlayed", "
 /** Most games lined up to play next. */
 export const MAX_UP_NEXT = 5;
 
+/** What the part of Home added by a plugin is called among the parts the user left out. */
+export function homePluginPart(pluginId: string): HomePluginPart {
+  return `plugin:${pluginId}`;
+}
+
+/** `plugin:` followed by a plugin id as the backend accepts them (2–40 of a-z, 0-9, dashes). */
+function isHomePluginPart(value: unknown): value is HomePluginPart {
+  return typeof value === "string" && /^plugin:[a-z0-9][a-z0-9-]{1,39}$/.test(value);
+}
+
 /** The Home settings as the backend would keep them: known names, a coarse place, five ids. */
 export function withHomeConfig(value: unknown): HomeConfig {
   const raw = (value && typeof value === "object" ? value : {}) as Partial<HomeConfig>;
@@ -727,8 +746,10 @@ export function withHomeConfig(value: unknown): HomeConfig {
         }
       : null;
   const upNext = Array.isArray(raw.upNext) ? raw.upNext.filter((id): id is string => typeof id === "string" && id !== "") : [];
+  // The parts plugins add: well-formed plugin ids, each once, after Kanso's own parts
+  const pluginParts = [...new Set(hidden.filter(isHomePluginPart))].sort();
   return {
-    hidden: HOME_SECTIONS.filter((section) => hidden.includes(section)),
+    hidden: [...HOME_SECTIONS.filter((section) => hidden.includes(section)), ...pluginParts],
     effects: raw.effects !== false,
     weather: raw.weather === true && place !== null,
     place,
@@ -929,9 +950,12 @@ function readPreviewThemes(): Theme[] {
   try {
     const raw = localStorage.getItem(PREVIEW_THEMES_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    // Themes saved by an earlier version lack the newer sections
+    // Themes saved by an earlier version lack the newer sections; one saved before the
+    // format marker was kept is of format 2 at most
     return Array.isArray(parsed)
-      ? (parsed as ThemeInput[]).map(withThemeDefaults)
+      ? (parsed as ThemeInput[]).map((stored) =>
+          withThemeDefaults({ ...stored, kansoTheme: stored.kansoTheme ?? 2 })
+        )
       : [];
   } catch {
     return [];
@@ -940,7 +964,11 @@ function readPreviewThemes(): Theme[] {
 
 function writePreviewThemes(themes: Theme[]): void {
   try {
-    localStorage.setItem(PREVIEW_THEMES_KEY, JSON.stringify(themes));
+    // With the marker of the format, as the backend writes its files
+    localStorage.setItem(
+      PREVIEW_THEMES_KEY,
+      JSON.stringify(themes.map((theme) => ({ kansoTheme: THEME_FORMAT_VERSION, ...theme })))
+    );
   } catch {
     // Preview only: themes simply won't survive a reload
   }
@@ -1370,6 +1398,23 @@ export async function pluginGameData(
     });
   }
   return previewGameData(pluginId, game);
+}
+
+/**
+ * What a plugin adds to the Home page; `force` asks again instead of using the cache. The
+ * backend refuses a plugin that is off, adds nothing to Home, or whose part the user left out.
+ */
+export async function pluginHomeData(pluginId: string, force = false): Promise<HomeDataAnswer> {
+  if (isTauri()) {
+    return invoke<HomeDataAnswer>("plugin_home_data", { pluginId, force });
+  }
+  const answer = previewHomeData(pluginId, previewGamesState);
+  try {
+    const staged = JSON.parse(localStorage.getItem(PREVIEW_HOME_PARTS_KEY) ?? "{}")[pluginId];
+    return staged && typeof staged === "object" ? { ...answer, ...staged } : answer;
+  } catch {
+    return answer;
+  }
 }
 
 /** The labels plugins have for the game cards, by game id. */

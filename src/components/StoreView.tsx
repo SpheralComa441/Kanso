@@ -3,7 +3,16 @@ import { BellRing, ExternalLink, EyeOff, Heart, RefreshCw, SlidersHorizontal, Wi
 import { detectCountry, useI18n, type MessageKey } from "../i18n";
 import { DEAL_STORES, fetchDeals, openStorePage } from "../lib/backend";
 import { storePicks } from "../lib/storePicks";
-import type { Deal, DealsReport, DealStore, DetectedGame, LikedDeal, StoreConfig } from "../types/game";
+import type {
+  Deal,
+  DealsReport,
+  DealStore,
+  DetectedGame,
+  LikedDeal,
+  StoreConfig,
+  StoreTab,
+  ThemeStore,
+} from "../types/game";
 
 const STORE_NAMES: Record<Exclude<DealStore, "others">, string> = {
   steam: "Steam",
@@ -31,7 +40,6 @@ export function likedEndingSoon(liked: LikedDeal[], now = Date.now()): LikedDeal
   return liked.filter((deal) => deal.endsAt !== null && deal.endsAt > now && deal.endsAt - now <= ENDING_SOON_MS);
 }
 
-type Tab = "all" | "picks" | "liked" | DealStore;
 type Sort = "discount" | "price" | "ending" | "title";
 const SORTS: [Sort, MessageKey][] = [
   ["discount", "store.sortDiscount"],
@@ -49,12 +57,11 @@ interface DealTileProps {
   onHide: (deal: Deal) => void;
 }
 
-function DealTile({ deal, owned, liked, onOpen, onToggleLike, onHide }: DealTileProps) {
-  const { t, money, shortDate, relativeFuture } = useI18n();
-  const [imageFailed, setImageFailed] = useState(false);
+/** What a tile and a row say of a deal in words: who sells it, and when it starts or ends. */
+function useDealWords(deal: Deal) {
+  const { t, shortDate, relativeFuture } = useI18n();
   // Among the other shops, the one that sells it is the name that matters
   const store = deal.seller ?? storeLabel(deal.store, t);
-  const isFree = deal.finalPrice === 0;
   const endsSoon = deal.endsAt !== null && deal.endsAt > Date.now() && deal.endsAt - Date.now() <= ENDING_SOON_MS;
   const timing = deal.upcoming
     ? deal.startsAt !== null
@@ -65,6 +72,14 @@ function DealTile({ deal, owned, liked, onOpen, onToggleLike, onHide }: DealTile
         ? t("store.endsIn", { when: relativeFuture(deal.endsAt) })
         : t("deals.until", { date: shortDate(deal.endsAt) })
       : null;
+  return { store, endsSoon, timing };
+}
+
+function DealTile({ deal, owned, liked, onOpen, onToggleLike, onHide }: DealTileProps) {
+  const { t, money } = useI18n();
+  const [imageFailed, setImageFailed] = useState(false);
+  const { store, endsSoon, timing } = useDealWords(deal);
+  const isFree = deal.finalPrice === 0;
   const chip = "rounded-md border border-white/15 bg-black/75 p-1.5 text-white/85 transition-colors hover:bg-black hover:text-white";
 
   return (
@@ -165,9 +180,133 @@ function DealTile({ deal, owned, liked, onOpen, onToggleLike, onHide }: DealTile
   );
 }
 
-function DealGrid({ children }: { children: React.ReactNode }) {
+/**
+ * A deal as a row of a list: a small picture, then title and genres, the store, when it
+ * ends, the discount and the price. The whole row opens the store's page; liking and
+ * hiding are the same two actions a tile has.
+ */
+function DealRow({ deal, owned, liked, index, onOpen, onToggleLike, onHide }: DealTileProps & { index: number }) {
+  const { t, money } = useI18n();
+  const [imageFailed, setImageFailed] = useState(false);
+  const { store, endsSoon, timing } = useDealWords(deal);
+  const isFree = deal.finalPrice === 0;
+  const action = "rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-oled-elevated hover:text-zinc-200";
+
   return (
-    <ul className="grid" style={{ gap: "var(--grid-gap)", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))" }}>
+    <li
+      className="motion-row group relative flex items-center gap-3.5 px-3.5 py-2.5 transition-colors hover:bg-oled-elevated/60"
+      style={{ "--i": index } as React.CSSProperties}
+      data-deal={deal.id}
+      data-store={deal.store}
+    >
+      {/* The whole row opens the store's page; what can be pressed on it sits above */}
+      <button
+        type="button"
+        onClick={() => onOpen(deal)}
+        aria-label={t("deals.openStore", { title: deal.title, store })}
+        title={deal.title}
+        className="absolute inset-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+      />
+      <div className="h-12 w-[6.5rem] shrink-0 overflow-hidden rounded-md border border-oled-border bg-oled-bg">
+        {deal.imageUrl && !imageFailed && (
+          <img
+            src={deal.imageUrl}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            onError={() => setImageFailed(true)}
+            className="h-full w-full object-cover"
+          />
+        )}
+      </div>
+
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex items-center gap-2">
+          <h3 className="truncate text-sm font-medium text-zinc-100" title={deal.title}>
+            {deal.title}
+          </h3>
+          <span className={`shrink-0 rounded border px-1.5 py-px text-3xs font-medium ${STORE_BADGE[deal.store]}`}>{store}</span>
+          {owned && (
+            <span className="shrink-0 rounded border border-oled-border px-1.5 py-px text-3xs font-medium text-zinc-400">
+              {t("deals.owned")}
+            </span>
+          )}
+        </div>
+        {(deal.genres.length > 0 || timing) && (
+          <p className="truncate text-2xs text-zinc-500">
+            {deal.genres.slice(0, 3).join(" · ")}
+            {deal.genres.length > 0 && timing && " · "}
+            {timing && <span className={endsSoon ? "font-medium text-amber-300" : undefined}>{timing}</span>}
+          </p>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-3 tabular-nums">
+        {!deal.upcoming && (
+          <span className="rounded-md bg-accent px-1.5 py-0.5 text-2xs font-bold text-zinc-950">
+            {isFree ? t("deals.free") : `-${deal.discountPercent}%`}
+          </span>
+        )}
+        <div className="min-w-[4.5rem] text-right">
+          {!deal.upcoming && deal.originalPrice !== null && deal.originalPrice > deal.finalPrice && (
+            <p className="text-3xs leading-tight text-zinc-500 line-through">{money(deal.originalPrice, deal.currency)}</p>
+          )}
+          <p className="text-sm font-semibold leading-tight text-zinc-100">
+            {deal.upcoming
+              ? deal.originalPrice !== null
+                ? money(deal.originalPrice, deal.currency)
+                : ""
+              : isFree
+                ? t("deals.free")
+                : money(deal.finalPrice, deal.currency)}
+          </p>
+        </div>
+      </div>
+
+      <div className="relative flex shrink-0 items-center gap-0.5">
+        <button
+          type="button"
+          data-hide-deal={deal.id}
+          onClick={() => onHide(deal)}
+          aria-label={t("store.hideDeal", { title: deal.title })}
+          title={t("store.hideDeal", { title: deal.title })}
+          className={action}
+        >
+          <EyeOff className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          data-like-deal={deal.id}
+          onClick={() => onToggleLike(deal)}
+          aria-pressed={liked}
+          aria-label={t(liked ? "store.unlike" : "store.like", { title: deal.title })}
+          title={t(liked ? "store.unlike" : "store.like", { title: deal.title })}
+          className={`${action} ${liked ? "text-accent" : ""}`}
+        >
+          <Heart className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
+        </button>
+      </div>
+    </li>
+  );
+}
+
+/** The deals of a tab: tiles in a grid or rows in a list, as the theme says. */
+function Deals({ layout, children }: { layout: ThemeStore["layout"]; children: React.ReactNode }) {
+  if (layout === "list") {
+    return (
+      <div className="overflow-hidden rounded-xl border border-oled-border bg-oled-surface/50">
+        <ul className="divide-y divide-oled-border" data-store-layout="list">
+          {children}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <ul
+      className="grid"
+      data-store-layout="grid"
+      style={{ gap: "var(--grid-gap)", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))" }}
+    >
       {children}
     </ul>
   );
@@ -196,6 +335,8 @@ interface StoreViewProps {
   ownedSteamAppIds: ReadonlySet<string>;
   store: StoreConfig;
   onChangeStore: (next: StoreConfig) => void;
+  /** How the active theme arranges the page: its tabs, tiles or rows, the figures. */
+  theme: ThemeStore;
   onOpenSettings: () => void;
   onError: (message: string) => void;
   /**
@@ -210,7 +351,9 @@ interface StoreViewProps {
 /**
  * The Store page: the discounts running on the stores Kanso can ask without an account, one
  * tab per store. A deal can be liked (Kanso then says when it is about to end) or hidden;
- * a store can be left out altogether. "For you" picks, among the deals, the ones of the
+ * a store can be left out altogether. The active theme says which tabs there are and in
+ * which order (the page opens on the first), whether deals are tiles or rows, and whether
+ * the figures are shown; what it shows on the Home page is always a few tiles. "For you" picks, among the deals, the ones of the
  * genres the user plays the most and, for a change, some of genres they never play.
  *
  * Nothing about the user leaves the PC for this: the stores are asked for their public list
@@ -221,6 +364,7 @@ export function StoreView({
   ownedSteamAppIds,
   store,
   onChangeStore,
+  theme,
   onOpenSettings,
   onError,
   compact,
@@ -230,7 +374,8 @@ export function StoreView({
   const [report, setReport] = useState<DealsReport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [failed, setFailed] = useState(false);
-  const [tab, setTab] = useState<Tab>("all");
+  // The tab the user picked; until then, and whenever it is no longer offered, the first one
+  const [pickedTab, setPickedTab] = useState<StoreTab | null>(null);
   const [sort, setSort] = useState<Sort>("discount");
 
   const load = useCallback(
@@ -285,17 +430,23 @@ export function StoreView({
       // A deal the user no longer wants to see is not one they like
       liked: store.liked.filter((entry) => entry.id !== deal.id),
     });
-  const tile = (deal: Deal) => (
-    <DealTile
-      key={deal.id}
-      deal={deal}
-      owned={deal.steamAppid !== null && ownedSteamAppIds.has(deal.steamAppid)}
-      liked={likedIds.has(deal.id)}
-      onOpen={(d) => void openDeal(d)}
-      onToggleLike={toggleLike}
-      onHide={hideDeal}
-    />
-  );
+  // On Home a deal is always a tile; on the page it is what the theme says
+  const layout = compact ? "grid" : theme.layout;
+  const tile = (deal: Deal, index: number) => {
+    const entry: DealTileProps = {
+      deal,
+      owned: deal.steamAppid !== null && ownedSteamAppIds.has(deal.steamAppid),
+      liked: likedIds.has(deal.id),
+      onOpen: (d) => void openDeal(d),
+      onToggleLike: toggleLike,
+      onHide: hideDeal,
+    };
+    return layout === "list" ? (
+      <DealRow key={deal.id} index={index} {...entry} />
+    ) : (
+      <DealTile key={deal.id} {...entry} />
+    );
+  };
 
   // On the Home page: a few suggestions, or the best discounts, and the way to the rest
   if (compact) {
@@ -330,7 +481,7 @@ export function StoreView({
             </button>
           )}
         </header>
-        <DealGrid>{shown.map(tile)}</DealGrid>
+        <Deals layout="grid">{shown.map(tile)}</Deals>
       </section>
     );
   }
@@ -354,19 +505,31 @@ export function StoreView({
           return b.discountPercent - a.discountPercent || a.title.localeCompare(b.title);
       }
     });
-  const tabs: [Tab, string, number][] = [
-    ["all", t("store.all"), deals.length],
-    ["picks", t("store.picks"), picks.alike.length + picks.different.length],
-    ...shownStores.map((name): [Tab, string, number] => [name, storeLabel(name, t), deals.filter((deal) => deal.store === name).length]),
-    ["liked", t("store.liked"), store.liked.length],
-  ];
+  // The tabs the theme lists, in its order. A store the user hid has no tab, whatever the
+  // theme says
+  const tabs: [StoreTab, string, number][] = theme.tabs.flatMap((name): [StoreTab, string, number][] => {
+    switch (name) {
+      case "all":
+        return [[name, t("store.all"), deals.length]];
+      case "picks":
+        return [[name, t("store.picks"), picks.alike.length + picks.different.length]];
+      case "liked":
+        return [[name, t("store.liked"), store.liked.length]];
+      default:
+        return shownStores.includes(name)
+          ? [[name, storeLabel(name, t), deals.filter((deal) => deal.store === name).length]]
+          : [];
+    }
+  });
+  // `null` when the theme lists only stores and the user hid every one of them
+  const tab: StoreTab | null = tabs.some(([name]) => name === pickedTab) ? pickedTab : (tabs[0]?.[0] ?? null);
   // The liked deals as the stores list them now; the ones no longer listed, as remembered
   const likedNow = store.liked.map((entry) => ({ entry, deal: (report?.deals ?? []).find((deal) => deal.id === entry.id) ?? null }));
   const offline = failed || (report !== null && report.deals.length === 0 && report.failedStores.length > 0);
   const listed = tab === "all" ? deals : deals.filter((deal) => deal.store === tab);
 
   return (
-    <div className="store-page space-y-5">
+    <div className="store-page space-y-5" data-store-layout={layout}>
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 id="store-title" className="text-lg font-semibold tracking-tight text-zinc-50">
@@ -409,7 +572,7 @@ export function StoreView({
             type="button"
             role="tab"
             aria-selected={tab === name}
-            onClick={() => setTab(name)}
+            onClick={() => setPickedTab(name)}
             className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-1.5 text-xs font-medium transition-colors ${
               tab === name
                 ? "border-accent bg-accent text-zinc-950"
@@ -460,7 +623,7 @@ export function StoreView({
           </div>
         ) : (
           <div className="space-y-4">
-            <DealGrid>{likedNow.flatMap(({ deal }) => (deal ? [tile(deal)] : []))}</DealGrid>
+            <Deals layout={layout}>{likedNow.flatMap(({ deal }) => (deal ? [deal] : [])).map(tile)}</Deals>
             {likedNow.some(({ deal }) => deal === null) && (
               <section id="store-liked-gone" className="space-y-2">
                 <h2 className="micro-label">{t("store.likedGone")}</h2>
@@ -499,7 +662,7 @@ export function StoreView({
                   <h2 className="home-heading text-sm font-semibold">{t("store.picksAlike")}</h2>
                   <span className="text-2xs text-zinc-500">{picks.favourites.join(" · ")}</span>
                 </header>
-                <DealGrid>{picks.alike.map(tile)}</DealGrid>
+                <Deals layout={layout}>{picks.alike.map(tile)}</Deals>
               </section>
             )}
             {picks.different.length > 0 && (
@@ -508,7 +671,7 @@ export function StoreView({
                   <h2 className="home-heading text-sm font-semibold">{t("store.picksDifferent")}</h2>
                   <span className="text-2xs text-zinc-500">{t("store.picksDifferentNote")}</span>
                 </header>
-                <DealGrid>{picks.different.map(tile)}</DealGrid>
+                <Deals layout={layout}>{picks.different.map(tile)}</Deals>
               </section>
             )}
             <p className="text-2xs leading-relaxed text-zinc-500">{t("store.picksHow")}</p>
@@ -517,11 +680,11 @@ export function StoreView({
       ) : listed.length === 0 ? (
         <div id="store-empty" className="rounded-xl border border-oled-border bg-oled-surface/60 px-6 py-14 text-center">
           {offline && <WifiOff className="mx-auto mb-3 h-7 w-7 text-zinc-500" />}
-          <p className="text-sm text-zinc-300">{t(offline ? "deals.offline" : shownStores.length === 0 ? "store.noStores" : "deals.empty")}</p>
+          <p className="text-sm text-zinc-300">{t(offline ? "deals.offline" : shownStores.length === 0 || tab === null ? "store.noStores" : "deals.empty")}</p>
         </div>
       ) : (
         <>
-          {tab === "all" && (
+          {tab === "all" && theme.figures && (
             <div id="store-figures" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Figure id="store-count" label={t("store.figureDeals")} value={number(running.length)} note={shownStores.map((name) => storeLabel(name, t)).join(" · ")} />
               <Figure id="store-free" label={t("store.figureFree")} value={number(running.filter((deal) => deal.finalPrice === 0).length)} />
@@ -556,7 +719,7 @@ export function StoreView({
               ))}
             </select>
           </div>
-          <DealGrid>{sorted(listed).map(tile)}</DealGrid>
+          <Deals layout={layout}>{sorted(listed).map(tile)}</Deals>
         </>
       )}
 

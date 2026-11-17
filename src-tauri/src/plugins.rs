@@ -1,12 +1,13 @@
-//! Plugins as the desktop app runs them: listing, installing, running on demand and filling
-//! in the game-card labels in the background.
+//! Plugins as the desktop app runs them: listing, installing, running on demand (for a game's
+//! sheet, for the Home page, for a command) and filling in the game-card labels in the
+//! background.
 
 use crate::{game_not_found, load_config, lock_db, resolve_config_path, AppState, SharedDb};
 use kanso_core::plugins::output::{is_safe_link, PluginView};
 use kanso_core::plugins::registry::{self, load_plugins, Plugin};
 use kanso_core::plugins::{
-    describe, installed_state, is_enabled, shows_badge, BadgeEntry, GameDataAnswer, PluginEngine,
-    PluginInfo,
+    describe, installed_state, is_enabled, shows_badge, BadgeEntry, GameDataAnswer, HomeDataAnswer,
+    PluginEngine, PluginInfo,
 };
 use kanso_core::{current_language, now_timestamp_ms, AppConfig, T};
 use serde::Serialize;
@@ -176,6 +177,8 @@ pub(crate) fn remove_plugin(
     let config_path = resolve_config_path(&app)?;
     let mut config = AppConfig::load_from_file(&config_path)?;
     config.plugins.remove(&id);
+    // Its part of Home goes with it: installed again later, it shows until hidden again
+    config.home.forget_plugin(&id);
     let saved = config.save_to_file(&config_path)?;
     let _ = app.emit(BADGES_UPDATED_EVENT, ());
     Ok(saved)
@@ -229,6 +232,44 @@ pub(crate) async fn plugin_game_data(
             let _ = app.emit(BADGES_UPDATED_EVENT, ());
         }
         Ok(answer)
+    })
+    .await
+    .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))?
+}
+
+/// What a plugin adds to the Home page: cached while fresh, asked again with `force`. The
+/// interface asks one plugin at a time while Home is on screen, so a slow one does not hold
+/// the others back. A plugin that is switched off, adds nothing to Home, or whose part the
+/// user left out in Settings is not run.
+#[tauri::command]
+pub(crate) async fn plugin_home_data(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    plugin_id: String,
+    force: bool,
+) -> Result<HomeDataAnswer, String> {
+    let config = load_config(&app);
+    let host = Arc::clone(&state.plugins);
+    let db = Arc::clone(&state.db);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let plugin = host.find_enabled(&plugin_id, &config)?;
+        if !plugin.manifest.home || config.home.hides_plugin(&plugin_id) {
+            return Err(format!("{}: {plugin_id}", T::PluginNotFound.s()));
+        }
+        let games = lock_db(&db).load_games()?;
+
+        let lock = host.lock_for(&plugin_id);
+        let _running = lock.lock().unwrap_or_else(|p| p.into_inner());
+        Ok(host.engine.home_data(
+            &db,
+            &plugin,
+            &config,
+            current_language(),
+            &games,
+            force,
+            now_timestamp_ms(),
+        ))
     })
     .await
     .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))?

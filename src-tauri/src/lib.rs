@@ -1087,6 +1087,7 @@ pub fn run() {
             plugins::remove_plugin,
             plugins::open_plugins_folder,
             plugins::plugin_game_data,
+            plugins::plugin_home_data,
             plugins::plugin_badges,
             plugins::run_plugin_command,
             plugins::open_plugin_link,

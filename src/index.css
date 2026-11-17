@@ -207,6 +207,14 @@
     scrollbar-gutter: stable;
   }
 
+  /* The pages of the side panel when a theme puts them at the bottom: under the groups,
+     which scroll above them, on the same margins */
+  .app-sidebar-pages {
+    width: var(--sidebar-width);
+    padding: 0.625rem 10px 1rem;
+    border-top: var(--divider-width) solid var(--border-subtle);
+  }
+
   .app-main {
     padding: 1.25rem calc(var(--content-padding) - var(--scrollbar-size)) var(--content-padding)
       var(--content-padding);
@@ -246,6 +254,13 @@
     --fade: 1.125rem;
     -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
     mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
+  }
+
+  /* The same at both ends, for a scrolling area with something sitting right under it */
+  .fade-ends {
+    --fade: 1.125rem;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
   }
 
   /* ------------------------------------------------------------------ cards */
@@ -412,6 +427,12 @@
 
   /* ...and its cards one after the other, the first twenty or so; the rest are there at once */
   .motion-view .game-card {
+    animation: card-in var(--motion-slow) var(--motion-ease) backwards;
+    animation-delay: calc(min(var(--i, 0), 24) * var(--motion-stagger));
+  }
+
+  /* The rows of a list (the Store and the News as rows) come in the same way */
+  .motion-view .motion-row {
     animation: card-in var(--motion-slow) var(--motion-ease) backwards;
     animation-delay: calc(min(var(--i, 0), 24) * var(--motion-stagger));
   }
@@ -1076,6 +1097,55 @@
     justify-content: center;
     gap: 1rem;
     padding-block: 0.25rem;
+  }
+
+  /*
+   * On a page (a part of Home) the covers are those of its shelves: as many in a row, as
+   * wide, with the theme's proportions and gap, starting at the left and wrapping.
+   */
+  .pick-grid[data-picks-wide] {
+    grid-template-columns: repeat(var(--picks), minmax(0, 1fr));
+    gap: var(--grid-gap);
+    padding-block: 0;
+  }
+
+  .pick-grid[data-picks-wide] .pick-card {
+    aspect-ratio: var(--cover-aspect);
+  }
+
+  /*
+   * A theme that cuts the corners of its cards cuts these too, so that they do not stand out
+   * among the shelves. The border stays on the straight sides; the cuts themselves are bare.
+   */
+  :root:is([data-card-shape="cut"], [data-card-shape="slant"]) .pick-grid[data-picks-wide] .pick-face {
+    --cut-a: var(--card-radius);
+    --cut-b: var(--card-radius);
+    border-radius: 0;
+    box-shadow: none;
+    clip-path: polygon(
+      var(--cut-a) 0,
+      calc(100% - var(--cut-b)) 0,
+      100% var(--cut-b),
+      100% calc(100% - var(--cut-a)),
+      calc(100% - var(--cut-a)) 100%,
+      var(--cut-b) 100%,
+      0 calc(100% - var(--cut-b)),
+      0 var(--cut-a)
+    );
+  }
+
+  :root[data-card-shape="slant"] .pick-grid[data-picks-wide] .pick-face {
+    --cut-a: 0px;
+  }
+
+  /* Measured to know how many covers a shelf holds: the gap is the shelves' own */
+  .home-picks {
+    column-gap: var(--grid-gap);
+  }
+
+  /* The words a plugin adds to Home keep a readable measure however wide the page is */
+  .home-plugin-words {
+    max-width: 48rem;
   }
 
   .pick-card {

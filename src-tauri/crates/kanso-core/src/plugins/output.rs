@@ -11,6 +11,9 @@ const MAX_SECTIONS: usize = 6;
 const MAX_BLOCKS: usize = 12;
 const MAX_ITEMS: usize = 24;
 const MAX_GAMES: usize = 12;
+/// A part of the Home page is one among several: it gets less room than a dialog of its own.
+const MAX_HOME_SECTIONS: usize = 2;
+const MAX_HOME_GAMES: usize = 12;
 const BADGE_CHARS: usize = 14;
 const BADGE_LABEL_CHARS: usize = 24;
 const HINT_CHARS: usize = 40;
@@ -106,18 +109,20 @@ impl PluginGameData {
     }
 }
 
-/// A game a command points at.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+/// A game a command, or a part of Home, points at.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GamePick {
     pub id: String,
+    #[serde(default)]
     pub note: Option<String>,
     /// Shown on the card while it is still covered ([`GamesStyle::Mystery`]).
+    #[serde(default)]
     pub hint: Option<String>,
 }
 
 /// How the games of a command are laid out. A name from this list, nothing else.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GamesStyle {
     /// Rows: small cover, title, note, buttons.
@@ -140,14 +145,22 @@ impl GamesStyle {
     }
 }
 
-/// Answer of a command: what the dialog shows.
-#[derive(Debug, Clone, PartialEq, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// Answer of a command (what its dialog shows) or of `home` (what its part of Home shows).
+/// It reads back from the cache as it was written.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct PluginView {
     pub title: Option<String>,
     pub sections: Vec<Section>,
     pub games: Vec<GamePick>,
     pub games_style: GamesStyle,
+}
+
+impl PluginView {
+    /// Nothing to draw: no words and no games. The title alone is a heading over nothing.
+    pub fn is_empty(&self) -> bool {
+        self.sections.is_empty() && self.games.is_empty()
+    }
 }
 
 /// Reads what `gameDetails` returned. `null`/`undefined` mean "nothing for this game".
@@ -193,6 +206,15 @@ pub fn parse_view(value: &Value) -> PluginView {
             .and_then(GamesStyle::from_name)
             .unwrap_or_default(),
     }
+}
+
+/// Reads what `home` returned: the same shape as a command's answer, cut to what a part of
+/// the Home page may take. `null`/`undefined` mean "nothing to show today".
+pub fn parse_home_view(value: &Value) -> PluginView {
+    let mut view = parse_view(value);
+    view.sections.truncate(MAX_HOME_SECTIONS);
+    view.games.truncate(MAX_HOME_GAMES);
+    view
 }
 
 fn parse_badge(value: &Value) -> Option<Badge> {
@@ -451,6 +473,45 @@ mod tests {
             assert_eq!(parse_view(&json!({"gamesStyle": other})).games_style, GamesStyle::List);
         }
         assert_eq!(parse_view(&json!(null)), PluginView::default());
+    }
+
+    #[test]
+    fn a_part_of_home_is_a_view_cut_to_two_sections_and_twelve_games() {
+        let section = |n: usize| json!({"title": format!("Part {n}"), "blocks": [{"type": "text", "text": "Words."}]});
+        let value = json!({
+            "title": "Today",
+            "sections": (0..5).map(section).collect::<Vec<_>>(),
+            "gamesStyle": "cards",
+            "games": (0..30).map(|n| json!({"id": format!("steam:{n}"), "note": "Why"})).collect::<Vec<_>>(),
+        });
+
+        let view = parse_home_view(&value);
+        assert_eq!(view.title.as_deref(), Some("Today"));
+        assert_eq!(view.sections.len(), MAX_HOME_SECTIONS, "the first two, the rest is cut");
+        assert_eq!(view.sections[1].title.as_deref(), Some("Part 1"));
+        assert_eq!(view.games.len(), MAX_HOME_GAMES);
+        assert_eq!(view.games[11].id, "steam:11");
+        assert_eq!(view.games_style, GamesStyle::Cards);
+        // The same answer in a dialog of its own has more room for words
+        assert_eq!(parse_view(&value).sections.len(), 5);
+
+        // The three layouts are the ones of a command; anything else is the plain list
+        assert_eq!(parse_home_view(&json!({"gamesStyle": "mystery"})).games_style, GamesStyle::Mystery);
+        assert_eq!(parse_home_view(&json!({"gamesStyle": "<marquee>"})).games_style, GamesStyle::List);
+
+        // Nothing today, or nonsense: an empty part, which Home does not draw
+        for nothing in [json!(null), json!("text"), json!(7), json!({"title": "Only a heading"}), json!({"sections": [{"blocks": []}]})] {
+            assert!(parse_home_view(&nothing).is_empty(), "{nothing}");
+        }
+        assert!(!view.is_empty());
+
+        // What is kept in the cache reads back identically, and an older or partial entry
+        // reads as far as it goes
+        let stored = serde_json::to_string(&view).unwrap();
+        assert_eq!(serde_json::from_str::<PluginView>(&stored).unwrap(), view);
+        let partial: PluginView = serde_json::from_str(r#"{"games": [{"id": "gog:1"}]}"#).unwrap();
+        assert_eq!(partial.games, vec![GamePick { id: "gog:1".into(), note: None, hint: None }]);
+        assert_eq!(partial.games_style, GamesStyle::List);
     }
 
     #[test]

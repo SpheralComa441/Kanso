@@ -2,6 +2,7 @@ import type {
   DetectedGame,
   GameAchievements,
   GameDataAnswer,
+  HomeDataAnswer,
   PlaySession,
   PluginGameData,
   PluginInfo,
@@ -31,6 +32,7 @@ const PLUGINS: PluginSeed[] = [
     homepage: "https://howlongtobeat.com",
     hosts: ["howlongtobeat.com"],
     gameDetails: true,
+    home: false,
     badge: true,
     background: true,
     commands: [],
@@ -46,6 +48,7 @@ const PLUGINS: PluginSeed[] = [
     homepage: "https://store.steampowered.com",
     hosts: ["api.steampowered.com", "store.steampowered.com"],
     gameDetails: true,
+    home: false,
     badge: true,
     background: true,
     commands: [],
@@ -61,6 +64,7 @@ const PLUGINS: PluginSeed[] = [
     homepage: "https://store.steampowered.com",
     hosts: ["api.steampowered.com"],
     gameDetails: true,
+    home: false,
     badge: false,
     background: false,
     commands: [],
@@ -85,6 +89,7 @@ const PLUGINS: PluginSeed[] = [
     homepage: "https://www.pcgamingwiki.com",
     hosts: ["www.pcgamingwiki.com"],
     gameDetails: true,
+    home: false,
     badge: false,
     background: false,
     commands: [],
@@ -101,6 +106,7 @@ const PLUGINS: PluginSeed[] = [
     homepage: "https://isthereanydeal.com",
     hosts: ["api.isthereanydeal.com"],
     gameDetails: true,
+    home: false,
     badge: false,
     background: false,
     commands: [],
@@ -134,6 +140,7 @@ const PLUGINS: PluginSeed[] = [
     homepage: "https://www.nexusmods.com",
     hosts: ["data.nexusmods.com", "api.nexusmods.com"],
     gameDetails: true,
+    home: false,
     badge: false,
     background: false,
     commands: [],
@@ -149,6 +156,7 @@ const PLUGINS: PluginSeed[] = [
     homepage: null,
     hosts: [],
     gameDetails: false,
+    home: false,
     badge: false,
     background: false,
     commands: [
@@ -169,6 +177,23 @@ const PLUGINS: PluginSeed[] = [
       },
     ],
     enabledByDefault: true,
+  },
+  {
+    id: "daily-pick",
+    name: "Il gioco di oggi",
+    version: "1.0.0",
+    author: "Kanso",
+    description:
+      "Un gioco al giorno dalla tua libreria, sulla Home: prima quelli del backlog, poi quelli che non apri da tempo. Funziona offline.",
+    homepage: null,
+    hosts: [],
+    gameDetails: false,
+    home: true,
+    badge: false,
+    background: false,
+    commands: [],
+    settings: [],
+    enabledByDefault: false,
   },
 ];
 
@@ -362,6 +387,46 @@ export function previewCommand(games: DetectedGame[]): PluginView {
     gamesStyle: "mystery",
     games: picks.map((pick) => ({ id: pick.game.id, note: pick.note, hint: pick.hint })),
   };
+}
+
+/** What a plugin adds to the Home page: for "Il gioco di oggi", one game of the library a day. */
+export function previewHomeData(pluginId: string, games: DetectedGame[]): HomeDataAnswer {
+  const plugin = PLUGINS.find((entry) => entry.id === pluginId);
+  const answer = (data: PluginView): HomeDataAnswer => ({
+    pluginId,
+    pluginName: plugin?.name ?? pluginId,
+    data,
+    error: null,
+    logs: [],
+    fetchedAt: Date.now(),
+  });
+  const nothing: PluginView = { title: null, sections: [], games: [], gamesStyle: "list" };
+  if (pluginId !== "daily-pick") return answer(nothing);
+
+  const started = (game: DetectedGame) => (game.playtimeMinutes ?? 0) > 0;
+  const waiting = (game: DetectedGame) => game.status === "backlog" || !started(game);
+  const candidates = games
+    .filter((game) => !game.isHidden)
+    .filter((game) => game.status !== "finished" && game.status !== "abandoned")
+    .sort((a, b) => (a.id < b.id ? -1 : 1));
+  // What is on disk and waits first, as the plugin itself does; the date picks among them
+  const pools = [
+    candidates.filter((game) => game.isInstalled && waiting(game)),
+    candidates.filter((game) => game.isInstalled),
+    candidates,
+  ];
+  const pool = pools.find((entries) => entries.length > 0);
+  if (!pool) return answer(nothing);
+  const game = pool[Math.floor(hash(new Date().toDateString()) * pool.length)];
+  const note = waiting(game)
+    ? `Dal backlog${started(game) ? "" : " · mai giocato"}`
+    : `Dalla tua libreria · ${Math.max(1, Math.round((game.playtimeMinutes ?? 0) / 60))} h di gioco`;
+  return answer({
+    title: "Il gioco di oggi",
+    sections: [],
+    games: [{ id: game.id, note, hint: null }],
+    gamesStyle: "cards",
+  });
 }
 
 /** Twelve weeks of sample play history spread over the games that have play time. */

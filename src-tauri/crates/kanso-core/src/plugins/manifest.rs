@@ -115,7 +115,9 @@ pub struct PluginManifest {
     /// `gameDetails` may be run quietly for the whole library, so the labels are there
     /// before each sheet is opened.
     pub background: bool,
-    /// Hours an answer of `gameDetails` is reused.
+    /// Implements `home(context)`: a part of the Home page.
+    pub home: bool,
+    /// Hours an answer of `gameDetails` is reused (and of `home`, where a day is the most).
     pub cache_hours: u64,
     pub commands: Vec<PluginCommand>,
     pub settings: Vec<PluginSetting>,
@@ -186,6 +188,7 @@ impl PluginManifest {
                 .unwrap_or(false)
         };
         let game_details = provided("gameDetails");
+        let home = provided("home");
 
         let mut commands = Vec::new();
         for item in list_field(root, "commands", MAX_COMMANDS)? {
@@ -265,9 +268,9 @@ impl PluginManifest {
             });
         }
 
-        if !game_details && commands.is_empty() {
+        if !game_details && !home && commands.is_empty() {
             return Err(
-                "plugin.json: the plugin adds nothing: set \"provides\": {\"gameDetails\": true} or declare \"commands\""
+                "plugin.json: the plugin adds nothing: set \"gameDetails\" or \"home\" to true under \"provides\", or declare \"commands\""
                     .to_string(),
             );
         }
@@ -283,6 +286,7 @@ impl PluginManifest {
             game_details,
             badge: game_details && provided("badge"),
             background: game_details && provided("background"),
+            home,
             cache_hours: root
                 .get("cacheHours")
                 .and_then(Value::as_u64)
@@ -377,6 +381,7 @@ mod tests {
         assert_eq!(manifest.description.get(Lang::Es), "Lowest price ever.");
         assert_eq!(manifest.hosts, ["api.example.org", "example.org"]);
         assert!(manifest.game_details && manifest.badge && manifest.background);
+        assert!(!manifest.home, "a part of Home only when the manifest says so");
         assert_eq!(manifest.cache_hours, 24 * 90, "clamped");
         assert!(manifest.enabled_by_default);
         assert_eq!(manifest.commands[0].id, "refresh");
@@ -418,5 +423,47 @@ mod tests {
         assert!(bad(r#"{"kansoPlugin": 1, "id": "demo", "version": "1"}"#).contains("\"name\""));
         assert!(bad(r#"{"kansoPlugin": 1, "id": "demo", "name": "x", "version": "1 0"}"#).contains("version"));
         assert!(bad(r#"{"kansoPlugin": 1, "id": "demo", "name": "x", "version": "1"}"#).contains("adds nothing"));
+    }
+
+    #[test]
+    fn a_part_of_home_is_enough_for_a_plugin_and_must_be_said_plainly() {
+        let with = |provides: &str| {
+            PluginManifest::parse(&format!(
+                r#"{{"kansoPlugin": 1, "id": "demo", "name": "Demo", "version": "1.0", "provides": {provides}}}"#
+            ))
+        };
+
+        // Nothing but a part of Home: a plugin in its own right, and nothing else is assumed
+        let home_only = with(r#"{"home": true}"#).expect("valid manifest");
+        assert!(home_only.home);
+        assert!(!home_only.game_details && !home_only.badge && !home_only.background);
+        assert!(home_only.commands.is_empty());
+
+        // Alongside what a plugin could already add
+        let both = with(r#"{"home": true, "gameDetails": true, "badge": true}"#).expect("valid manifest");
+        assert!(both.home && both.game_details && both.badge);
+
+        // Only `true` switches it on: anything else is "no", and a plugin with nothing else adds nothing
+        for provides in [r#"{"home": false}"#, r#"{"home": "yes"}"#, r#"{"home": 1}"#, r#"{"home": null}"#, "{}"] {
+            assert!(with(provides).expect_err(provides).contains("adds nothing"), "{provides}");
+        }
+        let error = with("{}").unwrap_err();
+        assert!(error.contains("\"home\"") && error.contains("\"gameDetails\"") && error.contains("\"commands\""), "{error}");
+    }
+
+    #[test]
+    fn the_manifest_in_the_plugin_guide_is_valid() {
+        // The guide's first block of JSON is the manifest authors start from
+        let guide = include_str!("../../../../../docs/PLUGINS.md");
+        let start = guide.find("```json\n").expect("the guide has a manifest") + "```json\n".len();
+        let example = &guide[start..start + guide[start..].find("\n```").expect("the example ends")];
+        let manifest = PluginManifest::parse(example).expect("the manifest in docs/PLUGINS.md must stay valid");
+
+        assert_eq!(manifest.id, "my-plugin");
+        assert!(manifest.game_details && manifest.badge && manifest.background && manifest.home, "everything it says it provides");
+        assert_eq!(manifest.cache_hours, 168);
+        assert_eq!(manifest.hosts, ["api.example.org"]);
+        assert_eq!(manifest.commands.len(), 1);
+        assert_eq!(manifest.settings.len(), 4, "one setting of each type");
     }
 }

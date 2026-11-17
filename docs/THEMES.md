@@ -1,9 +1,13 @@
 # Temi di Kanso / Kanso themes
 
 Un tema è un singolo file `.json` che ridisegna l'intera interfaccia: colori, font, forma di card,
-controlli e icone, disposizione, sfondo e la scheda che si apre cliccando un gioco.
+controlli e icone, disposizione, sfondo, animazioni, la scheda che si apre cliccando un gioco, e
+come sono fatti il pannello laterale e le pagine Home, Store e News (che cosa c'è, in che ordine,
+a griglia o a elenco).
 *A theme is a single `.json` file that restyles the whole interface: colors, fonts, the shape of
-cards, controls and icons, layout, background and the sheet that opens when a game is clicked.*
+cards, controls and icons, layout, background, motion, the sheet that opens when a game is
+clicked, and how the side panel and the Home, Store and News pages are made (what is there, in
+which order, as a grid or as a list).*
 
 I temi inclusi in Kanso (*Brace*, *Ambra*, *Ciano*, *Viola*, *Menta*, *Inchiostro*) nascono dal
 logo per i colori: la stessa ardesia con un colore ciascuno. Hanno forme tonde, copertine senza
@@ -21,8 +25,8 @@ Personalizza*: scegli un tema di partenza, cambia colori e font vedendo il risul
 *Salva come nuovo tema*. L'editor modifica **solo** colori e font; tutto il resto del tema di
 partenza viene conservato com'è.
 
-**Da file (tutto il resto) / From a file (everything else)** — forme, misure, icone, sfondo e font
-incorporati si definiscono nel file:
+**Da file (tutto il resto) / From a file (everything else)** — forme, misure, icone, sfondo, font
+incorporati e la disposizione di pannello laterale, Home, Store e News si definiscono nel file:
 
 1. *Impostazioni → Tema*: scegli un tema e premi *Esporta...*. Il file esportato elenca **tutti** i
    valori, quindi è un modello completo. In alternativa copia un esempio da [`themes/`](themes/).
@@ -39,7 +43,19 @@ netti e bagliore al passaggio, riquadri pieni nella scheda del gioco, animazioni
 [`aurora`](themes/aurora.kanso-theme.json) (sfondo sfumato, forme tonde, riquadri di vetro nella
 scheda del gioco sopra la copertina molto sfocata). Entrambi usano i layout attuali: copertine
 che raccontano il gioco al passaggio del mouse e scheda a riquadri con le altre schede che scorrono.
-Arcade e Aurora sono anche inclusi nell'app.
+Arcade e Aurora sono anche inclusi nell'app: il tema incluso e il file sono la stessa cosa.
+
+I due esempi del formato 3 dispongono anche il pannello laterale, lo Store e le News, ciascuno a
+modo suo. *The two format 3 examples also arrange the side panel, the Store and the News, each
+in its own way:*
+
+| | Pannello laterale / Side panel | Store | News |
+| --- | --- | --- | --- |
+| **Arcade** | Pagine in alto con gli Emulatori subito dopo la Home (`home`, `emulators`, `store`, `news`, `stats`); tra i gruppi, le piattaforme prima degli stati | A elenco (`list`), senza la riga delle cifre | A elenco (`list`), con immagine e riassunto |
+| **Aurora** | Pagine in fondo (`pagesPosition: bottom`); generi e tag subito dopo la libreria, poi piattaforme e stati | A griglia, con «Per te» come prima scheda: la pagina si apre lì | A griglia uniforme (`grid`), senza la notizia grande in testa |
+
+Nord, che è un file del formato 1, non dice nulla di tutto questo e prende la disposizione
+predefinita di Kanso, come i sei temi inclusi nati dal logo.
 
 ## Installare un tema / Installing a theme
 
@@ -54,13 +70,17 @@ I temi installati stanno in `%LOCALAPPDATA%\com.kanso.launcher\themes\`.
 Solo `name` e `colors` sono obbligatori. Tutto ciò che manca prende il valore predefinito di Kanso;
 i numeri fuori intervallo vengono riportati al limite più vicino; un valore del tipo sbagliato o un
 nome non previsto fanno rifiutare il file. I file con `"kansoTheme": 1` (colori, tre misure e un
-font) restano validi.
+font) e `"kansoTheme": 2` restano validi: le sezioni che non conoscevano (`nav`, `store`, `news`)
+prendono i valori predefiniti, cioè l'aspetto che avevano prima. L'unica differenza tra le
+versioni riguarda `home.sections` ed è spiegata [più sotto](#home--la-pagina-home).
 *Only `name` and `colors` are required. Missing values take Kanso's default, out-of-range numbers
-are clamped, wrong types and unknown names are rejected. Version 1 files are still valid.*
+are clamped, wrong types and unknown names are rejected. Files marked 1 or 2 are still valid:
+the sections they did not know (`nav`, `store`, `news`) take their defaults, that is the look
+they had before. The one difference between versions is about `home.sections`, explained below.*
 
 ```json
 {
-  "kansoTheme": 2,
+  "kansoTheme": 3,
   "name": "Il mio tema",
   "author": "Chi l'ha fatto",
   "description": "Una riga di descrizione.",
@@ -127,7 +147,21 @@ are clamped, wrong types and unknown names are rejected. Version 1 files are sti
     "cardTitles": "secondary"
   },
   "motion": { "level": "smooth", "sheet": "rise", "view": "rise", "stagger": true },
-  "home": { "sections": ["resume", "upNext", "mostPlayed", "recommendations", "deals"], "effects": "seasonal" },
+  "home": {
+    "sections": ["resume", "upNext", "mostPlayed", "recommendations", "deals", "plugins"],
+    "effects": "seasonal"
+  },
+  "nav": {
+    "pages": ["home", "store", "news", "stats", "emulators"],
+    "groups": ["library", "status", "platform", "genres", "tags"],
+    "pagesPosition": "top"
+  },
+  "store": {
+    "tabs": ["all", "picks", "steam", "epic", "gog", "others", "liked"],
+    "layout": "grid",
+    "figures": true
+  },
+  "news": { "layout": "magazine", "pictures": true, "summaries": true },
   "fontFiles": []
 }
 ```
@@ -138,7 +172,7 @@ I valori qui sopra sono i predefiniti di Kanso. *The values above are Kanso's de
 
 | Campo / Field | Significato / Meaning |
 | --- | --- |
-| `kansoTheme` | Versione del formato: `2` (i file `1` restano validi). |
+| `kansoTheme` | Versione del formato: `3` (i file `1` e `2` restano validi). Un numero più alto di quello che Kanso conosce fa rifiutare il file. |
 | `name` | Nome mostrato nell'elenco (max 60 caratteri). Obbligatorio. |
 | `author`, `description` | Facoltativi. |
 | `colorScheme` | `"dark"` o `"light"`: dice a Kanso quali tinte usare per badge e avvisi sopra le tue superfici. |
@@ -307,13 +341,110 @@ there are, in which order, and what moves behind it.*
 
 | Chiave / Key | Valori / Values | Significato / Meaning |
 | --- | --- | --- |
-| `sections` | elenco di `resume`, `upNext`, `mostPlayed`, `recommendations`, `deals` | Le parti mostrate, nell'ordine scritto: da riprendere, prossimi giochi, i più giocati, consigli per genere dallo Store («Per te»), i cinque sconti più alti. Una parte non nominata non viene mostrata; un elenco vuoto lascia la Home vuota |
+| `sections` | elenco di `resume`, `upNext`, `mostPlayed`, `recommendations`, `deals`, `plugins` | Le parti mostrate, nell'ordine scritto: da riprendere, prossimi giochi, i più giocati, consigli per genere dallo Store («Per te»), i cinque sconti più alti, e `plugins`: le parti che i plugin attivati dall'utente aggiungono alla Home (per esempio «Il gioco di oggi»), una per plugin, una dopo l'altra nell'ordine dei plugin, ciascuna con il suo titolo, i suoi testi e i giochi che propone; finché nessun plugin ha qualcosa da mostrare non occupa spazio. Ogni nome una volta sola (una ripetizione viene ignorata). Una parte non nominata non viene mostrata; un elenco vuoto lascia la Home vuota |
 | `effects` | `seasonal`, `none` | Lo sfondo che scende dall'alto: qualcosa della stagione, di una festa vicina o, se l'utente lo ha chiesto, del meteo; oppure niente |
+
+**`sections` e la versione del file.** `plugins` esiste dal formato 3. Un file segnato
+`"kansoTheme": 1` o `2` (o senza numero) che elenca `sections` è stato scritto prima che quella
+parte esistesse: leggendolo, Kanso aggiunge `plugins` in fondo al suo elenco, così un tema già
+installato non perde ciò che i plugin mostrano. Un file segnato `3` viene preso alla lettera:
+se non nomina `plugins`, quella parte non c'è. I temi salvati dall'app e quelli esportati sono
+sempre del formato 3, con l'elenco completo.
+*`plugins` exists since format 3. A file marked 1 or 2 (or not marked) that lists `sections`
+predates it: on reading, `plugins` is appended to its list. A file marked 3 is taken literally:
+a part it does not name is not shown. Themes saved or exported by the app are always format 3.*
+
+**Che cosa mostra `plugins`.** Un plugin può aggiungere alla Home una parte sua (vedi
+[PLUGINS.md](PLUGINS.md#a-part-of-home)): un titolo, qualche riga di dati e fino a dodici giochi
+della libreria, disegnati da Kanso con le intestazioni, le copertine e le animazioni del tema,
+come le altre parti. Il tema decide **dove** stanno tutte insieme (il posto di `plugins`
+nell'elenco) o che non ci sono (non nominandolo: in quel caso i plugin non vengono nemmeno
+interrogati per la Home). Non può scegliere tra un plugin e l'altro: quali parti mostrare lo
+decide l'utente, attivando i plugin e, in *Impostazioni → Home*, togliendo quelle che non vuole.
+*What `plugins` shows: the parts that the plugins the user switched on add to Home, one per
+plugin, drawn by Kanso with the theme's headings, covers and motion. The theme places them all
+together, or leaves them out (then the plugins are not even asked); which plugins show is the
+user's choice, in Settings → Plugins and Settings → Home.*
 
 Un tema decide ordine e presenza delle parti; l'utente può comunque nasconderne qualunque, e
 spegnere lo sfondo, da *Impostazioni → Home*. Lo sfondo prende i suoi colori dal tema (testo,
 accento, secondo colore) e non si disegna con le animazioni spente. Un tema non può indicare
 immagini, video o indirizzi per lo sfondo: sceglie solo tra i due nomi.
+
+### `nav` — Il pannello laterale
+
+Quali pagine e quali gruppi elenca il pannello laterale, in che ordine, e dove stanno le pagine.
+*Which pages and which groups the side panel lists, in which order, and where the pages are.*
+
+| Chiave / Key | Valori / Values | Significato / Meaning |
+| --- | --- | --- |
+| `pages` | elenco di `home`, `store`, `news`, `stats`, `emulators` | Le pagine accanto alla libreria, nell'ordine scritto: Home, Store, News, Statistiche, Emulatori. Ogni nome una volta sola. Una pagina non nominata non è offerta: non ha la sua voce e nessun collegamento porta lì (per esempio «Vedi tutto nello Store» dalla Home). `[]` lascia la sola libreria |
+| `groups` | elenco di `library`, `status`, `platform`, `genres`, `tags` | I gruppi di voci, nell'ordine scritto: Libreria (tutti i giochi, preferiti, recenti, non installati, nascosti), Stato, Piattaforma, Generi, Tag. Un gruppo non nominato non viene mostrato, **tranne `library`**: se il tema non la nomina, Kanso la mette per prima |
+| `pagesPosition` | `top`, `bottom` | Le pagine sopra i gruppi, oppure sotto: in quel caso restano ferme in fondo al pannello mentre i gruppi scorrono |
+
+- La libreria c'è sempre: un tema non può togliere all'utente la strada verso i suoi giochi.
+  *The library is always there: a theme cannot lock the user out of their games.*
+- Ciò che l'utente nasconde da *Impostazioni → Generale → Pannello laterale* (Home, Store, News,
+  Tag) resta nascosto qualunque cosa dica il tema. *What the user hides in Settings stays hidden
+  whatever the theme says.*
+- Ogni gruppo mantiene le proprie condizioni: gli stati compaiono quando se ne usa almeno uno, le
+  piattaforme sono quelle che hanno giochi, i tag ci sono dopo la prima sincronizzazione.
+- Se la pagina aperta non è più offerta (perché si è cambiato tema, o la si è nascosta), Kanso
+  torna alla libreria. Lo stesso vale per le schede di generi e tag quando il loro gruppo non c'è.
+  Mentre un tema è solo in prova nelle Impostazioni si vede la libreria, ma annullando si torna
+  alla pagina di prima.
+- Una pagina non offerta non sparisce da Kanso: cambia solo ciò che il pannello propone. Senza
+  `emulators`, per esempio, gli emulatori si gestiscono ancora da *Impostazioni → Emulatori* e i
+  giochi emulati restano sulla Home e, se hanno uno stato, nell'elenco di quello stato; ma la
+  pagina che li elenca tutti non c'è finché l'utente non sceglie un altro tema. *A page that is
+  not offered is only out of the panel: without `emulators`, emulated games still show on Home
+  and under their status, but the page listing them all is not there until another theme is
+  chosen.*
+- Un filtro di un gruppo che il tema non mostra può comunque essere attivo (un genere scelto
+  dalla scheda di un gioco, un filtro messo prima di cambiare tema). In quel caso il gruppo
+  compare ridotto al titolo e alla sola voce selezionata, che lo spegne con un clic, e sparisce
+  con lui. *A filter of a group the theme leaves out stays in sight: the group shows up with its
+  title and that one entry, which switches it off.*
+- Un tema sceglie tra le pagine e i gruppi che esistono: non può aggiungerne, rinominarli o
+  cambiarne l'icona. I colori delle voci si scelgono con `layout.navHeadings` e
+  `layout.navPages`.
+
+### `store` — La pagina Store
+
+Le schede della pagina, come sono disegnate le offerte e se ci sono le cifre in alto. Vale per la
+pagina intera: i consigli e gli sconti che la Home mostra restano a riquadri.
+*The tabs of the page, how deals are drawn and whether the figures are there. It applies to the
+full page: what Home shows of the Store stays as tiles.*
+
+| Chiave / Key | Valori / Values | Significato / Meaning |
+| --- | --- | --- |
+| `tabs` | elenco di `all`, `picks`, `steam`, `epic`, `gog`, `others`, `liked` | Le schede, nell'ordine scritto: tutte le offerte, «Per te», Steam, Epic Games, GOG, altri store, «Mi piace». Ogni nome una volta sola. Una scheda non nominata non è offerta; **la prima è quella su cui si apre la pagina**. Ne serve almeno una: `[]` fa rifiutare il file |
+| `layout` | `grid`, `list` | `grid`: riquadri con l'immagine in alto. `list`: righe compatte con immagine piccola, titolo, store, generi, scadenza, sconto e prezzo; le azioni «Mi piace» e «Nascondi» sono le stesse |
+| `figures` | `true` / `false` | La riga delle quattro cifre (offerte, gratis ora, sconto più alto, in scadenza) in cima alla scheda `all` |
+
+- Gli store che l'utente ha nascosto da *Impostazioni → Store* restano nascosti qualunque cosa
+  dica il tema: la loro scheda non compare, e se era la prima la pagina si apre sulla successiva.
+  *Stores the user hid stay hidden whatever the theme says.*
+- `all` elenca le offerte di tutti gli store che l'utente tiene, anche di quelli a cui il tema
+  non dà una scheda propria.
+- Un tema sceglie tra le schede che esistono: non può aggiungere negozi o indirizzi, né cambiare
+  quali store vengono interrogati.
+
+### `news` — La pagina News
+
+Come sono disposte le notizie e che cosa mostra ciascuna. *How the news are laid out and what
+each item shows.*
+
+| Chiave / Key | Valori / Values | Significato / Meaning |
+| --- | --- | --- |
+| `layout` | `magazine`, `grid`, `list` | `magazine`: la prima notizia grande, con l'immagine a lato, poi le altre a griglia. `grid`: tutte della stessa misura. `list`: righe con una piccola immagine a lato |
+| `pictures` | `true` / `false` | Le notizie mostrano la loro immagine. Con `false` nessuna immagine viene mostrata (e in `magazine` nessuna notizia fa da apertura) |
+| `summaries` | `true` / `false` | Le notizie mostrano il riassunto sotto il titolo |
+
+Le fonti restano quelle scelte dall'utente in *Impostazioni → News*, e le immagini sono quelle
+dei feed: un tema decide solo *come* mostrarle, non può indicare siti, feed o immagini.
+*Sources stay the user's choice and pictures are the feeds' own: a theme only decides how they
+are shown.*
 
 ### `motion` — Animazioni
 
@@ -341,6 +472,12 @@ font ad alta leggibilità sostituisce `fontFamily` e `headingFont`, le barre di 
 essere forzate visibili, «Riduci le animazioni» spegne `motion`. Un tema non può disattivarle. *The user's accessibility preferences win
 over the theme and cannot be switched off by it.*
 
+Lo stesso vale per le scelte fatte nelle Impostazioni: le pagine e i tag nascosti dal pannello
+laterale, le parti nascoste della Home, gli store nascosti e il livello delle animazioni restano
+come l'utente li ha voluti con qualunque tema. Un tema può togliere o riordinare, mai rimettere
+ciò che l'utente ha tolto. *The same goes for the user's choices in Settings: a theme can leave
+out or reorder, never bring back what the user took away.*
+
 ## Sicurezza / Safety
 
 Un tema può impostare **solo** i campi elencati sopra, e ognuno viene validato dal backend prima di
@@ -348,6 +485,10 @@ arrivare all'interfaccia: un colore deve essere un esadecimale, una misura un nu
 dei nomi previsti, un font un elenco di nomi semplici, un file di font un vero font (viene
 controllata la firma del file) e solo dalla cartella del tema. Un tema non può quindi contenere CSS
 arbitrario, script, percorsi di file o risorse remote: importarne uno ricevuto da altri è sicuro.
+Anche la disposizione di pannello laterale, Home, Store e News è fatta solo di nomi presi da
+elenchi chiusi (pagine, gruppi, schede, parti, layout) e di sì/no: un tema riordina e sceglie tra
+ciò che Kanso sa già disegnare, non può aggiungere pagine, negozi, fonti di notizie o contenuti
+propri, né togliere la libreria.
 
 *A theme can only set the fields listed above and each one is validated by the backend before it
 reaches the interface. A theme file cannot carry arbitrary CSS, scripts, file paths or remote
@@ -358,5 +499,16 @@ resources, so importing one from a stranger is safe.*
 - Validazione e formato: `src-tauri/crates/kanso-core/src/theme.rs` (con i test).
 - Applicazione dei valori all'interfaccia: `src/lib/themes.ts` (`applyTheme`) e le regole in
   `src/index.css`; i valori predefiniti sono in `src/theme.css`.
+- Le sezioni che dispongono l'interfaccia arrivano ai componenti come proprietà del tema attivo,
+  da `src/App.tsx`: `home` a `HomeView`, `nav` a `Sidebar`, `store` a `StoreView`, `news` a
+  `NewsView`, `detail` a `GameDetail`. Che cosa è offerto nel pannello (tema più scelte
+  dell'utente) si calcola in un punto solo: `offeredPages` e `offeredGroups` in
+  `src/lib/themes.ts`.
+- I temi inclusi Arcade e Aurora sono i file di `docs/themes/`, importati così come sono da
+  `src/lib/themes.ts`; il test `the_example_themes_in_the_docs_are_valid` li fa passare dalla
+  stessa validazione dei file importati.
+- L'esempio completo di questa pagina è letto da un test
+  (`the_full_example_in_the_theme_guide_is_valid_and_shows_the_default_arrangement`): se un
+  campo cambia nome o viene aggiunto senza comparire qui, il test fallisce.
 - Font inclusi: elenco in `scripts/generate-fonts-css.mjs` (`npm run fonts`), che rigenera
   `src/fonts.css` e `public/font-licenses.txt` (le licenze SIL OFL, distribuite con l'app).

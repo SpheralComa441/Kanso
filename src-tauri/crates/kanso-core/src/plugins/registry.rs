@@ -39,7 +39,7 @@ macro_rules! bundled {
 }
 
 /// The official plugins, from the repository's `plugins/` folder, in the order they are listed.
-const BUNDLED: [(&str, &str); 7] = [
+const BUNDLED: [(&str, &str); 8] = [
     bundled!("howlongtobeat"),
     bundled!("steam-reviews"),
     bundled!("steam-news"),
@@ -47,6 +47,7 @@ const BUNDLED: [(&str, &str); 7] = [
     bundled!("nexus-mods"),
     bundled!("price-history"),
     bundled!("play-tonight"),
+    bundled!("daily-pick"),
 ];
 
 /// The plugins shipped with Kanso.
@@ -208,7 +209,16 @@ mod tests {
         let ids: Vec<&str> = plugins.iter().map(|p| p.manifest.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["howlongtobeat", "steam-reviews", "steam-news", "pcgamingwiki", "nexus-mods", "price-history", "play-tonight"]
+            [
+                "howlongtobeat",
+                "steam-reviews",
+                "steam-news",
+                "pcgamingwiki",
+                "nexus-mods",
+                "price-history",
+                "play-tonight",
+                "daily-pick"
+            ]
         );
         for plugin in &plugins {
             assert_eq!(plugin.source, PluginSource::Bundled);
@@ -227,6 +237,14 @@ mod tests {
                 "{} is on by default but contacts {:?}",
                 plugin.manifest.id,
                 plugin.manifest.hosts
+            );
+        }
+        // Nobody's Home page gains a part unless they switch its plugin on
+        for plugin in &plugins {
+            assert!(
+                !(plugin.manifest.home && plugin.manifest.enabled_by_default),
+                "{} adds a part to Home and is on by default",
+                plugin.manifest.id
             );
         }
     }

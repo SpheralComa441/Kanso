@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff, FolderOpen, Globe, Plus, ShieldCheck, Trash2, WifiOff } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, Globe, Home, Plus, ShieldCheck, Trash2, WifiOff } from "lucide-react";
 import { useI18n } from "../i18n";
 import {
   installPlugin,
@@ -211,6 +211,13 @@ export function PluginsSettings({
                       </>
                     )}
                   </p>
+                  {/* Where it shows besides the game sheets and the menu: said like the sites it contacts */}
+                  {plugin.home && (
+                    <p data-plugin-home={plugin.id} className="mt-1 flex items-start gap-1.5 text-2xs text-zinc-500">
+                      <Home className="mt-px h-3 w-3 shrink-0" />
+                      <span>{t("plugins.addsHome")}</span>
+                    </p>
+                  )}
                   <p className="mt-0.5 text-3xs text-zinc-600">
                     {t("plugins.byAuthor", {
                       version: plugin.version,
@@ -338,6 +345,12 @@ export function PluginsSettings({
             <p className="flex items-center gap-1.5 text-2xs text-zinc-300">
               <WifiOff className="h-3 w-3" />
               {t("plugins.confirmNoHosts")}
+            </p>
+          )}
+          {pending.preview.plugin.home && (
+            <p className="flex items-center gap-1.5 text-2xs text-zinc-300">
+              <Home className="h-3 w-3" />
+              {t("plugins.addsHome")}
             </p>
           )}
           <p className="flex items-start gap-1.5 text-2xs leading-relaxed text-zinc-400">

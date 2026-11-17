@@ -1,5 +1,5 @@
 {
-  "kansoTheme": 2,
+  "kansoTheme": 3,
   "name": "Arcade",
   "author": "Kanso",
   "description": "Neon cabinet: cut corners, pixel titles, sharp icons.",
@@ -83,6 +83,25 @@
     "sheet": "zoom",
     "view": "slide",
     "stagger": true
+  },
+  "home": {
+    "sections": ["resume", "upNext", "mostPlayed", "recommendations", "deals", "plugins"],
+    "effects": "seasonal"
+  },
+  "nav": {
+    "pages": ["home", "emulators", "store", "news", "stats"],
+    "groups": ["library", "platform", "status", "genres", "tags"],
+    "pagesPosition": "top"
+  },
+  "store": {
+    "tabs": ["all", "picks", "steam", "epic", "gog", "others", "liked"],
+    "layout": "list",
+    "figures": false
+  },
+  "news": {
+    "layout": "list",
+    "pictures": true,
+    "summaries": true
   },
   "fontFiles": []
 }

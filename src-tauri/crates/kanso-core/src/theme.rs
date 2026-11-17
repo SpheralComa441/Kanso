@@ -1,7 +1,8 @@
 //! Community themes: JSON files that restyle the whole interface.
 //!
 //! A theme sets colors, typography, the geometry of cards, controls and icons, a few layout
-//! choices and, optionally, the font files it needs. Every value is one of a fixed list of
+//! choices, what the side panel, the Home, Store and News pages are made of and, optionally,
+//! the font files it needs. Every value is one of a fixed list of
 //! fields and is validated here before it reaches the UI — a color must be a hex value, a size
 //! a number in range, a shape one of the known names, a font file a real font. A theme file
 //! therefore cannot carry arbitrary CSS, scripts or remote resources: importing one from a
@@ -17,9 +18,11 @@ use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Value of the `kansoTheme` marker written into exported files. Version 1 files (colors,
-/// three sizes and a font) are still read: everything they do not mention keeps its default.
-pub const THEME_FORMAT_VERSION: u32 = 2;
+/// Value of the `kansoTheme` marker written into exported files. Files marked 1 (colors,
+/// three sizes and a font) or 2 are still read: everything they do not mention keeps its
+/// default. Version 3 added the side panel, the Store and News pages, and the part of Home
+/// where plugins put what they add.
+pub const THEME_FORMAT_VERSION: u32 = 3;
 /// Themes are small unless they embed fonts; this bounds the whole file.
 const MAX_THEME_FILE_BYTES: u64 = 12 * 1024 * 1024;
 const MAX_FONT_FILES: usize = 6;
@@ -347,6 +350,8 @@ pub enum HomeSection {
     Recommendations,
     /// Current discounts.
     Deals,
+    /// What the plugins add to the page.
+    Plugins,
 }
 
 /// What moves behind the top of the Home page.
@@ -380,9 +385,155 @@ impl Default for ThemeHome {
                 HomeSection::MostPlayed,
                 HomeSection::Recommendations,
                 HomeSection::Deals,
+                HomeSection::Plugins,
             ],
             effects: HomeEffects::Seasonal,
         }
+    }
+}
+
+/// A page of the side panel beside the library.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NavPage {
+    Home,
+    Store,
+    News,
+    /// The statistics.
+    Stats,
+    Emulators,
+}
+
+/// A group of entries of the side panel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NavGroup {
+    /// Everything, favorites, recently played, not installed, hidden. Always there.
+    Library,
+    /// Where the user stands with a game: to play, playing, finished, abandoned.
+    Status,
+    Platform,
+    Genres,
+    Tags,
+}
+
+/// Where the pages of the side panel are, with respect to its groups.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PagesPosition {
+    #[default]
+    Top,
+    Bottom,
+}
+
+/// The side panel: which pages and which groups it lists, and in which order. The user can
+/// still hide Home, Store, News and the tags in Settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeNav {
+    /// The pages listed, in order. A page not named is not offered.
+    pub pages: Vec<NavPage>,
+    /// The groups listed, in order. A group not named is not shown, except the library:
+    /// a theme cannot take that away.
+    pub groups: Vec<NavGroup>,
+    pub pages_position: PagesPosition,
+}
+
+impl Default for ThemeNav {
+    fn default() -> Self {
+        Self {
+            pages: vec![NavPage::Home, NavPage::Store, NavPage::News, NavPage::Stats, NavPage::Emulators],
+            groups: vec![NavGroup::Library, NavGroup::Status, NavGroup::Platform, NavGroup::Genres, NavGroup::Tags],
+            pages_position: PagesPosition::Top,
+        }
+    }
+}
+
+/// A tab of the Store page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StoreTab {
+    /// Every discount of the stores the user keeps.
+    All,
+    /// Suggestions by the genres the user plays.
+    Picks,
+    Steam,
+    Epic,
+    Gog,
+    /// The other shops, as one group.
+    Others,
+    /// The deals the user liked.
+    Liked,
+}
+
+/// How the Store page draws its deals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StoreLayout {
+    /// Tiles with the picture on top.
+    #[default]
+    Grid,
+    /// Compact rows, one deal each.
+    List,
+}
+
+/// The Store page: its tabs, how deals are drawn, and whether the figures are there. The
+/// stores the user hid in Settings stay hidden.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeStore {
+    /// The tabs offered, in order; the page opens on the first. Never empty.
+    pub tabs: Vec<StoreTab>,
+    pub layout: StoreLayout,
+    /// The row of figures at the top of the tab with every discount.
+    pub figures: bool,
+}
+
+impl Default for ThemeStore {
+    fn default() -> Self {
+        Self {
+            tabs: vec![
+                StoreTab::All,
+                StoreTab::Picks,
+                StoreTab::Steam,
+                StoreTab::Epic,
+                StoreTab::Gog,
+                StoreTab::Others,
+                StoreTab::Liked,
+            ],
+            layout: StoreLayout::Grid,
+            figures: true,
+        }
+    }
+}
+
+/// How the News page lays its items out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NewsLayout {
+    /// The first item large, the others in a grid.
+    #[default]
+    Magazine,
+    /// Every item the same size.
+    Grid,
+    /// Rows with a small picture at the side.
+    List,
+}
+
+/// The News page: how its items are laid out and what each one shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeNews {
+    pub layout: NewsLayout,
+    /// Items show their picture.
+    pub pictures: bool,
+    /// Items show the summary under the title.
+    pub summaries: bool,
+}
+
+impl Default for ThemeNews {
+    fn default() -> Self {
+        Self { layout: NewsLayout::Magazine, pictures: true, summaries: true }
     }
 }
 
@@ -528,6 +679,12 @@ pub struct Theme {
     pub motion: ThemeMotion,
     #[serde(default)]
     pub home: ThemeHome,
+    #[serde(default)]
+    pub nav: ThemeNav,
+    #[serde(default)]
+    pub store: ThemeStore,
+    #[serde(default)]
+    pub news: ThemeNews,
     #[serde(default)]
     pub font_files: Vec<ThemeFontFile>,
 }
@@ -836,6 +993,26 @@ impl<'a> Fields<'a> {
         }
     }
 
+    /// A list of names an enum accepts, each kept once, in the order written. `None` when
+    /// the theme does not say; anything that is not a list of known names is an error.
+    fn names<C: DeserializeOwned + PartialEq>(&self, key: &str) -> Result<Option<Vec<C>>, String> {
+        match self.get(key) {
+            None => Ok(None),
+            Some(value @ Value::Array(entries)) => {
+                let mut names: Vec<C> = Vec::new();
+                for entry in entries {
+                    let name: C =
+                        serde_json::from_value(entry.clone()).map_err(|_| self.wrong(key, value))?;
+                    if !names.contains(&name) {
+                        names.push(name);
+                    }
+                }
+                Ok(Some(names))
+            }
+            Some(other) => Err(self.wrong(key, other)),
+        }
+    }
+
     fn color(&self, key: &str) -> Result<Option<String>, String> {
         match self.get(key) {
             None => Ok(None),
@@ -1131,23 +1308,57 @@ impl Theme {
         let h = Fields::section(&root, "home")?;
         let d = ThemeHome::default();
         let home = ThemeHome {
-            sections: match h.get("sections") {
+            sections: match h.names::<HomeSection>("sections")? {
                 None => d.sections,
-                // Names from the list, each once, in the theme's order
-                Some(value @ Value::Array(names)) => {
-                    let mut sections: Vec<HomeSection> = Vec::new();
-                    for name in names {
-                        let section: HomeSection =
-                            serde_json::from_value(name.clone()).map_err(|_| h.wrong("sections", value))?;
-                        if !sections.contains(&section) {
-                            sections.push(section);
-                        }
+                Some(mut sections) => {
+                    // A file older than format 3 could not name the part where plugins put
+                    // what they add: its list gets that part at the end. A format 3 file is
+                    // taken as written, and a part it does not name is not shown.
+                    if version < 3 && !sections.contains(&HomeSection::Plugins) {
+                        sections.push(HomeSection::Plugins);
                     }
                     sections
                 }
-                Some(other) => return Err(h.wrong("sections", other)),
             },
             effects: h.choice("effects", d.effects)?,
+        };
+
+        let n = Fields::section(&root, "nav")?;
+        let d = ThemeNav::default();
+        let nav = ThemeNav {
+            pages: n.names("pages")?.unwrap_or(d.pages),
+            groups: match n.names::<NavGroup>("groups")? {
+                None => d.groups,
+                // The library is always there: a theme that leaves it out gets it first
+                Some(mut groups) => {
+                    if !groups.contains(&NavGroup::Library) {
+                        groups.insert(0, NavGroup::Library);
+                    }
+                    groups
+                }
+            },
+            pages_position: n.choice("pagesPosition", d.pages_position)?,
+        };
+
+        let o = Fields::section(&root, "store")?;
+        let d = ThemeStore::default();
+        let store = ThemeStore {
+            tabs: match o.names::<StoreTab>("tabs")? {
+                None => d.tabs,
+                // A Store page with no tab would have nothing to open on
+                Some(tabs) if tabs.is_empty() => return Err(invalid(format!("{} []", o.name_of("tabs")))),
+                Some(tabs) => tabs,
+            },
+            layout: o.choice("layout", d.layout)?,
+            figures: o.flag("figures", d.figures)?,
+        };
+
+        let w = Fields::section(&root, "news")?;
+        let d = ThemeNews::default();
+        let news = ThemeNews {
+            layout: w.choice("layout", d.layout)?,
+            pictures: w.flag("pictures", d.pictures)?,
+            summaries: w.flag("summaries", d.summaries)?,
         };
 
         let i = Fields::section(&root, "icons")?;
@@ -1192,6 +1403,9 @@ impl Theme {
             detail,
             motion,
             home,
+            nav,
+            store,
+            news,
             font_files: parse_font_files(&root, fonts_dir)?,
         })
     }
@@ -1216,6 +1430,9 @@ impl Theme {
             "detail": self.detail,
             "motion": self.motion,
             "home": self.home,
+            "nav": self.nav,
+            "store": self.store,
+            "news": self.news,
             "fontFiles": self.font_files,
         });
         let mut text = serde_json::to_string_pretty(&value).unwrap_or_default();
@@ -1547,7 +1764,7 @@ mod tests {
             (r#"{"name":"X","colors":{},"motion":{"view":"spin"}}"#, "motion.view"),
             (r#"{"name":"X","colors":{},"motion":{"stagger":"yes"}}"#, "motion.stagger"),
             (r#"{"name":"X","colors":{},"cards":{"caption":"always"}}"#, "cards.caption"),
-            (r#"{"kansoTheme":3,"name":"X","colors":{}}"#, "kansoTheme"),
+            (r#"{"kansoTheme":4,"name":"X","colors":{}}"#, "kansoTheme"),
             (r#"["not", "a", "theme"]"#, "Tema non valido"),
             ("not json", "Tema non valido"),
         ];
@@ -1613,22 +1830,203 @@ mod tests {
     fn a_theme_arranges_the_home_page() {
         let plain = Theme::from_json(r#"{"name":"X","colors":{}}"#).unwrap();
         assert_eq!(plain.home, ThemeHome::default());
-        assert_eq!(plain.home.sections.len(), 5, "every part, in Kanso's order");
+        assert_eq!(plain.home.sections.len(), 6, "every part, in Kanso's order");
+        assert_eq!(plain.home.sections.last(), Some(&HomeSection::Plugins), "what the plugins add comes last");
 
         let own = Theme::from_json(
-            r##"{"name":"X","colors":{},"home":{"sections":["deals","resume","deals","mostPlayed"],"effects":"none"}}"##,
+            r##"{"kansoTheme":3,"name":"X","colors":{},"home":{"sections":["deals","resume","deals","mostPlayed"],"effects":"none"}}"##,
         )
         .unwrap();
         assert_eq!(own.home.sections, [HomeSection::Deals, HomeSection::Resume, HomeSection::MostPlayed], "its order, each part once; the rest is left out");
         assert_eq!(own.home.effects, HomeEffects::Off);
         assert_eq!(Theme::from_json(&own.to_json()).unwrap().home, own.home);
-        let bare = Theme::from_json(r##"{"name":"X","colors":{},"home":{"sections":[]}}"##).unwrap();
+        let bare = Theme::from_json(r##"{"kansoTheme":3,"name":"X","colors":{},"home":{"sections":[]}}"##).unwrap();
         assert!(bare.home.sections.is_empty(), "a theme may leave Home empty");
 
         for (raw, expected) in [
             (r##"{"name":"X","colors":{},"home":{"sections":["resume","<script>"]}}"##, "home.sections"),
             (r##"{"name":"X","colors":{},"home":{"sections":"resume"}}"##, "home.sections"),
             (r##"{"name":"X","colors":{},"home":{"effects":"url(x.gif)"}}"##, "home.effects"),
+        ] {
+            let err = Theme::from_json(raw).expect_err(raw);
+            assert!(err.contains(expected), "{raw} -> {err}");
+        }
+    }
+
+    #[test]
+    fn older_files_get_the_part_of_home_for_plugins_and_format_3_is_taken_as_written() {
+        let with = |marker: &str, sections: &str| {
+            Theme::from_json(&format!(r##"{{{marker}"name":"X","colors":{{}},"home":{{"sections":{sections}}}}}"##))
+                .unwrap()
+                .home
+                .sections
+        };
+        // Written before plugins had a place on Home: that place is added at the end
+        for marker in ["", r#""kansoTheme":1,"#, r#""kansoTheme":2,"#] {
+            assert_eq!(
+                with(marker, r#"["deals","resume"]"#),
+                [HomeSection::Deals, HomeSection::Resume, HomeSection::Plugins],
+                "{marker}"
+            );
+            assert_eq!(with(marker, "[]"), [HomeSection::Plugins], "{marker}");
+            // The name is known to every version: a file that has it keeps it where it is
+            assert_eq!(with(marker, r#"["plugins","deals"]"#), [HomeSection::Plugins, HomeSection::Deals], "{marker}");
+        }
+        // Format 3: a part not named is not shown, this one included
+        let marker = r#""kansoTheme":3,"#;
+        assert_eq!(with(marker, r#"["deals","resume"]"#), [HomeSection::Deals, HomeSection::Resume]);
+        assert!(with(marker, "[]").is_empty());
+        assert_eq!(with(marker, r#"["plugins","deals","plugins"]"#), [HomeSection::Plugins, HomeSection::Deals]);
+
+        // A list nobody wrote is Kanso's own, whatever the version
+        for raw in [r#"{"name":"X","colors":{}}"#, r#"{"kansoTheme":2,"name":"X","colors":{},"home":{"effects":"none"}}"#] {
+            assert_eq!(Theme::from_json(raw).unwrap().home.sections, ThemeHome::default().sections, "{raw}");
+        }
+
+        // A theme installed by an earlier Kanso (a format 2 file with everything spelled out)
+        // comes back with the new part, is saved as format 3 and then stays as it is
+        let installed = r##"{"kansoTheme":2,"name":"X","colors":{},"home":{"sections":["resume","upNext","mostPlayed","recommendations","deals"],"effects":"seasonal"}}"##;
+        let read = Theme::from_json(installed).unwrap();
+        assert_eq!(read.home, ThemeHome::default());
+        let saved = read.to_json();
+        assert!(saved.contains("\"kansoTheme\": 3") && saved.contains("\"plugins\""));
+        assert_eq!(Theme::from_json(&saved).unwrap(), read);
+        // ...and one whose author left a part out keeps it out through a save
+        let trimmed = Theme::from_json(r##"{"kansoTheme":3,"name":"X","colors":{},"home":{"sections":["resume"]}}"##).unwrap();
+        assert_eq!(trimmed.validated().unwrap().home.sections, [HomeSection::Resume]);
+    }
+
+    #[test]
+    fn a_theme_arranges_the_side_panel() {
+        let plain = Theme::from_json(r#"{"name":"X","colors":{}}"#).unwrap();
+        assert_eq!(plain.nav, ThemeNav::default());
+        assert_eq!(
+            plain.nav.pages,
+            [NavPage::Home, NavPage::Store, NavPage::News, NavPage::Stats, NavPage::Emulators],
+            "every page, in Kanso's order"
+        );
+        assert_eq!(
+            plain.nav.groups,
+            [NavGroup::Library, NavGroup::Status, NavGroup::Platform, NavGroup::Genres, NavGroup::Tags]
+        );
+        assert_eq!(plain.nav.pages_position, PagesPosition::Top);
+        // A file of an earlier format says nothing of the panel: it keeps Kanso's
+        assert_eq!(Theme::from_json(NORD).unwrap().nav, ThemeNav::default());
+
+        let own = Theme::from_json(
+            r##"{"kansoTheme":3,"name":"X","colors":{},"nav":{"pages":["stats","home","stats"],"groups":["tags","library","tags","platform"],"pagesPosition":"bottom"}}"##,
+        )
+        .unwrap();
+        assert_eq!(own.nav.pages, [NavPage::Stats, NavPage::Home], "its order, each page once; the rest is not offered");
+        assert_eq!(own.nav.groups, [NavGroup::Tags, NavGroup::Library, NavGroup::Platform], "the library where the theme puts it");
+        assert_eq!(own.nav.pages_position, PagesPosition::Bottom);
+        let exported = own.to_json();
+        assert!(exported.contains("\"nav\"") && exported.contains("\"pagesPosition\": \"bottom\""));
+        assert_eq!(Theme::from_json(&exported).unwrap().nav, own.nav);
+
+        // A theme may offer no page at all, but it cannot take the library away
+        let bare = Theme::from_json(r##"{"name":"X","colors":{},"nav":{"pages":[],"groups":[]}}"##).unwrap();
+        assert!(bare.nav.pages.is_empty());
+        assert_eq!(bare.nav.groups, [NavGroup::Library]);
+        let without = Theme::from_json(r##"{"name":"X","colors":{},"nav":{"groups":["genres","status"]}}"##).unwrap();
+        assert_eq!(without.nav.groups, [NavGroup::Library, NavGroup::Genres, NavGroup::Status], "left out: put first");
+        assert_eq!(Theme::from_json(&without.to_json()).unwrap().nav, without.nav);
+        // The same holds for a theme that reaches the backend from the interface
+        let mut from_ui = plain.clone();
+        from_ui.nav.groups = vec![NavGroup::Tags];
+        assert_eq!(from_ui.validated().unwrap().nav.groups, [NavGroup::Library, NavGroup::Tags]);
+
+        for (raw, expected) in [
+            (r##"{"name":"X","colors":{},"nav":{"pages":["home","library"]}}"##, "nav.pages"),
+            (r##"{"name":"X","colors":{},"nav":{"pages":["home","<script>"]}}"##, "nav.pages"),
+            (r##"{"name":"X","colors":{},"nav":{"pages":"home"}}"##, "nav.pages"),
+            (r##"{"name":"X","colors":{},"nav":{"pages":[1]}}"##, "nav.pages"),
+            (r##"{"name":"X","colors":{},"nav":{"groups":["library","home"]}}"##, "nav.groups"),
+            (r##"{"name":"X","colors":{},"nav":{"groups":["Library"]}}"##, "nav.groups"),
+            (r##"{"name":"X","colors":{},"nav":{"groups":{"library":true}}}"##, "nav.groups"),
+            (r##"{"name":"X","colors":{},"nav":{"pagesPosition":"left"}}"##, "nav.pagesPosition"),
+            (r##"{"name":"X","colors":{},"nav":{"pagesPosition":true}}"##, "nav.pagesPosition"),
+            (r##"{"name":"X","colors":{},"nav":["home"]}"##, "nav"),
+        ] {
+            let err = Theme::from_json(raw).expect_err(raw);
+            assert!(err.contains(expected), "{raw} -> {err}");
+        }
+    }
+
+    #[test]
+    fn a_theme_arranges_the_store_page() {
+        let plain = Theme::from_json(r#"{"name":"X","colors":{}}"#).unwrap();
+        assert_eq!(plain.store, ThemeStore::default());
+        assert_eq!(
+            plain.store.tabs,
+            [StoreTab::All, StoreTab::Picks, StoreTab::Steam, StoreTab::Epic, StoreTab::Gog, StoreTab::Others, StoreTab::Liked],
+            "every tab, in Kanso's order"
+        );
+        assert_eq!(plain.store.layout, StoreLayout::Grid);
+        assert!(plain.store.figures);
+        assert_eq!(Theme::from_json(NORD).unwrap().store, ThemeStore::default());
+
+        let own = Theme::from_json(
+            r##"{"kansoTheme":3,"name":"X","colors":{},"store":{"tabs":["liked","gog","liked","all"],"layout":"list","figures":false}}"##,
+        )
+        .unwrap();
+        assert_eq!(own.store.tabs, [StoreTab::Liked, StoreTab::Gog, StoreTab::All], "its order, each tab once; the first is where the page opens");
+        assert_eq!(own.store.layout, StoreLayout::List);
+        assert!(!own.store.figures);
+        let exported = own.to_json();
+        assert!(exported.contains("\"store\"") && exported.contains("\"layout\": \"list\""));
+        assert_eq!(Theme::from_json(&exported).unwrap().store, own.store);
+
+        for (raw, expected) in [
+            // A page with no tab has nothing to open on
+            (r##"{"name":"X","colors":{},"store":{"tabs":[]}}"##, "store.tabs"),
+            (r##"{"name":"X","colors":{},"store":{"tabs":["all","amazon"]}}"##, "store.tabs"),
+            (r##"{"name":"X","colors":{},"store":{"tabs":["https://evil.example/deals"]}}"##, "store.tabs"),
+            (r##"{"name":"X","colors":{},"store":{"tabs":"all"}}"##, "store.tabs"),
+            (r##"{"name":"X","colors":{},"store":{"tabs":[["all"]]}}"##, "store.tabs"),
+            (r##"{"name":"X","colors":{},"store":{"layout":"table"}}"##, "store.layout"),
+            (r##"{"name":"X","colors":{},"store":{"layout":"display: none"}}"##, "store.layout"),
+            (r##"{"name":"X","colors":{},"store":{"figures":"no"}}"##, "store.figures"),
+            (r##"{"name":"X","colors":{},"store":{"figures":0}}"##, "store.figures"),
+            (r##"{"name":"X","colors":{},"store":"list"}"##, "store"),
+        ] {
+            let err = Theme::from_json(raw).expect_err(raw);
+            assert!(err.contains(expected), "{raw} -> {err}");
+        }
+        // An empty list is refused from the interface too, not quietly replaced
+        let mut from_ui = plain.clone();
+        from_ui.store.tabs.clear();
+        assert!(from_ui.validated().unwrap_err().contains("store.tabs"));
+    }
+
+    #[test]
+    fn a_theme_arranges_the_news_page() {
+        let plain = Theme::from_json(r#"{"name":"X","colors":{}}"#).unwrap();
+        assert_eq!(plain.news, ThemeNews::default());
+        assert_eq!(
+            (plain.news.layout, plain.news.pictures, plain.news.summaries),
+            (NewsLayout::Magazine, true, true)
+        );
+        assert_eq!(Theme::from_json(NORD).unwrap().news, ThemeNews::default());
+
+        let own = Theme::from_json(
+            r##"{"kansoTheme":3,"name":"X","colors":{},"news":{"layout":"list","pictures":false,"summaries":false}}"##,
+        )
+        .unwrap();
+        assert_eq!(own.news, ThemeNews { layout: NewsLayout::List, pictures: false, summaries: false });
+        let exported = own.to_json();
+        assert!(exported.contains("\"news\"") && exported.contains("\"summaries\": false"));
+        assert_eq!(Theme::from_json(&exported).unwrap().news, own.news);
+        let grid = Theme::from_json(r##"{"name":"X","colors":{},"news":{"layout":"grid"}}"##).unwrap();
+        assert_eq!(grid.news, ThemeNews { layout: NewsLayout::Grid, pictures: true, summaries: true }, "what is not said keeps its default");
+
+        for (raw, expected) in [
+            (r##"{"name":"X","colors":{},"news":{"layout":"masonry"}}"##, "news.layout"),
+            (r##"{"name":"X","colors":{},"news":{"layout":["list"]}}"##, "news.layout"),
+            (r##"{"name":"X","colors":{},"news":{"pictures":"https://evil.example/x.png"}}"##, "news.pictures"),
+            (r##"{"name":"X","colors":{},"news":{"pictures":1}}"##, "news.pictures"),
+            (r##"{"name":"X","colors":{},"news":{"summaries":"yes"}}"##, "news.summaries"),
+            (r##"{"name":"X","colors":{},"news":true}"##, "news"),
         ] {
             let err = Theme::from_json(raw).expect_err(raw);
             assert!(err.contains(expected), "{raw} -> {err}");
@@ -1643,10 +2041,10 @@ mod tests {
         theme.icons.stroke_width = 1.5;
         theme.effects.background_gradient = vec!["#000000".to_string(), "#112233".to_string()];
         let json = theme.to_json();
-        assert!(json.contains("\"kansoTheme\": 2"));
+        assert!(json.contains("\"kansoTheme\": 3"));
         assert!(!json.contains("\"id\""));
         // Every section is spelled out: an exported theme is a complete template
-        for section in ["typography", "layout", "cards", "shapes", "icons", "effects", "fontFiles"] {
+        for section in ["typography", "layout", "cards", "shapes", "icons", "effects", "detail", "motion", "home", "nav", "store", "news", "fontFiles"] {
             assert!(json.contains(&format!("\"{section}\"")), "{section} missing");
         }
         assert!(json.contains("\"aspect\": \"2:3\"") && json.contains("\"shadow\": \"none\""));
@@ -1666,6 +2064,8 @@ mod tests {
         assert_eq!(validated.layout.card_min_width, 200);
         assert_eq!(validated.layout.grid_gap, 16);
         assert_eq!(validated.cards, ThemeCards::default());
+        assert_eq!((&validated.nav, &validated.store, &validated.news), (&ThemeNav::default(), &ThemeStore::default(), &ThemeNews::default()));
+        assert_eq!(validated.home, ThemeHome::default());
     }
 
     #[test]
@@ -1813,15 +2213,64 @@ mod tests {
         assert_eq!(nord.name, "Nord");
         assert_eq!(nord.colors.accent, "#88c0d0");
         assert_eq!(nord.font_family, None);
+        // A format 1 file: the side panel and the pages keep Kanso's arrangement
+        assert_eq!((&nord.nav, &nord.store, &nord.news), (&ThemeNav::default(), &ThemeStore::default(), &ThemeNews::default()));
+        assert_eq!(nord.home, ThemeHome::default());
 
         let arcade = Theme::from_json(include_str!("../../../../docs/themes/arcade.kanso-theme.json"))
             .expect("docs/themes/arcade.kanso-theme.json must stay importable");
         assert_eq!(arcade.cards.shape, CardShape::Cut);
         assert_eq!(arcade.icons.corners, IconCorners::Sharp);
+        // Format 3: the emulators right after Home, the Store and the News as lists
+        assert_eq!(arcade.nav.pages, [NavPage::Home, NavPage::Emulators, NavPage::Store, NavPage::News, NavPage::Stats]);
+        assert_eq!((arcade.store.layout, arcade.store.figures, arcade.news.layout), (StoreLayout::List, false, NewsLayout::List));
 
         let aurora = Theme::from_json(include_str!("../../../../docs/themes/aurora.kanso-theme.json"))
             .expect("docs/themes/aurora.kanso-theme.json must stay importable");
         assert_eq!(aurora.cards.caption, CardCaption::Hover);
         assert_eq!(aurora.effects.background_gradient.len(), 3);
+        // Format 3: the pages at the bottom, the Store opening on the picks, the News as a grid
+        assert_eq!(aurora.nav.pages_position, PagesPosition::Bottom);
+        assert_eq!(aurora.nav.groups[..3], [NavGroup::Library, NavGroup::Genres, NavGroup::Tags]);
+        assert_eq!((aurora.store.tabs[0], aurora.news.layout), (StoreTab::Picks, NewsLayout::Grid));
+
+        // The two that ship inside the app are written as the app itself would export them:
+        // every name they use is known, and reading them back changes nothing
+        for theme in [&arcade, &aurora] {
+            assert!(theme.to_json().contains("\"kansoTheme\": 3"));
+            assert_eq!(theme.home, ThemeHome::default(), "{}", theme.name);
+            assert_eq!(&Theme::from_json(&theme.to_json()).unwrap(), theme, "{}", theme.name);
+        }
+    }
+
+    #[test]
+    fn the_full_example_in_the_theme_guide_is_valid_and_shows_the_default_arrangement() {
+        // The guide's first block of JSON is the template people copy: every name in it must
+        // be one this version accepts
+        let guide = include_str!("../../../../docs/THEMES.md");
+        let start = guide.find("```json\n").expect("the guide has a full example") + "```json\n".len();
+        let example = &guide[start..start + guide[start..].find("\n```").expect("the example ends")];
+        let theme = Theme::from_json(example).expect("the full example in docs/THEMES.md must stay importable");
+
+        assert!(example.contains(&format!("\"kansoTheme\": {THEME_FORMAT_VERSION}")), "the example is of the current format");
+        // The guide says the values it shows are Kanso's: for what a theme arranges, they are
+        assert_eq!(theme.home, ThemeHome::default());
+        assert_eq!(theme.nav, ThemeNav::default());
+        assert_eq!(theme.store, ThemeStore::default());
+        assert_eq!(theme.news, ThemeNews::default());
+        assert_eq!(theme.motion, ThemeMotion::default());
+        assert_eq!(theme.detail, ThemeDetail::default());
+        // Every section the app writes is in the example, so that none is left undocumented
+        let exported: Value = serde_json::from_str(&theme.to_json()).unwrap();
+        let shown: Value = serde_json::from_str(example).unwrap();
+        for (section, written) in exported.as_object().unwrap() {
+            let documented = shown.get(section).unwrap_or_else(|| panic!("{section} is missing from the example"));
+            if let (Some(written), Some(documented)) = (written.as_object(), documented.as_object()) {
+                for key in written.keys() {
+                    assert!(documented.contains_key(key), "{section}.{key} is missing from the example");
+                }
+            }
+        }
+        assert_eq!(Theme::from_json(&theme.to_json()).unwrap(), theme);
     }
 }

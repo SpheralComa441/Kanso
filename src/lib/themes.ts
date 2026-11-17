@@ -3,7 +3,10 @@ import auroraTheme from "../../docs/themes/aurora.kanso-theme.json";
 import type {
   AccessibilityConfig,
   AnimationsChoice,
+  HideableSection,
   MotionLevel,
+  NavGroup,
+  NavPage,
   Theme,
   ThemeCards,
   ThemeColors,
@@ -15,9 +18,15 @@ import type {
   ThemeIcons,
   ThemeLayout,
   ThemeMotion,
+  ThemeNav,
+  ThemeNews,
   ThemeShapes,
+  ThemeStore,
   ThemeTypography,
 } from "../types/game";
+
+/** The `kansoTheme` marker of the theme files this version writes (`kanso-core/src/theme.rs`). */
+export const THEME_FORMAT_VERSION = 3;
 
 /** Built-in theme ids carry a prefix no installed theme can have (their ids are plain slugs). */
 const BUILTIN_PREFIX = "builtin:";
@@ -76,12 +85,25 @@ const DEFAULT_DETAIL: ThemeDetail = {
 
 const DEFAULT_MOTION: ThemeMotion = { level: "smooth", sheet: "rise", view: "rise", stagger: true };
 export const DEFAULT_HOME: ThemeHome = {
-  sections: ["resume", "upNext", "mostPlayed", "recommendations", "deals"],
+  sections: ["resume", "upNext", "mostPlayed", "recommendations", "deals", "plugins"],
   effects: "seasonal",
 };
+export const DEFAULT_NAV: ThemeNav = {
+  pages: ["home", "store", "news", "stats", "emulators"],
+  groups: ["library", "status", "platform", "genres", "tags"],
+  pagesPosition: "top",
+};
+export const DEFAULT_STORE: ThemeStore = {
+  tabs: ["all", "picks", "steam", "epic", "gog", "others", "liked"],
+  layout: "grid",
+  figures: true,
+};
+export const DEFAULT_NEWS: ThemeNews = { layout: "magazine", pictures: true, summaries: true };
 
 /** A theme whose optional sections may be missing or partial (theme files, older data). */
 export type ThemeInput = Pick<Theme, "name" | "colors"> & {
+  /** The format marker of a theme file; a theme the app already holds carries none. */
+  kansoTheme?: number;
   id?: string;
   author?: string;
   description?: string;
@@ -96,11 +118,28 @@ export type ThemeInput = Pick<Theme, "name" | "colors"> & {
   detail?: Partial<Record<keyof ThemeDetail, unknown>>;
   motion?: Partial<Record<keyof ThemeMotion, unknown>>;
   home?: Partial<Record<keyof ThemeHome, unknown>>;
+  nav?: Partial<Record<keyof ThemeNav, unknown>>;
+  store?: Partial<Record<keyof ThemeStore, unknown>>;
+  news?: Partial<Record<keyof ThemeNews, unknown>>;
   fontFiles?: ThemeFontFile[];
 };
 
-/** Fills in every section a theme does not spell out. */
+/**
+ * Fills in every section a theme does not spell out, and keeps the few promises the backend
+ * makes about the lists for the themes it never reads (the built-in ones, the browser
+ * preview): a file older than format 3 that lists the parts of Home gets the part for
+ * plugins at the end, the library is always among the groups of the side panel, and the
+ * Store page has at least one tab.
+ */
 export function withThemeDefaults(input: ThemeInput): Theme {
+  const home = { ...DEFAULT_HOME, ...input.home } as ThemeHome;
+  if (input.kansoTheme !== undefined && input.kansoTheme < 3 && input.home?.sections && !home.sections.includes("plugins")) {
+    home.sections = [...home.sections, "plugins"];
+  }
+  const nav = { ...DEFAULT_NAV, ...input.nav } as ThemeNav;
+  if (!nav.groups.includes("library")) nav.groups = ["library", ...nav.groups];
+  const store = { ...DEFAULT_STORE, ...input.store } as ThemeStore;
+  if (store.tabs.length === 0) store.tabs = DEFAULT_STORE.tabs;
   return {
     id: input.id ?? "",
     name: input.name,
@@ -117,7 +156,10 @@ export function withThemeDefaults(input: ThemeInput): Theme {
     effects: { ...DEFAULT_EFFECTS, ...input.effects },
     detail: { ...DEFAULT_DETAIL, ...input.detail } as ThemeDetail,
     motion: { ...DEFAULT_MOTION, ...input.motion } as ThemeMotion,
-    home: { ...DEFAULT_HOME, ...input.home } as ThemeHome,
+    home,
+    nav,
+    store,
+    news: { ...DEFAULT_NEWS, ...input.news } as ThemeNews,
     fontFiles: input.fontFiles ?? [],
   };
 }
@@ -228,6 +270,23 @@ export function resolveTheme(id: string | null, userThemes: Theme[]): Theme {
     [...BUILTIN_THEMES, ...userThemes].find((theme) => theme.id === id) ??
     DEFAULT_THEME
   );
+}
+
+/**
+ * The pages the side panel offers: the theme's, in its order, less the ones the user chose
+ * to hide in Settings. A page that is not here has no entry and no link leading to it.
+ */
+export function offeredPages(nav: ThemeNav, hidden: readonly HideableSection[]): NavPage[] {
+  return nav.pages.filter((page) => !(hidden as readonly string[]).includes(page));
+}
+
+/**
+ * The groups the side panel shows: the theme's, in its order, less the tags when the user
+ * hid them. The library is always among them.
+ */
+export function offeredGroups(nav: ThemeNav, hidden: readonly HideableSection[]): NavGroup[] {
+  const groups: NavGroup[] = nav.groups.includes("library") ? nav.groups : ["library", ...nav.groups];
+  return groups.filter((group) => group !== "tags" || !hidden.includes("tags"));
 }
 
 /** Order and CSS variable of each theme color; also drives the editor. */
