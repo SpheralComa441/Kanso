@@ -64,7 +64,7 @@ const CARD_INFO_DEFAULT: [&str; 3] = ["genres", "playtime", "badges"];
 
 /// The parts of the side panel the user can leave out: the Home page, the Store page, the
 /// list of tags. Anything else in `config.json` is dropped.
-pub const HIDEABLE_SECTIONS: [&str; 3] = ["home", "store", "tags"];
+pub const HIDEABLE_SECTIONS: [&str; 4] = ["home", "store", "news", "tags"];
 
 /// The parts of the Home page the user can leave out.
 pub const HOME_SECTIONS: [&str; 5] = ["resume", "upNext", "mostPlayed", "recommendations", "deals"];
@@ -373,6 +373,9 @@ pub struct AppConfig {
     pub home: HomeConfig,
     /// How the user wants the Store page.
     pub store: StoreConfig,
+    /// The news sources the user chose, by id; `None` until they choose, and then the News
+    /// page reads the sources of the interface's language.
+    pub news_sources: Option<Vec<String>>,
     /// Whether Kanso may ask NVIDIA's public repository which version of DLSS is the newest
     /// and download its libraries from there. Off until the user turns it on: with it off
     /// Kanso only reads the versions in the games' folders and contacts nobody about DLSS.
@@ -405,6 +408,7 @@ impl Default for AppConfig {
             hidden_sections: Vec::new(),
             home: HomeConfig::default(),
             store: StoreConfig::default(),
+            news_sources: None,
             dlss_updates: false,
             emulators: Vec::new(),
             has_game_pass: false,
@@ -472,6 +476,14 @@ impl AppConfig {
                 .collect(),
             home: self.home.sanitized(),
             store: self.store.sanitized(),
+            // Only sources Kanso knows, each once, in the order Kanso lists them
+            news_sources: self.news_sources.map(|chosen| {
+                crate::news::NEWS_SOURCES
+                    .iter()
+                    .filter(|source| chosen.iter().any(|id| id.trim() == source.id))
+                    .map(|source| source.id.to_string())
+                    .collect()
+            }),
             dlss_updates: self.dlss_updates,
             emulators: {
                 // One entry per emulator: a later one with the same id is a leftover
@@ -563,6 +575,7 @@ mod tests {
         let input = AppConfig {
             store: StoreConfig::default(),
             dlss_updates: true,
+            news_sources: Some(vec![" pcgamer ".to_string(), "no-such-site".to_string(), "pcgamer".to_string()]),
             steamgriddb_api_key: "  sgdb_secret_key_123  ".to_string(),
             custom_folders: vec![
                 r"D:\Games\".to_string(),
@@ -646,6 +659,8 @@ mod tests {
         let saved = input.save_to_file(&cfg_path).expect("save config");
         assert!(!initial.dlss_updates, "asking NVIDIA about DLSS is off until the user turns it on");
         assert!(saved.dlss_updates);
+        assert_eq!(initial.news_sources, None, "no choice yet: the sources of the language");
+        assert_eq!(saved.news_sources.as_deref(), Some(&["pcgamer".to_string()][..]), "known sources only, each once");
         assert_eq!(saved.steamgriddb_api_key, "sgdb_secret_key_123");
         assert_eq!(saved.custom_folders, vec![r"D:\Games\", r"E:\IndieGames"]);
         assert!(saved.has_api_key());

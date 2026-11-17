@@ -6,6 +6,7 @@ mod browser_signin;
 mod gamepass;
 mod signin_window;
 mod dlss;
+mod news;
 mod weather;
 
 use kanso_core::deals::is_allowed_store_url;
@@ -59,6 +60,8 @@ pub(crate) struct AppState {
     weather_cache: weather::WeatherCache,
     /// What is known about DLSS while Kanso runs: NVIDIA's newest version, the games that carry it.
     pub(crate) dlss_cache: dlss::DlssCache,
+    /// The last news read from the feeds, and for which sources.
+    pub(crate) news_cache: news::NewsCache,
     /// Games Kanso currently sees running, kept by the play time tracker.
     pub(crate) running_games: Arc<Mutex<Vec<String>>>,
     pub(crate) plugins: Arc<plugins::PluginHost>,
@@ -984,6 +987,7 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         deals_cache: Arc::new(Mutex::new(None)),
         weather_cache: Arc::default(),
         dlss_cache: Arc::default(),
+        news_cache: Arc::default(),
         running_games: Arc::clone(&running_games),
         plugins: Arc::clone(&plugin_host),
         completing_library: Arc::default(),
@@ -1071,6 +1075,9 @@ pub fn run() {
             dlss::dlss_update,
             dlss::dlss_restore,
             dlss::open_dlss_source,
+            news::news_sources,
+            news::fetch_news,
+            news::open_news_link,
             playtime::get_game_achievements,
             playtime::get_play_sessions,
             playtime::get_running_games,

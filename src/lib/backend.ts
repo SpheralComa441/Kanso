@@ -34,12 +34,16 @@ import type {
   DlssLibrary,
   DlssSource,
   DlssStatus,
+  NewsReport,
+  NewsSourceInfo,
   LikedDeal,
   StoreConfig,
 } from "../types/game";
 import {
   PREVIEW_DLSS,
   PREVIEW_DLSS_LATEST,
+  PREVIEW_NEWS,
+  PREVIEW_NEWS_SOURCES,
   PREVIEW_MOCK_DEALS,
   PREVIEW_MOCK_EMULATED_GAMES,
   PREVIEW_MOCK_EMULATORS,
@@ -80,6 +84,7 @@ const DEFAULT_CONFIG: AppConfig = {
   hiddenSections: [],
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   store: { hiddenStores: [], hiddenDeals: [], liked: [] },
+  newsSources: null,
   dlssUpdates: false,
   emulators: [],
   hasGamePass: false,
@@ -172,6 +177,7 @@ export async function getSettings(): Promise<AppConfig> {
       hiddenSections: withHiddenSections(parsed.hiddenSections),
       home: withHomeConfig(parsed.home),
       store: withStoreConfig(parsed.store),
+      newsSources: withNewsSources(parsed.newsSources),
       dlssUpdates: parsed.dlssUpdates === true,
       emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
@@ -199,6 +205,7 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     hiddenSections: withHiddenSections(config.hiddenSections),
     home: withHomeConfig(config.home),
     store: withStoreConfig(config.store),
+    newsSources: withNewsSources(config.newsSources),
     dlssUpdates: config.dlssUpdates === true,
     emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
@@ -726,7 +733,7 @@ export function withHomeConfig(value: unknown): HomeConfig {
 }
 
 /** The parts of the side panel that can be hidden, in the order Settings lists them. */
-export const HIDEABLE_SECTIONS: HideableSection[] = ["home", "store", "tags"];
+export const HIDEABLE_SECTIONS: HideableSection[] = ["home", "store", "news", "tags"];
 
 function withHiddenSections(value: unknown): HideableSection[] {
   const chosen = Array.isArray(value) ? value : [];
@@ -1059,6 +1066,58 @@ export async function getPlaySessions(sinceMs: number): Promise<PlaySession[]> {
 }
 
 /** The achievements Steam lists for a game; `null` when there is nothing to show. */
+/* ------------------------------------------------------------------- news */
+
+/** The user's choice of news sources as the backend would keep it: plain ids, each once. */
+function withNewsSources(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return [...new Set(value.filter((id): id is string => typeof id === "string" && /^[a-z0-9-]{1,40}$/.test(id)))];
+}
+
+/** Every site whose feed Kanso can read. */
+export async function newsSources(): Promise<NewsSourceInfo[]> {
+  if (isTauri()) {
+    return invoke<NewsSourceInfo[]>("news_sources");
+  }
+  return PREVIEW_NEWS_SOURCES;
+}
+
+function previewNewsSourcesInUse(): string[] {
+  let chosen: string[] | null = null;
+  let language = "it";
+  try {
+    const saved = JSON.parse(localStorage.getItem(BROWSER_STORAGE_KEY) ?? "{}");
+    chosen = withNewsSources(saved.newsSources);
+    if (typeof saved.language === "string") language = saved.language;
+  } catch {
+    // Nothing saved yet: the language's own sources
+  }
+  if (chosen) return chosen;
+  const own = PREVIEW_NEWS_SOURCES.filter((source) => source.lang === language);
+  return (own.length > 0 ? own : PREVIEW_NEWS_SOURCES.filter((source) => source.lang === "en")).map((source) => source.id);
+}
+
+/**
+ * The latest PC gaming and hardware news from the sources the user keeps, newest first. The
+ * backend reuses its last answer for twenty minutes unless `forceRefresh`.
+ */
+export async function fetchNews(forceRefresh = false): Promise<NewsReport> {
+  if (isTauri()) {
+    return invoke<NewsReport>("fetch_news", { forceRefresh });
+  }
+  const inUse = previewNewsSourcesInUse();
+  return { items: PREVIEW_NEWS.filter((item) => inUse.includes(item.source)), failedSources: [], fetchedAt: Date.now() };
+}
+
+/** Opens an article, or a source's site, in the default browser. */
+export async function openNewsLink(url: string): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_news_link", { url });
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 /* ------------------------------------------------------------------- DLSS */
 
 /** The browser preview's own games with DLSS: changed by the buttons, forgotten on reload. */

@@ -29,7 +29,6 @@ export interface PluginCommandEntry {
 }
 
 interface HeaderProps {
-  totalGames: number;
   searchQuery: string;
   onSearchChange: (value: string) => void;
   isSidebarOpen: boolean;
@@ -219,7 +218,6 @@ function WindowControls() {
  * excluded automatically).
  */
 export function Header({
-  totalGames,
   searchQuery,
   onSearchChange,
   isSidebarOpen,
@@ -241,7 +239,7 @@ export function Header({
   pluginCommands,
   onRunPluginCommand,
 }: HeaderProps) {
-  const { t, plural } = useI18n();
+  const { t } = useI18n();
   const contentRef = useRef<HTMLDivElement>(null);
   const SidebarIcon = isSidebarOpen ? PanelLeftClose : PanelLeftOpen;
   const sidebarLabel = isSidebarOpen
@@ -292,9 +290,6 @@ export function Header({
             <h1 className="wordmark text-base font-semibold tracking-tight text-zinc-100">
               Kanso
             </h1>
-            <span className="rounded-md border border-oled-border bg-oled-surface px-2 py-0.5 text-xs font-medium tabular-nums text-zinc-400">
-              {plural("games", totalGames)}
-            </span>
           </div>
         </div>
 

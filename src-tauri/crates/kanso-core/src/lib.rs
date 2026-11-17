@@ -15,6 +15,7 @@ pub mod gog_account;
 pub mod i18n;
 pub mod metadata;
 pub mod models;
+pub mod news;
 pub mod owned;
 pub mod pe_version;
 pub mod playtime;

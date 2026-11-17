@@ -101,7 +101,7 @@ export interface HomeConfig {
 }
 
 /** A part of the side panel the user can leave out. */
-export type HideableSection = "home" | "store" | "tags";
+export type HideableSection = "home" | "store" | "news" | "tags";
 
 /** A stretch of play time, the unit of the statistics page. */
 export interface PlaySession {
@@ -123,6 +123,41 @@ export interface Achievement {
   globalPercent: number | null;
   /** How far along a counted achievement is, 0–1. */
   progress: number | null;
+}
+
+/** What a news source writes about. */
+export type NewsTopic = "gaming" | "hardware";
+
+/** One piece of news, from a publisher's public feed. */
+export interface NewsItem {
+  id: string;
+  source: string;
+  sourceName: string;
+  topic: NewsTopic;
+  title: string;
+  /** The article, on the source's own site. */
+  url: string;
+  /** The first words of the article; empty when the feed gives none. */
+  summary: string;
+  imageUrl: string | null;
+  publishedAt: number | null;
+}
+
+export interface NewsReport {
+  /** Newest first. */
+  items: NewsItem[];
+  /** Sources that could not be read; the others are still listed. */
+  failedSources: string[];
+  fetchedAt: number;
+}
+
+/** A site whose feed Kanso can read. */
+export interface NewsSourceInfo {
+  id: string;
+  name: string;
+  lang: string;
+  topic: NewsTopic;
+  siteUrl: string;
 }
 
 /** One of the three parts of NVIDIA DLSS, each a library of its own in the game's folder. */
@@ -232,6 +267,8 @@ export interface AppConfig {
   hiddenSections: HideableSection[];
   home: HomeConfig;
   store: StoreConfig;
+  /** The news sources the user chose, by id; `null` until they choose (then: the language's own). */
+  newsSources: string[] | null;
   /**
    * Whether Kanso may ask NVIDIA's public repository for the newest DLSS and download its
    * libraries from there. Off until the user turns it on.

@@ -49,7 +49,7 @@
     "borderWidth": 2,
     "shadow": "none",
     "hover": "glow",
-    "caption": "below"
+    "caption": "hover"
   },
   "shapes": {
     "controlRadius": 2,
@@ -68,10 +68,10 @@
     "backgroundAngle": 180
   },
   "detail": {
-    "layout": "sheet",
-    "backdrop": "dim",
-    "backdropBlur": 0,
-    "backdropDim": 0.8,
+    "layout": "bento",
+    "backdrop": "art",
+    "backdropBlur": 18,
+    "backdropDim": 0.7,
     "tiles": "filled",
     "tileGap": 12,
     "cards": "rail",

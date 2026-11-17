@@ -247,6 +247,17 @@ export const THEME_COLOR_TOKENS: [keyof ThemeColors, string][] = [
   ["accentSecondary", "--accent-secondary"],
 ];
 
+/** How light a "#rrggbb" color is, from 0 (black) to 1 (white), as contrast is reckoned. */
+export function luminance(hex: string): number {
+  const value = /^#([0-9a-f]{6})$/i.exec(hex.trim())?.[1];
+  if (!value) return 1;
+  const channel = (index: number) => {
+    const part = parseInt(value.slice(index, index + 2), 16) / 255;
+    return part <= 0.03928 ? part / 12.92 : ((part + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+}
+
 /** The theme color each choice for the side panel stands for. */
 const NAV_COLORS: Record<NavColor, string> = {
   accent: "var(--accent-color)",
@@ -439,6 +450,9 @@ export function applyTheme(
   const root = document.documentElement;
   const set = (name: string, value: string) => root.style.setProperty(name, value);
   const { typography, layout, cards, shapes, icons, effects, detail, motion } = theme;
+  // On the dark chips drawn over covers the accent must still read: a theme whose accent is
+  // dark (ink on paper) shows white there instead
+  set("--accent-on-dark", luminance(theme.colors.accent) < 0.2 ? "#ffffff" : theme.colors.accent);
   const scale = typography.scale * (accessibility.textScale / 100);
   // Pixel sizes follow the interface scale, like everything sized in rem
   const px = (value: number) => `${Math.round(value * scale * 100) / 100}px`;

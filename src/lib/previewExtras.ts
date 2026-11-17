@@ -358,16 +358,7 @@ export function previewCommand(games: DetectedGame[]): PluginView {
     .filter((pick, index, all) => pick.game && all.findIndex((p) => p.game === pick.game) === index);
   return {
     title: "Stasera potresti giocare a…",
-    sections: [
-      {
-        blocks: [
-          {
-            type: "text",
-            text: "Tre carte coperte: una da continuare, una dal backlog e una da riscoprire. Scoprile, oppure ridistribuisci per avere altre idee.",
-          },
-        ],
-      },
-    ],
+    sections: [],
     gamesStyle: "mystery",
     games: picks.map((pick) => ({ id: pick.game.id, note: pick.note, hint: pick.hint })),
   };

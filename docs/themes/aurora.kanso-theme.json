@@ -49,7 +49,7 @@
     "borderWidth": 0,
     "shadow": "soft",
     "hover": "zoom",
-    "caption": "overlay"
+    "caption": "hover"
   },
   "shapes": {
     "controlRadius": 14,
@@ -78,7 +78,7 @@
     "backdropDim": 0.45,
     "tiles": "glass",
     "tileGap": 16,
-    "cards": "stack",
+    "cards": "rail",
     "keyTitles": "secondary",
     "cardTitles": "accent"
   },

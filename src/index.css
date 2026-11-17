@@ -642,13 +642,30 @@
    * What moves behind the top of Home: it fades out before the content, takes no clicks
    * and sits under everything on the page.
    */
+  /* The favourite star on the dark chip over a cover */
+  .favorite-on-cover {
+    color: var(--accent-on-dark, var(--accent-color));
+    fill: var(--accent-on-dark, var(--accent-color));
+  }
+
+  /* The moving background of Home: a holder with no height that stays at the top of the
+     window as the page scrolls, and the canvas hanging from it (placed and sized by its
+     component) behind everything else on the page */
+  .home-ambience-holder {
+    position: sticky;
+    top: 0;
+    height: 0;
+    /* Takes no room: the gap the page puts before its next part is given back */
+    margin-bottom: -1.75rem;
+    pointer-events: none;
+  }
   .home-ambience {
     position: absolute;
-    inset: -1.25rem calc(var(--content-padding) * -1) auto;
-    width: calc(100% + var(--content-padding) * 2);
-    height: min(26rem, 55vh);
     pointer-events: none;
-    mask-image: linear-gradient(to bottom, black 35%, transparent);
+    image-rendering: pixelated;
+  }
+  .home-page > :not(.home-ambience-holder) {
+    position: relative;
   }
 
   /* A shelf is one row of covers: as many as fit, never a cut second row */

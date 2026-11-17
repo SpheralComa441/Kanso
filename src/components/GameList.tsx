@@ -70,9 +70,11 @@ interface FavoriteButtonProps {
   game: DetectedGame;
   onToggle: (game: DetectedGame) => void;
   className?: string;
+  /** Drawn on the dark chip over a cover: the star wears a color that reads there. */
+  onCover?: boolean;
 }
 
-function FavoriteButton({ game, onToggle, className = "" }: FavoriteButtonProps) {
+function FavoriteButton({ game, onToggle, className = "", onCover = false }: FavoriteButtonProps) {
   const { t } = useI18n();
   return (
     <button
@@ -87,7 +89,7 @@ function FavoriteButton({ game, onToggle, className = "" }: FavoriteButtonProps)
     >
       <Star
         className={`h-3.5 w-3.5 ${
-          game.isFavorite ? "fill-accent text-accent" : ""
+          game.isFavorite ? (onCover ? "favorite-on-cover" : "fill-accent text-accent") : ""
         }`}
       />
     </button>
@@ -318,6 +320,7 @@ export function GameList({
                   <FavoriteButton
                     game={game}
                     onToggle={onToggleFavorite}
+                    onCover
                     className={`absolute right-2.5 top-2.5 rounded-lg border border-white/10 bg-black/75 p-1.5 text-white/80 transition-opacity hover:bg-black/85 hover:text-white focus-visible:opacity-100 group-hover:opacity-100 ${
                       game.isFavorite ? "opacity-100" : "opacity-0"
                     }`}

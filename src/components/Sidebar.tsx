@@ -9,6 +9,7 @@ import {
   Joystick,
   LayoutGrid,
   Library,
+  Newspaper,
   Star,
   Tag,
 } from "lucide-react";
@@ -31,7 +32,7 @@ import type { CategoryKind } from "./CategoryGrid";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
 /** The library, or one of the pages beside it; `genres` and `tags` are the walls of tiles. */
-export type MainView = "home" | "store" | "library" | "stats" | "emulators" | CategoryKind;
+export type MainView = "home" | "store" | "news" | "library" | "stats" | "emulators" | CategoryKind;
 
 const SECTION_PREF_KEYS: Record<CategoryKind, string> = {
   genres: "kanso.ui.sidebar.genres",
@@ -43,6 +44,7 @@ interface SidebarProps {
   view: MainView;
   onOpenHome: () => void;
   onOpenStore: () => void;
+  onOpenNews: () => void;
   /** Liked deals about to end: the Store entry wears their number. */
   storeAlerts: number;
   onOpenStats: () => void;
@@ -246,6 +248,7 @@ export function Sidebar({
   tags,
   hidden,
   onOpenStore,
+  onOpenNews,
   storeAlerts,
 }: SidebarProps) {
   const { t } = useI18n();
@@ -344,6 +347,16 @@ export function Sidebar({
               active={view === "store"}
               icon={<Tag className="h-3.5 w-3.5 shrink-0" />}
               onClick={onOpenStore}
+            />
+          )}
+          {!hidden.includes("news") && (
+            <NavRow
+              id="nav-news"
+              page
+              label={t("sidebar.news")}
+              active={view === "news"}
+              icon={<Newspaper className="h-3.5 w-3.5 shrink-0" />}
+              onClick={onOpenNews}
             />
           )}
           <NavRow
