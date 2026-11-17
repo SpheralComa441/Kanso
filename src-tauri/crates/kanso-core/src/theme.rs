@@ -1821,7 +1821,7 @@ mod tests {
 
         let aurora = Theme::from_json(include_str!("../../../../docs/themes/aurora.kanso-theme.json"))
             .expect("docs/themes/aurora.kanso-theme.json must stay importable");
-        assert_eq!(aurora.cards.caption, CardCaption::Overlay);
+        assert_eq!(aurora.cards.caption, CardCaption::Hover);
         assert_eq!(aurora.effects.background_gradient.len(), 3);
     }
 }

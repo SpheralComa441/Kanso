@@ -1,4 +1,4 @@
-import type { Deal, DetectedGame, DlssLibrary, EmulatorInfo } from "../types/game";
+import type { Deal, DetectedGame, DlssLibrary, EmulatorInfo, NewsItem, NewsSourceInfo } from "../types/game";
 
 /**
  * Sample library shown only in the browser preview (`npm run dev` outside Tauri),
@@ -374,6 +374,44 @@ function previewBanner(title: string, from: string, to: string): string {
 }
 
 /** Sample deals for the browser preview, shaped like the real store answers. */
+/** A few sample sources and news, for the browser preview. */
+export const PREVIEW_NEWS_SOURCES: NewsSourceInfo[] = [
+  { id: "sample-it-giochi", name: "Giochi PC Oggi", lang: "it", topic: "gaming", siteUrl: "https://example.com/" },
+  { id: "sample-it-hardware", name: "Hardware Italia", lang: "it", topic: "hardware", siteUrl: "https://example.org/" },
+  { id: "sample-en-gaming", name: "PC Games Daily", lang: "en", topic: "gaming", siteUrl: "https://example.net/" },
+  { id: "sample-en-hardware", name: "Silicon Report", lang: "en", topic: "hardware", siteUrl: "https://example.edu/" },
+];
+
+const sampleNews = (
+  source: NewsSourceInfo,
+  slug: string,
+  title: string,
+  summary: string,
+  hoursAgo: number,
+  colors: [string, string] | null
+): NewsItem => ({
+  id: `${source.id}:${source.siteUrl}${slug}`,
+  source: source.id,
+  sourceName: source.name,
+  topic: source.topic,
+  title,
+  url: `${source.siteUrl}${slug}`,
+  summary,
+  imageUrl: colors ? previewBanner(title, colors[0], colors[1]) : null,
+  publishedAt: Date.now() - hoursAgo * 60 * 60 * 1000,
+});
+
+export const PREVIEW_NEWS: NewsItem[] = [
+  sampleNews(PREVIEW_NEWS_SOURCES[0], "gdr-open-world", "Il GDR open world più atteso ha una data di uscita su PC", "Lo studio ha confermato il giorno di lancio e i requisiti di sistema, con supporto a DLSS e FSR fin dal primo giorno.", 1, ["#7a3b1d", "#1d0f08"]),
+  sampleNews(PREVIEW_NEWS_SOURCES[1], "nuova-gpu", "La nuova scheda video di fascia media alla prova: numeri e consumi", "Dodici giochi in tre risoluzioni, temperature e rumore: quanto conviene rispetto alla generazione precedente.", 3, ["#1d5a7a", "#081a24"]),
+  sampleNews(PREVIEW_NEWS_SOURCES[0], "saldi-autunno", "Saldi d'autunno: i giochi da non lasciarsi sfuggire", "Una selezione ragionata tra indie e grandi produzioni, con i prezzi più bassi di sempre.", 6, null),
+  sampleNews(PREVIEW_NEWS_SOURCES[1], "monitor-oled", "Monitor OLED a 240 Hz: i modelli in arrivo", "Pannelli più luminosi e garanzia estesa contro il burn-in: che cosa cambia per chi gioca.", 11, ["#4a2a6b", "#140a1f"]),
+  sampleNews(PREVIEW_NEWS_SOURCES[0], "patch-strategia", "Lo strategico più giocato riceve la patch più grande di sempre", "", 20, ["#2f6b3a", "#0b1f10"]),
+  sampleNews(PREVIEW_NEWS_SOURCES[1], "cpu-desktop", "Processori desktop: trapelano le specifiche della prossima serie", "Più core efficienti e una nuova piattaforma: le indiscrezioni e che cosa aspettarsi.", 30, null),
+  sampleNews(PREVIEW_NEWS_SOURCES[2], "roguelike", "The roguelike everyone is playing gets a free expansion", "A new biome, two characters and mod support arrive next week on PC.", 2, ["#6b2a3a", "#1f0a10"]),
+  sampleNews(PREVIEW_NEWS_SOURCES[3], "ssd-prices", "SSD prices are dropping again: what to buy now", "We compare the best 2 TB drives for gaming and look at where prices are heading.", 5, ["#3a3f6b", "#0e1020"]),
+];
+
 /** What the DLSS libraries of two sample games would read. */
 export const PREVIEW_DLSS_LATEST = "310.9.16";
 export const PREVIEW_DLSS: Record<string, DlssLibrary[]> = {

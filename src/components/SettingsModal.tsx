@@ -12,6 +12,7 @@ import {
   KeyRound,
   Languages,
   Library,
+  Newspaper,
   Palette,
   Plus,
   Puzzle,
@@ -63,6 +64,8 @@ import type {
 } from "../types/game";
 import { CARD_INFO_CHOICES } from "../lib/cardInfo";
 import { DlssSettings } from "./DlssSettings";
+import { KansoMark } from "./KansoMark";
+import { NewsSettings } from "./NewsSettings";
 import { EmulatorsSettings } from "./EmulatorsSettings";
 import { PluginsSettings } from "./PluginsSettings";
 import { StoreAccountsSettings } from "./StoreAccountsSettings";
@@ -74,6 +77,7 @@ export type SettingsSection =
   | "appearance"
   | "home"
   | "store"
+  | "news"
   | "dlss"
   | "accessibility"
   | "library"
@@ -86,6 +90,7 @@ const SECTIONS: { id: SettingsSection; icon: typeof Palette; label: MessageKey }
   { id: "appearance", icon: Palette, label: "settings.cat.appearance" },
   { id: "home", icon: Home, label: "sidebar.home" },
   { id: "store", icon: Tag, label: "sidebar.store" },
+  { id: "news", icon: Newspaper, label: "sidebar.news" },
   { id: "dlss", icon: Gauge, label: "dlss.title" },
   { id: "accessibility", icon: Accessibility, label: "a11y.section" },
   { id: "library", icon: Library, label: "settings.cat.library" },
@@ -203,6 +208,8 @@ export function SettingsModal({
   const [home, setHome] = useState(initialConfig.home);
   const [store, setStore] = useState(initialConfig.store);
   const [dlssUpdates, setDlssUpdates] = useState(initialConfig.dlssUpdates);
+  const [newsSourcesChosen, setNewsSourcesChosen] = useState(initialConfig.newsSources);
+  const [newsFeeds, setNewsFeeds] = useState(initialConfig.newsFeeds);
   // Looking for the place whose weather to follow: what was typed, and what was found
   const [placeQuery, setPlaceQuery] = useState("");
   const [places, setPlaces] = useState<PlaceMatch[] | "searching" | null>(null);
@@ -235,6 +242,8 @@ export function SettingsModal({
       setHome(initialConfig.home);
       setStore(initialConfig.store);
       setDlssUpdates(initialConfig.dlssUpdates);
+      setNewsSourcesChosen(initialConfig.newsSources);
+      setNewsFeeds(initialConfig.newsFeeds);
       setPlaceQuery("");
       setPlaces(null);
       setEmulators(initialConfig.emulators);
@@ -423,6 +432,8 @@ export function SettingsModal({
         home,
         store,
         dlssUpdates,
+        newsSources: newsSourcesChosen,
+        newsFeeds,
         // An entry that says nothing (no executable, folder or argument) is not kept
         emulators: emulators.filter(
           (emulator) => emulator.exePath.trim() || emulator.folders.length > 0 || emulator.args.trim()
@@ -570,6 +581,7 @@ export function SettingsModal({
                   [
                     ["home", "settings.showHome", "settings.showHomeHelp"],
                     ["store", "settings.showStore", "settings.showStoreHelp"],
+                    ["news", "settings.showNews", "settings.showNewsHelp"],
                     ["tags", "settings.showTags", "settings.showTagsHelp"],
                   ] as const
                 ).map(([name, label, help]) => (
@@ -672,19 +684,19 @@ export function SettingsModal({
                               : "border-oled-border bg-oled-bg hover:border-zinc-600"
                           }`}
                         >
-                          {/* The theme's own colors, whatever theme is active */}
+                          {/* The logo in the theme's own colors, whatever theme is active: drawn
+                              in the accent on the theme's page, its heart in the second color */}
                           <span
                             aria-hidden="true"
-                            className="flex h-8 w-8 shrink-0 items-end justify-end overflow-hidden rounded-md border"
+                            data-theme-mark
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border"
                             style={{
                               background: theme.colors.background,
                               borderColor: theme.colors.border,
+                              color: theme.colors.accent,
                             }}
                           >
-                            <span
-                              className="h-4 w-4 rounded-tl-md"
-                              style={{ background: theme.colors.accent }}
-                            />
+                            <KansoMark decorative accent={theme.colors.accentSecondary} className="h-8 w-8" />
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-xs font-medium text-zinc-100">
@@ -1073,6 +1085,17 @@ export function SettingsModal({
                 </div>
                 <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.storePrivacy")}</p>
               </section>
+            </Panel>
+
+            <Panel id="news" active={section === "news"} title={t("sidebar.news")} description={t("settings.cat.newsHelp")}>
+              <NewsSettings
+                active={isOpen && section === "news"}
+                value={newsSourcesChosen}
+                onChange={setNewsSourcesChosen}
+                language={language}
+                feeds={newsFeeds}
+                onFeedsChange={setNewsFeeds}
+              />
             </Panel>
 
             <Panel id="dlss" active={section === "dlss"} title={t("dlss.title")} description={t("settings.cat.dlssHelp")}>

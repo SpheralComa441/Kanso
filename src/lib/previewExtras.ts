@@ -130,7 +130,7 @@ const PLUGINS: PluginSeed[] = [
     version: "1.1.0",
     author: "Kanso",
     description:
-      "Quante mod ha un gioco su Nexus Mods, con il link alla sua pagina delle mod nel browser. Nessun account. Scarica l'elenco pubblico dei giochi di Nexus Mods e vi cerca il gioco su questo PC, quindi nulla della tua libreria viene inviato; solo quando quell'elenco non è disponibile chiede a Nexus Mods del solo gioco di cui è aperta la scheda, per titolo.",
+      "Quante mod ha un gioco su Nexus Mods, con il link alla sua pagina delle mod nel browser. Non serve un account. Usa l'elenco pubblico dei giochi di Nexus Mods; se non è disponibile, cerca per titolo il gioco di cui è aperta la scheda.",
     homepage: "https://www.nexusmods.com",
     hosts: ["data.nexusmods.com", "api.nexusmods.com"],
     gameDetails: true,
@@ -358,16 +358,7 @@ export function previewCommand(games: DetectedGame[]): PluginView {
     .filter((pick, index, all) => pick.game && all.findIndex((p) => p.game === pick.game) === index);
   return {
     title: "Stasera potresti giocare a…",
-    sections: [
-      {
-        blocks: [
-          {
-            type: "text",
-            text: "Tre carte coperte: una da continuare, una dal backlog e una da riscoprire. Scoprile, oppure ridistribuisci per avere altre idee.",
-          },
-        ],
-      },
-    ],
+    sections: [],
     gamesStyle: "mystery",
     games: picks.map((pick) => ({ id: pick.game.id, note: pick.note, hint: pick.hint })),
   };

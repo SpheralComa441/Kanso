@@ -15,6 +15,7 @@ import {
 } from "./components/PluginCommandDialog";
 import { SettingsModal, type SettingsSection } from "./components/SettingsModal";
 import { Sidebar, type MainView } from "./components/Sidebar";
+import { NewsView } from "./components/NewsView";
 import { likedEndingSoon, StoreView } from "./components/StoreView";
 import { StatsView } from "./components/StatsView";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./components/StatusIcon";
@@ -108,6 +109,8 @@ const INITIAL_CONFIG: AppConfig = {
   hiddenSections: [],
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   store: { hiddenStores: [], hiddenDeals: [], liked: [] },
+  newsSources: null,
+  newsFeeds: [],
   dlssUpdates: false,
   emulators: [],
   hasGamePass: false,
@@ -225,7 +228,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [mainView, setMainView] = useState<MainView>(() =>
     readUiPreference(
       MAIN_VIEW_PREF_KEY,
-      ["home", "store", "library", "stats", "emulators", "genres", "tags"],
+      ["home", "store", "news", "library", "stats", "emulators", "genres", "tags"],
       "library"
     )
   );
@@ -612,7 +615,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   // A page the user hid is not a place to be left on: the library takes over
   const hiddenSections = config.hiddenSections;
   useEffect(() => {
-    if ((mainView === "home" || mainView === "store" || mainView === "tags") && hiddenSections.includes(mainView)) {
+    if ((mainView === "home" || mainView === "store" || mainView === "news" || mainView === "tags") && hiddenSections.includes(mainView)) {
       setMainView("library");
       writeUiPreference(MAIN_VIEW_PREF_KEY, "library");
     }
@@ -929,7 +932,6 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   return (
     <div className="flex h-full flex-col text-zinc-100">
       <Header
-        totalGames={counts.visible}
         searchQuery={searchQuery}
         onSearchChange={changeSearch}
         isSidebarOpen={isSidebarOpen}
@@ -970,6 +972,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           view={mainView}
           onOpenHome={() => showView("home")}
           onOpenStore={() => showView("store")}
+          onOpenNews={() => showView("news")}
           storeAlerts={likedEndingSoon(config.store.liked).length}
           onOpenStats={() => showView("stats")}
           onOpenEmulators={() => {
@@ -1022,6 +1025,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
             />
           ) : mainView === "store" ? (
             storeView()
+          ) : mainView === "news" ? (
+            // Not before the settings are in: the sources to ask are theirs to say
+            settingsLoaded && <NewsView
+              sourcesKey={`${lang}|${config.newsSources === null ? "default" : config.newsSources.join(",")}|${config.newsFeeds.map((feed) => `${feed.url} ${feed.topic} ${feed.name}`).join(",")}`}
+              onOpenSettings={() => openSettings("news")}
+              onError={setStatusMessage}
+            />
           ) : mainView === "stats" ? (
             <StatsView
               games={allGames}

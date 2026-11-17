@@ -33,13 +33,18 @@ import type {
   DlssChange,
   DlssLibrary,
   DlssSource,
+  CustomFeed,
   DlssStatus,
+  NewsReport,
+  NewsSourceInfo,
   LikedDeal,
   StoreConfig,
 } from "../types/game";
 import {
   PREVIEW_DLSS,
   PREVIEW_DLSS_LATEST,
+  PREVIEW_NEWS,
+  PREVIEW_NEWS_SOURCES,
   PREVIEW_MOCK_DEALS,
   PREVIEW_MOCK_EMULATED_GAMES,
   PREVIEW_MOCK_EMULATORS,
@@ -80,6 +85,8 @@ const DEFAULT_CONFIG: AppConfig = {
   hiddenSections: [],
   home: { hidden: [], effects: true, weather: false, place: null, upNext: [] },
   store: { hiddenStores: [], hiddenDeals: [], liked: [] },
+  newsSources: null,
+  newsFeeds: [],
   dlssUpdates: false,
   emulators: [],
   hasGamePass: false,
@@ -172,6 +179,8 @@ export async function getSettings(): Promise<AppConfig> {
       hiddenSections: withHiddenSections(parsed.hiddenSections),
       home: withHomeConfig(parsed.home),
       store: withStoreConfig(parsed.store),
+      newsSources: withNewsSources(parsed.newsSources),
+      newsFeeds: withNewsFeeds(parsed.newsFeeds),
       dlssUpdates: parsed.dlssUpdates === true,
       emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
@@ -199,6 +208,8 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     hiddenSections: withHiddenSections(config.hiddenSections),
     home: withHomeConfig(config.home),
     store: withStoreConfig(config.store),
+    newsSources: withNewsSources(config.newsSources),
+    newsFeeds: withNewsFeeds(config.newsFeeds),
     dlssUpdates: config.dlssUpdates === true,
     emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
@@ -726,7 +737,7 @@ export function withHomeConfig(value: unknown): HomeConfig {
 }
 
 /** The parts of the side panel that can be hidden, in the order Settings lists them. */
-export const HIDEABLE_SECTIONS: HideableSection[] = ["home", "store", "tags"];
+export const HIDEABLE_SECTIONS: HideableSection[] = ["home", "store", "news", "tags"];
 
 function withHiddenSections(value: unknown): HideableSection[] {
   const chosen = Array.isArray(value) ? value : [];
@@ -1059,6 +1070,85 @@ export async function getPlaySessions(sinceMs: number): Promise<PlaySession[]> {
 }
 
 /** The achievements Steam lists for a game; `null` when there is nothing to show. */
+/* ------------------------------------------------------------------- news */
+
+/** The user's choice of news sources as the backend would keep it: plain ids, each once. */
+function withNewsSources(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  return [...new Set(value.filter((id): id is string => typeof id === "string" && /^[a-z0-9-]{1,40}$/.test(id)))];
+}
+
+/** Most feeds a user can add by hand. */
+export const MAX_CUSTOM_FEEDS = 12;
+
+/**
+ * Whether `url` can be a feed's address, as the backend judges it: `https://` in lower case,
+ * a host with a dot and neither a user name nor a port, nothing odd after it.
+ */
+export function isFeedUrl(url: string): boolean {
+  return /^https:\/\/[^\s/?#@:"<>\\]+\.[^\s/?#@:"<>\\]+([/?#][^\s"<>\\]*)?$/.test(url) && url.length <= 300;
+}
+
+/** The feeds added by hand as the backend would keep them. */
+function withNewsFeeds(value: unknown): CustomFeed[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .filter((feed): feed is CustomFeed => Boolean(feed) && typeof feed.url === "string")
+    .map((feed) => ({
+      name: String(feed.name ?? "").trim().slice(0, 40),
+      url: feed.url.trim(),
+      topic: feed.topic === "hardware" ? ("hardware" as const) : ("gaming" as const),
+    }))
+    .filter((feed) => isFeedUrl(feed.url) && !seen.has(feed.url) && Boolean(seen.add(feed.url)))
+    .map((feed) => ({ ...feed, name: feed.name || feed.url.replace(/^https:\/\/(www\.|feeds?\.|rss\.)?/, "").split("/")[0] }))
+    .slice(0, MAX_CUSTOM_FEEDS);
+}
+
+/** Every site whose feed Kanso can read. */
+export async function newsSources(): Promise<NewsSourceInfo[]> {
+  if (isTauri()) {
+    return invoke<NewsSourceInfo[]>("news_sources");
+  }
+  return PREVIEW_NEWS_SOURCES;
+}
+
+function previewNewsSourcesInUse(): string[] {
+  let chosen: string[] | null = null;
+  let language = "it";
+  try {
+    const saved = JSON.parse(localStorage.getItem(BROWSER_STORAGE_KEY) ?? "{}");
+    chosen = withNewsSources(saved.newsSources);
+    if (typeof saved.language === "string") language = saved.language;
+  } catch {
+    // Nothing saved yet: the language's own sources
+  }
+  if (chosen) return chosen;
+  const own = PREVIEW_NEWS_SOURCES.filter((source) => source.lang === language);
+  return (own.length > 0 ? own : PREVIEW_NEWS_SOURCES.filter((source) => source.lang === "en")).map((source) => source.id);
+}
+
+/**
+ * The latest PC gaming and hardware news from the sources the user keeps, newest first. The
+ * backend reuses its last answer for twenty minutes unless `forceRefresh`.
+ */
+export async function fetchNews(forceRefresh = false): Promise<NewsReport> {
+  if (isTauri()) {
+    return invoke<NewsReport>("fetch_news", { forceRefresh });
+  }
+  const inUse = previewNewsSourcesInUse();
+  return { items: PREVIEW_NEWS.filter((item) => inUse.includes(item.source)), failedSources: [], fetchedAt: Date.now() };
+}
+
+/** Opens an article, or a source's site, in the default browser. */
+export async function openNewsLink(url: string): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_news_link", { url });
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 /* ------------------------------------------------------------------- DLSS */
 
 /** The browser preview's own games with DLSS: changed by the buttons, forgotten on reload. */

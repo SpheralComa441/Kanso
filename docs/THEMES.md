@@ -34,10 +34,11 @@ incorporati si definiscono nel file:
 import fail with the name of the field to fix.*
 
 Esempi / Examples: [`nord`](themes/nord.kanso-theme.json) (solo colori, formato 1),
-[`arcade`](themes/arcade.kanso-theme.json) (angoli tagliati, titoli pixel, icone squadrate, scheda
-del gioco unica su velo scuro, animazioni vivaci),
-[`aurora`](themes/aurora.kanso-theme.json) (sfondo sfumato, forme tonde, titoli sulle copertine,
-scheda del gioco a riquadri di vetro sopra la copertina molto sfocata).
+[`arcade`](themes/arcade.kanso-theme.json) (angoli tagliati, titoli pixel, icone squadrate, bordi
+netti e bagliore al passaggio, riquadri pieni nella scheda del gioco, animazioni vivaci),
+[`aurora`](themes/aurora.kanso-theme.json) (sfondo sfumato, forme tonde, riquadri di vetro nella
+scheda del gioco sopra la copertina molto sfocata). Entrambi usano i layout attuali: copertine
+che raccontano il gioco al passaggio del mouse e scheda a riquadri con le altre schede che scorrono.
 Arcade e Aurora sono anche inclusi nell'app.
 
 ## Installare un tema / Installing a theme

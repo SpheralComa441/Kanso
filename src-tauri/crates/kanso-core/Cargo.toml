@@ -23,6 +23,8 @@ yaml-rust2 = { version = "0.13", default-features = false }
 # Already in the dependency tree through ureq's TLS; opens the envelope (AES-256-GCM) a current
 # Ubisoft Connect client keeps its local product cache in
 ring = "0.17"
+# Reads news feeds that are not written in UTF-8 (windows-1251, ISO-8859-1…)
+encoding_rs = "0.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"

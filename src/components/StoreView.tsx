@@ -116,7 +116,7 @@ function DealTile({ deal, owned, liked, onOpen, onToggleLike, onHide }: DealTile
             title={t(liked ? "store.unlike" : "store.like", { title: deal.title })}
             className={`${chip} ${liked ? "opacity-100" : "opacity-0 focus-visible:opacity-100 group-hover:opacity-100"}`}
           >
-            <Heart className={`h-3 w-3 ${liked ? "fill-accent text-accent" : ""}`} />
+            <Heart className={`h-3 w-3 ${liked ? "favorite-on-cover" : ""}`} />
           </button>
         </div>
         {owned && (

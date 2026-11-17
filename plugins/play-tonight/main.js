@@ -5,12 +5,6 @@ const DAY = 24 * 60 * 60 * 1000;
 
 const TEXT = {
   title: { en: "Tonight you could play…", it: "Stasera potresti giocare a…", es: "Esta noche podrías jugar a…", ru: "Сегодня можно сыграть в…" },
-  intro: {
-    en: "Three face-down cards: one to continue, one from your backlog and one to rediscover. Turn them over, or deal again for other ideas.",
-    it: "Tre carte coperte: una da continuare, una dal backlog e una da riscoprire. Scoprile, oppure ridistribuisci per avere altre idee.",
-    es: "Tres cartas boca abajo: una para continuar, una pendiente y una para redescubrir. Descúbrelas, o reparte de nuevo para tener otras ideas.",
-    ru: "Три закрытые карты: продолжить, начать из отложенных и вспомнить давнюю. Откройте их или раздайте заново — будут другие идеи.",
-  },
   empty: {
     en: "There is nothing to suggest yet: the library is empty or every game is finished or abandoned.",
     it: "Non c'è ancora nulla da proporre: la libreria è vuota oppure tutti i giochi sono finiti o abbandonati.",
@@ -99,7 +93,8 @@ kanso.plugin({
       }
       return {
         title: kanso.t(TEXT.title),
-        sections: [{ blocks: [{ type: "text", text: kanso.t(TEXT.intro) }] }],
+        // The cards say what they are themselves: nothing to read first
+        sections: [],
         // Whole covers, face down until each one is turned
         gamesStyle: "mystery",
         games: picks,

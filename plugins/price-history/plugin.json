@@ -10,10 +10,10 @@
   "version": "1.0.0",
   "author": "Kanso",
   "description": {
-    "en": "Best current price and all-time low across the stores, from IsThereAnyDeal. Needs your own free API key, which stays on this PC.",
-    "it": "Miglior prezzo attuale e minimo storico tra i vari store, da IsThereAnyDeal. Richiede la tua chiave API gratuita, che resta su questo PC.",
-    "es": "Mejor precio actual y mínimo histórico entre las tiendas, de IsThereAnyDeal. Necesita tu propia clave API gratuita, que se queda en este PC.",
-    "ru": "Лучшая текущая цена и исторический минимум по магазинам от IsThereAnyDeal. Нужен ваш бесплатный ключ API, который остаётся на этом ПК."
+    "en": "Best current price and all-time low across the stores, from IsThereAnyDeal. Needs your own free API key.",
+    "it": "Miglior prezzo attuale e minimo storico tra i vari store, da IsThereAnyDeal. Richiede la tua chiave API gratuita.",
+    "es": "Mejor precio actual y mínimo histórico entre las tiendas, de IsThereAnyDeal. Necesita tu propia clave API gratuita.",
+    "ru": "Лучшая текущая цена и исторический минимум по магазинам от IsThereAnyDeal. Нужен ваш бесплатный ключ API."
   },
   "homepage": "https://isthereanydeal.com",
   "hosts": ["api.isthereanydeal.com"],
