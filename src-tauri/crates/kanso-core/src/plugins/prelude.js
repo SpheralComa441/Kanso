@@ -154,6 +154,8 @@
     outcome = { ok: false, error: describe(value) };
   }
 
+  // `hook` is the path of a function in what the plugin registered: "gameDetails", "home",
+  // or "commands.<id>".
   globalThis.__kanso_call = function (hook, argsJson) {
     outcome = null;
     var owner = null;

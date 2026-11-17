@@ -1,5 +1,6 @@
-//! Community plugins: small JavaScript programs that add information to a game's sheet or
-//! commands to the Plugins menu, without ever touching the interface or the user's data.
+//! Community plugins: small JavaScript programs that add information to a game's sheet, a part
+//! to the Home page or commands to the Plugins menu, without ever touching the interface or
+//! the user's data.
 //!
 //! - [`manifest`]: `plugin.json`, including the hosts a plugin may contact;
 //! - [`registry`]: the shipped plugins and the user's plugins folder;
@@ -7,8 +8,8 @@
 //! - [`http`]: the checked door to the network;
 //! - [`output`]: the plain data a plugin may return, which Kanso draws itself.
 //!
-//! [`PluginEngine`] ties them to the library: it runs a plugin for a game, caches the answer
-//! in the database and hands the interface what to show.
+//! [`PluginEngine`] ties them to the library: it runs a plugin for a game or for the Home
+//! page, caches the answer in the database and hands the interface what to show.
 
 pub mod http;
 pub mod manifest;
@@ -22,9 +23,10 @@ use crate::i18n::{Lang, T};
 use crate::models::DetectedGame;
 use http::{HttpTransport, UreqTransport};
 use manifest::SettingKind;
-use output::{parse_game_data, parse_view, PluginGameData, PluginView};
+use output::{parse_game_data, parse_home_view, parse_view, PluginGameData, PluginView};
 use registry::{Plugin, PluginSource};
 use runtime::{run_hook, HookCall, HookOutput, RunLimits};
+use serde::de::DeserializeOwned;
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashSet};
@@ -34,6 +36,12 @@ use std::sync::{Arc, Mutex, MutexGuard};
 const ERROR_RETRY_MS: u64 = 30 * 60 * 1000;
 /// Log lines passed on with an error, for the plugin's author.
 const ERROR_LOG_LINES: usize = 12;
+/// The longest an answer of `home` is reused, whatever the manifest says: the Home page is
+/// about today.
+pub const HOME_MAX_CACHE_HOURS: u64 = 24;
+/// Where a plugin's answer for the Home page is kept, in the same cache as its answers per
+/// game. Every game id starts with its platform and a colon, so this is never one of them.
+const HOME_CACHE_KEY: &str = "@home";
 
 /// Whether the user (or, for a shipped plugin never touched, its own default) has it on.
 pub fn is_enabled(plugin: &Plugin, config: &AppConfig) -> bool {
@@ -119,6 +127,8 @@ pub struct PluginInfo {
     pub game_details: bool,
     pub badge: bool,
     pub background: bool,
+    /// Adds a part to the Home page.
+    pub home: bool,
     pub commands: Vec<PluginCommandInfo>,
     pub settings: Vec<PluginSettingInfo>,
 }
@@ -139,6 +149,7 @@ pub fn describe(plugin: &Plugin, config: &AppConfig, lang: Lang) -> PluginInfo {
         game_details: manifest.game_details,
         badge: manifest.badge,
         background: manifest.background,
+        home: manifest.home,
         commands: manifest
             .commands
             .iter()
@@ -203,6 +214,14 @@ pub fn game_payload(game: &DetectedGame) -> Value {
     })
 }
 
+/// What commands and `home` are called with: the visible library, and the time.
+fn library_context(visible: &[&DetectedGame], now_ms: u64) -> Value {
+    json!({
+        "games": visible.iter().map(|game| game_payload(game)).collect::<Vec<_>>(),
+        "now": now_ms,
+    })
+}
+
 /// What a plugin has to say about a game.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -216,6 +235,42 @@ pub struct GameDataAnswer {
     pub logs: Vec<String>,
     /// When `data` was obtained (ms).
     pub fetched_at: u64,
+}
+
+/// What a plugin adds to the Home page.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HomeDataAnswer {
+    pub plugin_id: String,
+    pub plugin_name: String,
+    /// `None` when the plugin failed and nothing older is worth showing. An empty view is
+    /// the plugin saying it has nothing for today.
+    pub data: Option<PluginView>,
+    /// Why the last attempt failed, with the plugin's last log lines for its author.
+    pub error: Option<String>,
+    pub logs: Vec<String>,
+    /// When `data` was obtained (ms).
+    pub fetched_at: u64,
+}
+
+/// One call of a hook whose answer is kept in the plugin's cache.
+struct CachedCall<'a> {
+    /// What the answer is filed under: a game id, or [`HOME_CACHE_KEY`].
+    key: &'a str,
+    hook: &'a str,
+    /// The longest the answer is reused; the answer itself may ask for less.
+    max_hours: u64,
+    /// Asks again even if the cached answer is still fresh.
+    force: bool,
+    now_ms: u64,
+}
+
+/// What a cached call gave: the answer, or the last good one together with the error.
+struct CachedAnswer<D> {
+    data: Option<D>,
+    error: Option<String>,
+    logs: Vec<String>,
+    fetched_at: u64,
 }
 
 /// A plugin's label for a game card.
@@ -301,38 +356,35 @@ impl PluginEngine {
         )
     }
 
-    /// What `plugin` shows for `game`: the cached answer while it is fresh, otherwise a new
-    /// one (always with `force`). The database is locked only to read and write the cache,
-    /// never while the plugin runs.
+    /// Calls a hook through the plugin's cache: the stored answer while it is fresh, otherwise
+    /// a new one (always with `force`). An answer is stale as soon as the plugin's code,
+    /// version, settings or the interface language change. When the call fails, the last good
+    /// answer is handed back together with the error; with nothing to fall back on, the error
+    /// itself is. Either way the failure is remembered for a while (the old answer is served
+    /// alone meanwhile), so that the plugin is not asked at every look.
+    ///
+    /// `args` is built only if the plugin really runs. The database is locked only to read
+    /// and write the cache, never while the plugin runs.
     #[allow(clippy::too_many_arguments)]
-    pub fn game_data(
+    fn cached<D: Serialize + DeserializeOwned>(
         &self,
         db: &Mutex<LibraryDb>,
         plugin: &Plugin,
         config: &AppConfig,
         lang: Lang,
-        game: &DetectedGame,
-        force: bool,
-        now_ms: u64,
-    ) -> GameDataAnswer {
+        call: &CachedCall<'_>,
+        args: impl FnOnce() -> Value,
+        parse: impl Fn(&Value) -> D,
+    ) -> CachedAnswer<D> {
         let settings = effective_settings(plugin, config);
         let signature = Self::signature(plugin, &settings, lang);
         let plugin_id = plugin.manifest.id.as_str();
-        let answer = |data: Option<PluginGameData>, error: Option<String>, logs: Vec<String>, fetched_at: u64| {
-            GameDataAnswer {
-                plugin_id: plugin_id.to_string(),
-                plugin_name: plugin.manifest.name.get(lang).to_string(),
-                data,
-                error,
-                logs,
-                fetched_at,
-            }
-        };
+        let now_ms = call.now_ms;
 
         let (cached, storage) = {
             let db = lock(db);
             (
-                db.get_plugin_cache(plugin_id, &game.id).ok().flatten(),
+                db.get_plugin_cache(plugin_id, call.key).ok().flatten(),
                 db.load_plugin_storage(plugin_id).unwrap_or_default(),
             )
         };
@@ -340,29 +392,32 @@ impl PluginEngine {
         let cached_data = |entry: &PluginCacheEntry| {
             entry
                 .ok
-                .then(|| serde_json::from_str::<PluginGameData>(&entry.data).ok())
+                .then(|| serde_json::from_str::<D>(&entry.data).ok())
                 .flatten()
         };
-        if let Some(entry) = cached.as_ref().filter(|entry| !force && entry.expires_at > now_ms) {
+        if let Some(entry) = cached.as_ref().filter(|entry| !call.force && entry.expires_at > now_ms) {
             return match cached_data(entry) {
-                Some(data) => answer(Some(data), None, Vec::new(), entry.fetched_at),
-                None => answer(None, Some(entry.data.clone()), Vec::new(), entry.fetched_at),
+                Some(data) => CachedAnswer { data: Some(data), error: None, logs: Vec::new(), fetched_at: entry.fetched_at },
+                None => CachedAnswer {
+                    data: None,
+                    error: Some(entry.data.clone()),
+                    logs: Vec::new(),
+                    fetched_at: entry.fetched_at,
+                },
             };
         }
 
-        match self.call(plugin, &settings, &storage, lang, "gameDetails", &game_payload(game)) {
+        match self.call(plugin, &settings, &storage, lang, call.hook, &args()) {
             Ok(output) => {
-                let data = parse_game_data(&output.value);
-                // An answer may ask to be kept for less than the plugin's usual time (data
-                // not out yet, a service that could not be reached), never for longer
+                let data = parse(&output.value);
+                // An answer may ask to be kept for less than the usual time (data not out
+                // yet, a service that could not be reached), never for longer
                 let cache_hours = output
                     .value
                     .get("cacheHours")
                     .and_then(Value::as_f64)
                     .filter(|hours| hours.is_finite() && *hours > 0.0)
-                    .map_or(plugin.manifest.cache_hours, |hours| {
-                        (hours.ceil() as u64).clamp(1, plugin.manifest.cache_hours)
-                    });
+                    .map_or(call.max_hours, |hours| (hours.ceil() as u64).clamp(1, call.max_hours));
                 let entry = PluginCacheEntry {
                     data: serde_json::to_string(&data).unwrap_or_else(|_| "{}".to_string()),
                     ok: true,
@@ -371,11 +426,11 @@ impl PluginEngine {
                     expires_at: now_ms + cache_hours * 3_600_000,
                 };
                 let mut db = lock(db);
-                let _ = db.put_plugin_cache(plugin_id, &game.id, &entry);
+                let _ = db.put_plugin_cache(plugin_id, call.key, &entry);
                 if let Some(storage) = &output.storage {
                     let _ = db.save_plugin_storage(plugin_id, storage);
                 }
-                answer(Some(data), None, Vec::new(), now_ms)
+                CachedAnswer { data: Some(data), error: None, logs: Vec::new(), fetched_at: now_ms }
             }
             Err(error) => {
                 let message = format!("{}: {}", T::PluginFailed.s(), error.message);
@@ -389,21 +444,107 @@ impl PluginEngine {
                     .collect();
                 // An older good answer is better than an error: keep it and show it
                 let previous = cached.as_ref().and_then(|entry| Some((cached_data(entry)?, entry.fetched_at)));
-                if previous.is_none() {
-                    let entry = PluginCacheEntry {
-                        data: message.clone(),
-                        ok: false,
-                        signature,
-                        fetched_at: now_ms,
-                        expires_at: now_ms + ERROR_RETRY_MS,
-                    };
-                    let _ = lock(db).put_plugin_cache(plugin_id, &game.id, &entry);
-                }
                 match previous {
-                    Some((data, fetched_at)) => answer(Some(data), Some(message), logs, fetched_at),
-                    None => answer(None, Some(message), logs, now_ms),
+                    Some((data, fetched_at)) => {
+                        // The failure is remembered here too: the old answer is served as
+                        // it is for a while before the plugin is asked again
+                        if let Some(entry) = cached {
+                            let kept = PluginCacheEntry { expires_at: now_ms + ERROR_RETRY_MS, ..entry };
+                            let _ = lock(db).put_plugin_cache(plugin_id, call.key, &kept);
+                        }
+                        CachedAnswer { data: Some(data), error: Some(message), logs, fetched_at }
+                    }
+                    None => {
+                        let entry = PluginCacheEntry {
+                            data: message.clone(),
+                            ok: false,
+                            signature,
+                            fetched_at: now_ms,
+                            expires_at: now_ms + ERROR_RETRY_MS,
+                        };
+                        let _ = lock(db).put_plugin_cache(plugin_id, call.key, &entry);
+                        CachedAnswer { data: None, error: Some(message), logs, fetched_at: now_ms }
+                    }
                 }
             }
+        }
+    }
+
+    /// What `plugin` shows for `game`: the cached answer while it is fresh (the manifest's
+    /// `cacheHours`), otherwise a new one (always with `force`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn game_data(
+        &self,
+        db: &Mutex<LibraryDb>,
+        plugin: &Plugin,
+        config: &AppConfig,
+        lang: Lang,
+        game: &DetectedGame,
+        force: bool,
+        now_ms: u64,
+    ) -> GameDataAnswer {
+        let call = CachedCall {
+            key: &game.id,
+            hook: "gameDetails",
+            max_hours: plugin.manifest.cache_hours,
+            force,
+            now_ms,
+        };
+        let answer = self.cached(db, plugin, config, lang, &call, || game_payload(game), parse_game_data);
+        GameDataAnswer {
+            plugin_id: plugin.manifest.id.clone(),
+            plugin_name: plugin.manifest.name.get(lang).to_string(),
+            data: answer.data,
+            error: answer.error,
+            logs: answer.logs,
+            fetched_at: answer.fetched_at,
+        }
+    }
+
+    /// What `plugin` adds to the Home page, from the visible library. Cached like
+    /// [`Self::game_data`], but for a day at most ([`HOME_MAX_CACHE_HOURS`]) whatever the
+    /// manifest says. The games it points at are checked against the library at every look:
+    /// one that was hidden or removed since the answer was cached is not shown.
+    #[allow(clippy::too_many_arguments)]
+    pub fn home_data(
+        &self,
+        db: &Mutex<LibraryDb>,
+        plugin: &Plugin,
+        config: &AppConfig,
+        lang: Lang,
+        games: &[DetectedGame],
+        force: bool,
+        now_ms: u64,
+    ) -> HomeDataAnswer {
+        let visible: Vec<&DetectedGame> = games.iter().filter(|game| !game.is_hidden).collect();
+        let call = CachedCall {
+            key: HOME_CACHE_KEY,
+            hook: "home",
+            max_hours: plugin.manifest.cache_hours.min(HOME_MAX_CACHE_HOURS),
+            force,
+            now_ms,
+        };
+        let answer = self.cached(
+            db,
+            plugin,
+            config,
+            lang,
+            &call,
+            || library_context(&visible, now_ms),
+            parse_home_view,
+        );
+        // Only games that are really in the library can be pointed at
+        let known: HashSet<&str> = visible.iter().map(|game| game.id.as_str()).collect();
+        HomeDataAnswer {
+            plugin_id: plugin.manifest.id.clone(),
+            plugin_name: plugin.manifest.name.get(lang).to_string(),
+            data: answer.data.map(|mut view| {
+                view.games.retain(|pick| known.contains(pick.id.as_str()));
+                view
+            }),
+            error: answer.error,
+            logs: answer.logs,
+            fetched_at: answer.fetched_at,
         }
     }
 
@@ -440,7 +581,8 @@ impl PluginEngine {
             }
             let signature = Self::signature(plugin, &effective_settings(plugin, config), lang);
             for (game_id, entry) in db.list_plugin_cache(&plugin.manifest.id).unwrap_or_default() {
-                if !entry.ok || entry.signature != signature {
+                // The answer for the Home page shares the cache and is not about a game
+                if !entry.ok || entry.signature != signature || game_id == HOME_CACHE_KEY {
                     continue;
                 }
                 let badge = serde_json::from_str::<PluginGameData>(&entry.data)
@@ -479,10 +621,7 @@ impl PluginEngine {
         let settings = effective_settings(plugin, config);
         let storage = lock(db).load_plugin_storage(plugin_id).unwrap_or_default();
         let visible: Vec<&DetectedGame> = games.iter().filter(|game| !game.is_hidden).collect();
-        let args = json!({
-            "games": visible.iter().map(|game| game_payload(game)).collect::<Vec<_>>(),
-            "now": now_ms,
-        });
+        let args = library_context(&visible, now_ms);
 
         let output = self
             .call(plugin, &settings, &storage, lang, &format!("commands.{command_id}"), &args)
@@ -720,6 +859,236 @@ mod tests {
         assert!(stale.error.is_some());
     }
 
+    /// A plugin that adds a part to Home and says how often it really ran.
+    const HOME: &str = r#"
+        kanso.plugin({
+          home(context) {
+            const runs = kanso.storage.get("runs", 0) + 1;
+            kanso.storage.set("runs", runs);
+            return {
+              title: "Run " + runs + " at " + context.now + " (" + kanso.settings.region + ")",
+              sections: [1, 2, 3, 4].map((n) => ({ title: "Part " + n, blocks: [{ type: "text", text: "Words." }] })),
+              gamesStyle: "cards",
+              games: context.games.map((game) => ({ id: game.id, note: game.title })).concat([{ id: "ghost:1" }]),
+            };
+          },
+        });
+    "#;
+
+    fn home_plugin(code: &str, cache_hours: u64) -> Plugin {
+        Plugin {
+            manifest: manifest::PluginManifest::parse(&format!(
+                r#"{{
+                  "kansoPlugin": 1, "id": "demo", "name": {{"en": "Demo", "it": "Dimostrazione"}},
+                  "version": "1.0.0", "hosts": ["api.example.org"], "cacheHours": {cache_hours},
+                  "provides": {{"home": true}},
+                  "settings": [{{"key": "region", "type": "select", "default": "eu", "options": ["eu", "us"]}}]
+                }}"#
+            ))
+            .unwrap(),
+            code: code.to_string(),
+            source: PluginSource::User,
+        }
+    }
+
+    fn runs(db: &Mutex<LibraryDb>) -> Option<String> {
+        lock(db).load_plugin_storage("demo").unwrap().get("runs").cloned()
+    }
+
+    #[test]
+    fn a_part_of_home_is_built_from_the_visible_library_and_cut_to_size() {
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let engine = PluginEngine::with_transport(FakeTransport::offline(), "0.1.0");
+        let plugin = home_plugin(HOME, 2);
+        let config = enabled(&[]);
+
+        let mut hidden = game("epic:hidden", "Hidden");
+        hidden.is_hidden = true;
+        let mut games: Vec<DetectedGame> = (0..20).map(|n| game(&format!("epic:{n:02}"), &format!("Game {n}"))).collect();
+        games.insert(3, hidden);
+
+        let answer = engine.home_data(&db, &plugin, &config, Lang::It, &games, false, 5_000);
+        assert_eq!((answer.plugin_id.as_str(), answer.plugin_name.as_str()), ("demo", "Dimostrazione"));
+        assert_eq!(answer.error, None, "{:?}", answer.logs);
+        assert_eq!(answer.fetched_at, 5_000);
+        let view = answer.data.expect("a view");
+        assert_eq!(view.title.as_deref(), Some("Run 1 at 5000 (eu)"), "the time and the settings reach the hook");
+        assert_eq!(view.sections.len(), 2, "two sections at most on Home");
+        assert_eq!(view.games_style, output::GamesStyle::Cards);
+        assert_eq!(view.games.len(), 12, "twelve games at most on Home");
+        assert!(view.games.iter().all(|pick| pick.id != "epic:hidden"), "hidden games are not handed over");
+        assert_eq!(view.games[3].id, "epic:03");
+        assert_eq!(view.games[3].note.as_deref(), Some("Game 3"));
+
+        // A game hidden (or gone) after the answer was cached is not pointed at any more,
+        // without running the plugin again
+        games.retain(|game| game.id != "epic:00");
+        games[0].is_hidden = true; // epic:01
+        let later = engine.home_data(&db, &plugin, &config, Lang::It, &games, false, 6_000);
+        let view = later.data.expect("a view");
+        assert_eq!(view.title.as_deref(), Some("Run 1 at 5000 (eu)"), "from the cache");
+        assert_eq!(view.games.len(), 10);
+        assert_eq!(view.games[0].id, "epic:02");
+        assert_eq!(runs(&db).as_deref(), Some("1"));
+
+        // What is kept for Home is not about a game: the cards get no label from it, and
+        // the answers per game do not see it
+        assert!(engine.badges(&lock(&db), std::slice::from_ref(&plugin), &config, Lang::It).is_empty());
+        assert_eq!(lock(&db).list_plugin_cache("demo").unwrap().len(), 1);
+        assert!(lock(&db).get_plugin_cache("demo", HOME_CACHE_KEY).unwrap().is_some());
+
+        // Nothing to show today: an empty view, cached like any other answer
+        let quiet = home_plugin("kanso.plugin({ home() { kanso.storage.set('asked', (kanso.storage.get('asked') || 0) + 1); return null; } });", 2);
+        let nothing = engine.home_data(&db, &quiet, &config, Lang::It, &games, false, 7_000);
+        assert_eq!(nothing.error, None);
+        assert!(nothing.data.expect("a view").is_empty());
+        engine.home_data(&db, &quiet, &config, Lang::It, &games, false, 8_000);
+        assert_eq!(lock(&db).load_plugin_storage("demo").unwrap().get("asked").map(String::as_str), Some("1"));
+    }
+
+    #[test]
+    fn a_part_of_home_is_cached_for_a_day_at_most_and_asked_again_like_a_game_sheet() {
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let engine = PluginEngine::with_transport(FakeTransport::offline(), "0.1.0");
+        let games = [game("epic:a", "A")];
+        let config = enabled(&[]);
+        let hour = 3_600_000;
+        let title = |answer: HomeDataAnswer| answer.data.and_then(|view| view.title).unwrap_or_default();
+
+        // The manifest says a week: on Home that is a day
+        let plugin = home_plugin(HOME, 168);
+        let first = engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 0);
+        assert_eq!(title(first), "Run 1 at 0 (eu)");
+        assert_eq!(lock(&db).get_plugin_cache("demo", HOME_CACHE_KEY).unwrap().unwrap().expires_at, HOME_MAX_CACHE_HOURS * hour);
+        let same_day = engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 23 * hour);
+        assert_eq!(same_day.fetched_at, 0);
+        assert_eq!(title(same_day), "Run 1 at 0 (eu)", "reused within the day");
+        let next_day = engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 24 * hour);
+        assert_eq!(title(next_day), format!("Run 2 at {} (eu)", 24 * hour), "asked again after a day");
+
+        // Asked again at once: when the user refreshes, and whenever the settings, the
+        // language, the plugin's code or its version change
+        let now = 25 * hour;
+        let ask = |plugin: &Plugin, config: &AppConfig, lang: Lang, force: bool| {
+            title(engine.home_data(&db, plugin, config, lang, &games, force, now))
+        };
+        assert!(ask(&plugin, &config, Lang::En, false).starts_with("Run 2 "), "still fresh");
+        assert!(ask(&plugin, &config, Lang::En, true).starts_with("Run 3 "), "forced from the interface");
+        let us = enabled(&[("region", "us")]);
+        assert_eq!(ask(&plugin, &us, Lang::En, false), format!("Run 4 at {now} (us)"));
+        assert!(ask(&plugin, &us, Lang::It, false).starts_with("Run 5 "), "another language");
+        let edited = home_plugin(&format!("{HOME}\n// edited"), 168);
+        assert!(ask(&edited, &us, Lang::It, false).starts_with("Run 6 "), "another main.js");
+        let mut updated = edited.clone();
+        updated.manifest.version = "1.0.1".to_string();
+        assert!(ask(&updated, &us, Lang::It, false).starts_with("Run 7 "), "another version");
+        assert!(ask(&updated, &us, Lang::It, false).starts_with("Run 7 "), "and then it is cached again");
+
+        // A shorter time in the manifest stands; an answer can shorten its own, never go
+        // past the manifest's or past the day
+        let expiry = |cache_hours: u64, reply: &str| {
+            let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+            let plugin = home_plugin(&format!("kanso.plugin({{ home: () => ({reply}) }});"), cache_hours);
+            engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 0);
+            let expires_at = lock(&db).get_plugin_cache("demo", HOME_CACHE_KEY).unwrap().unwrap().expires_at;
+            expires_at
+        };
+        assert_eq!(expiry(2, "{ sections: [] }"), 2 * hour);
+        assert_eq!(expiry(2160, "{ sections: [] }"), 24 * hour);
+        assert_eq!(expiry(2160, "null"), 24 * hour, "nothing to show is cached like an answer");
+        assert_eq!(expiry(168, "{ cacheHours: 3 }"), 3 * hour);
+        assert_eq!(expiry(168, "{ cacheHours: 0.5 }"), hour, "at least one hour");
+        assert_eq!(expiry(168, "{ cacheHours: 500 }"), 24 * hour, "never past the day");
+        assert_eq!(expiry(2, "{ cacheHours: 12 }"), 2 * hour, "never past the manifest's");
+        assert_eq!(expiry(168, "{ cacheHours: -1 }"), 24 * hour);
+        assert_eq!(expiry(168, "{ cacheHours: 'soon' }"), 24 * hour);
+    }
+
+    #[test]
+    fn a_failing_part_of_home_keeps_the_last_good_answer_and_reports_the_details() {
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let online = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let transport = {
+            let online = Arc::clone(&online);
+            FakeTransport::new(move |_| {
+                if online.load(std::sync::atomic::Ordering::SeqCst) {
+                    ok_json(json!({"id": "epic:hades"}))
+                } else {
+                    Err("dns error".to_string())
+                }
+            })
+        };
+        let engine = PluginEngine::with_transport(transport.clone(), "0.1.0");
+        let plugin = home_plugin(
+            r#"kanso.plugin({
+                 home() {
+                   kanso.log("asking the service");
+                   const pick = kanso.http.getJson("https://api.example.org/today");
+                   return { title: "Today", games: [{ id: pick.id }] };
+                 },
+               });"#,
+            24,
+        );
+        let config = enabled(&[]);
+        let games = [game("epic:hades", "Hades")];
+        let minute = 60_000;
+
+        // Offline with nothing cached: the error, with what the plugin logged and where it
+        // happened, and no view
+        let failed = engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 0);
+        assert_eq!(failed.data, None);
+        assert!(failed.error.as_deref().unwrap().contains("dns error"), "{:?}", failed.error);
+        assert!(failed.logs.iter().any(|line| line == "asking the service"), "{:?}", failed.logs);
+        assert!(failed.logs.iter().any(|line| line.contains("main.js")), "{:?}", failed.logs);
+
+        // Not asked again at every look at Home, only after a while or when the user says so
+        let soon = engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 10 * minute);
+        assert!(soon.data.is_none() && soon.error.is_some());
+        assert_eq!(transport.urls().len(), 1, "not asked again within the retry window");
+        engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 31 * minute);
+        assert_eq!(transport.urls().len(), 2, "asked again once the window passed");
+
+        online.store(true, std::sync::atomic::Ordering::SeqCst);
+        let good = engine.home_data(&db, &plugin, &config, Lang::En, &games, true, 40 * minute);
+        assert_eq!(good.error, None);
+        let view = good.data.clone().expect("a view");
+        assert_eq!(view.games[0].id, "epic:hades");
+
+        // Later the service is down again: the old answer stays, marked with the error and
+        // with the time it is from, whether it expired or the user asked again
+        online.store(false, std::sync::atomic::Ordering::SeqCst);
+        let day = 24 * 60 * minute;
+        for (force, now) in [(true, 50 * minute), (false, 2 * day)] {
+            let stale = engine.home_data(&db, &plugin, &config, Lang::En, &games, force, now);
+            assert_eq!(stale.data, good.data);
+            assert_eq!(stale.fetched_at, 40 * minute);
+            assert!(stale.error.as_deref().unwrap().contains("dns error"));
+            assert!(!stale.logs.is_empty());
+        }
+
+        // This failure is remembered too: the next looks get the old answer as it is, and
+        // the plugin is asked again only after a while or when the user says so
+        let asked = transport.urls().len();
+        for minutes in [1, 10, 29] {
+            let kept = engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 2 * day + minutes * minute);
+            assert_eq!((kept.data, kept.fetched_at), (good.data.clone(), 40 * minute));
+        }
+        assert_eq!(transport.urls().len(), asked, "an old answer is not asked for again at every look");
+        let entry = lock(&db).get_plugin_cache("demo", HOME_CACHE_KEY).unwrap().unwrap();
+        assert!(entry.ok && entry.fetched_at == 40 * minute, "the answer kept is the good one: {entry:?}");
+        engine.home_data(&db, &plugin, &config, Lang::En, &games, true, 2 * day + 5 * minute);
+        assert_eq!(transport.urls().len(), asked + 1, "the user asking again is not held back");
+        engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 2 * day + 36 * minute);
+        assert_eq!(transport.urls().len(), asked + 2, "asked again once the window passed");
+
+        // A plugin that says it adds a part of Home and has no such hook fails the same way
+        let hookless = home_plugin("kanso.plugin({ gameDetails: () => null });", 24);
+        let other_db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let missing = engine.home_data(&other_db, &hookless, &config, Lang::En, &games, false, 0);
+        assert!(missing.data.is_none());
+        assert!(missing.error.as_deref().unwrap().contains("does not implement home"), "{:?}", missing.error);
+    }
+
     #[test]
     fn commands_run_over_the_visible_library_and_point_only_at_real_games() {
         let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
@@ -774,6 +1143,8 @@ mod tests {
         assert_eq!(info.settings[0].kind, "secret");
         assert_eq!(info.settings[1].options[1].label, "us");
         assert_eq!(info.commands[0].title, "Pick");
+        assert!(info.game_details && !info.home, "what it adds is what its manifest says");
+        assert!(describe(&home_plugin(HOME, 2), &untouched, Lang::It).home);
         assert!(installed_state(None).enabled);
     }
 }

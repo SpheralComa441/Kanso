@@ -117,6 +117,12 @@
   outline-offset: 2px !important;
 }
 
+/* A button that covers a whole row of a list sits in a frame that clips what is drawn
+   outside it: there the thick outline stays inside the row, whole on its four sides */
+:root[data-strong-focus] .motion-row > button:focus-visible {
+  outline-offset: -3px !important;
+}
+
 /* Title rules a theme switches on; above utilities, which set these per component. */
 :root[data-heading-weight] :is(h1, h2, h3) {
   font-weight: var(--heading-weight);
@@ -207,6 +213,19 @@
     scrollbar-gutter: stable;
   }
 
+  /* The pages of the side panel when a theme puts them at the bottom: under the groups,
+     which scroll above them, on the same margins */
+  .app-sidebar-pages {
+    width: var(--sidebar-width);
+    padding: 0.625rem 10px 1rem;
+    border-top: var(--divider-width) solid var(--border-subtle);
+    /* Never the whole panel: in a small window with large text the pages scroll in their
+       own space, and the groups above keep theirs */
+    flex-shrink: 0;
+    max-height: 60%;
+    overflow-y: auto;
+  }
+
   .app-main {
     padding: 1.25rem calc(var(--content-padding) - var(--scrollbar-size)) var(--content-padding)
       var(--content-padding);
@@ -246,6 +265,13 @@
     --fade: 1.125rem;
     -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
     mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
+  }
+
+  /* The same at both ends, for a scrolling area with something sitting right under it */
+  .fade-ends {
+    --fade: 1.125rem;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
   }
 
   /* ------------------------------------------------------------------ cards */
@@ -412,6 +438,12 @@
 
   /* ...and its cards one after the other, the first twenty or so; the rest are there at once */
   .motion-view .game-card {
+    animation: card-in var(--motion-slow) var(--motion-ease) backwards;
+    animation-delay: calc(min(var(--i, 0), 24) * var(--motion-stagger));
+  }
+
+  /* The rows of a list (the Store and the News as rows) come in the same way */
+  .motion-view .motion-row {
     animation: card-in var(--motion-slow) var(--motion-ease) backwards;
     animation-delay: calc(min(var(--i, 0), 24) * var(--motion-stagger));
   }
@@ -997,7 +1029,8 @@
   /*
    * "hover": covers without a caption. Under the pointer, or reached with the keyboard, the
    * cover blurs and darkens and the game's title, genres and figures show over it, with the
-   * button that starts or installs it. A game with no artwork shows its title all the time.
+   * button that starts or installs it. A game with no artwork shows its title all the time,
+   * except under the pointer, where the title makes room for the lines.
    */
   .game-card-info {
     display: none;
@@ -1022,6 +1055,20 @@
   :root[data-card-caption="hover"] .game-card:has(:focus-visible) .game-card-art {
     filter: blur(10px) brightness(0.5) saturate(1.1);
     transform: scale(1.12);
+  }
+
+  /*
+   * A game with no artwork: its title makes room for the lines whenever the veil shows
+   * (the veil also stays after a click on its button, while the focus is in it)
+   */
+  :root[data-card-caption="hover"] .game-card-blank > p {
+    transition: opacity var(--motion-base) ease;
+  }
+
+  :root[data-card-caption="hover"] .game-card:hover .game-card-blank > p,
+  :root[data-card-caption="hover"] .game-card:has(:focus-visible) .game-card-blank > p,
+  :root[data-card-caption="hover"] .game-card:has(.game-card-hover:focus-within) .game-card-blank > p {
+    opacity: 0;
   }
 
   /* The veil that carries the text: over the whole cover, not only its foot */
@@ -1051,6 +1098,58 @@
   }
 
   /*
+   * On Home a cover keeps its title under it in every theme. A game that cannot be started
+   * has nothing under the pointer but what the cover tells, so its veil exists only where
+   * covers tell; and where they tell, the plugins' labels are among the lines over the
+   * cover and need no second place under it.
+   */
+  .game-card-hover[data-info-only] {
+    display: none;
+  }
+
+  :root[data-card-caption="hover"] .game-card-hover[data-info-only] {
+    display: flex;
+  }
+
+  :root[data-card-caption="hover"] .home-card-badges {
+    display: none;
+  }
+
+  /*
+   * On Home the top of a ranked cover holds its place in the shelf and the queue's controls:
+   * the lines keep clear of them, and those that do not fit the cover are left out whole,
+   * last first. The panel is a column that wraps: what does not fit between the top and the
+   * button goes to a second column, which lies outside the panel and is not drawn.
+   */
+  :root[data-card-caption="hover"] .home-card:has(.home-rank) .game-card-hover {
+    padding-top: 2.5rem;
+  }
+
+  :root[data-card-caption="hover"] .home-card .game-card-info {
+    display: flex;
+    flex-flow: column wrap;
+    justify-content: flex-end;
+    align-content: flex-start;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  :root[data-card-caption="hover"] .home-card .game-card-info > *,
+  :root[data-card-caption="hover"] .home-card .game-card-facts > * {
+    flex: none;
+    width: 100%;
+  }
+
+  /* Each figure is a line of its own, so one can be left out without the others */
+  :root[data-card-caption="hover"] .home-card .game-card-facts {
+    display: contents;
+  }
+
+  :root[data-card-caption="hover"] .home-card .game-card-info > * ~ .game-card-facts > :first-child {
+    margin-top: 0.5rem;
+  }
+
+  /*
    * The name next to the logo. The logo's own typeface, Afronaut, is a commercial font that
    * cannot be distributed with an open-source app: Kanso names it and uses it where it is
    * installed on the PC, and falls back to the theme's heading font everywhere else. No
@@ -1076,6 +1175,55 @@
     justify-content: center;
     gap: 1rem;
     padding-block: 0.25rem;
+  }
+
+  /*
+   * On a page (a part of Home) the covers are those of its shelves: as many in a row, as
+   * wide, with the theme's proportions and gap, starting at the left and wrapping.
+   */
+  .pick-grid[data-picks-wide] {
+    grid-template-columns: repeat(var(--picks), minmax(0, 1fr));
+    gap: var(--grid-gap);
+    padding-block: 0;
+  }
+
+  .pick-grid[data-picks-wide] .pick-card {
+    aspect-ratio: var(--cover-aspect);
+  }
+
+  /*
+   * A theme that cuts the corners of its cards cuts these too, so that they do not stand out
+   * among the shelves. The border stays on the straight sides; the cuts themselves are bare.
+   */
+  :root:is([data-card-shape="cut"], [data-card-shape="slant"]) .pick-grid[data-picks-wide] .pick-face {
+    --cut-a: var(--card-radius);
+    --cut-b: var(--card-radius);
+    border-radius: 0;
+    box-shadow: none;
+    clip-path: polygon(
+      var(--cut-a) 0,
+      calc(100% - var(--cut-b)) 0,
+      100% var(--cut-b),
+      100% calc(100% - var(--cut-a)),
+      calc(100% - var(--cut-a)) 100%,
+      var(--cut-b) 100%,
+      0 calc(100% - var(--cut-b)),
+      0 var(--cut-a)
+    );
+  }
+
+  :root[data-card-shape="slant"] .pick-grid[data-picks-wide] .pick-face {
+    --cut-a: 0px;
+  }
+
+  /* Measured to know how many covers a shelf holds: the gap is the shelves' own */
+  .home-picks {
+    column-gap: var(--grid-gap);
+  }
+
+  /* The words a plugin adds to Home keep a readable measure however wide the page is */
+  .home-plugin-words {
+    max-width: 48rem;
   }
 
   .pick-card {

@@ -1,5 +1,5 @@
 {
-  "kansoTheme": 2,
+  "kansoTheme": 3,
   "name": "Aurora",
   "author": "Kanso",
   "description": "Gradient night sky, round shapes, titles over the covers.",
@@ -87,6 +87,25 @@
     "sheet": "rise",
     "view": "fade",
     "stagger": true
+  },
+  "home": {
+    "sections": ["resume", "upNext", "mostPlayed", "recommendations", "deals", "plugins"],
+    "effects": "seasonal"
+  },
+  "nav": {
+    "pages": ["home", "store", "news", "stats", "emulators"],
+    "groups": ["library", "status", "platform", "genres", "tags"],
+    "pagesPosition": "top"
+  },
+  "store": {
+    "tabs": ["all", "picks", "steam", "epic", "gog", "others", "liked"],
+    "layout": "grid",
+    "figures": true
+  },
+  "news": {
+    "layout": "magazine",
+    "pictures": true,
+    "summaries": true
   },
   "fontFiles": []
 }

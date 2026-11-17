@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ExternalLink, RefreshCw, SlidersHorizontal, WifiOff } from "lucide-react";
+import { ExternalLink, Newspaper, RefreshCw, SlidersHorizontal, WifiOff } from "lucide-react";
 import { useI18n } from "../i18n";
 import { fetchNews, openNewsLink } from "../lib/backend";
-import type { NewsItem, NewsReport, NewsTopic } from "../types/game";
+import type { NewsItem, NewsReport, NewsTopic, ThemeNews } from "../types/game";
 
 type Tab = "all" | NewsTopic;
 const TABS: [Tab, "news.all" | "news.gaming" | "news.hardware"][] = [
@@ -20,13 +20,16 @@ interface NewsCardProps {
   item: NewsItem;
   /** The first piece of news, drawn wide with its picture beside it. */
   lead?: boolean;
+  /** Whether the theme has the items show their picture, and their summary. */
+  pictures: boolean;
+  summaries: boolean;
   onOpen: (item: NewsItem) => void;
 }
 
-function NewsCard({ item, lead = false, onOpen }: NewsCardProps) {
+function NewsCard({ item, lead = false, pictures, summaries, onOpen }: NewsCardProps) {
   const { t, relativePast } = useI18n();
   const [imageFailed, setImageFailed] = useState(false);
-  const hasPicture = Boolean(item.imageUrl) && !imageFailed;
+  const hasPicture = pictures && Boolean(item.imageUrl) && !imageFailed;
   return (
     <li
       className="game-card group relative flex h-full flex-col overflow-hidden"
@@ -54,7 +57,9 @@ function NewsCard({ item, lead = false, onOpen }: NewsCardProps) {
           {item.publishedAt !== null && <span className="shrink-0 text-zinc-500">· {relativePast(item.publishedAt)}</span>}
         </div>
         <h3 className={`font-semibold leading-snug text-zinc-100 ${lead ? "text-lg" : "line-clamp-3 text-sm"}`}>{item.title}</h3>
-        {item.summary && <p className={`text-xs leading-relaxed text-zinc-400 ${lead ? "line-clamp-5" : "line-clamp-3"}`}>{item.summary}</p>}
+        {summaries && item.summary && (
+          <p className={`news-summary text-xs leading-relaxed text-zinc-400 ${lead ? "line-clamp-5" : "line-clamp-3"}`}>{item.summary}</p>
+        )}
         <span className="mt-auto inline-flex items-center gap-1 pt-1 text-3xs text-zinc-500 opacity-0 transition-opacity group-hover:opacity-100">
           <ExternalLink className="h-3 w-3" />
           {item.sourceName}
@@ -71,7 +76,64 @@ function NewsCard({ item, lead = false, onOpen }: NewsCardProps) {
   );
 }
 
+/**
+ * A piece of news as a row of a list: a small picture at the side, then where it comes
+ * from, its title and its summary. The whole row opens the article.
+ */
+function NewsRow({ item, index, pictures, summaries, onOpen }: NewsCardProps & { index: number }) {
+  const { t, relativePast } = useI18n();
+  const [imageFailed, setImageFailed] = useState(false);
+  const hasPicture = Boolean(item.imageUrl) && !imageFailed;
+  return (
+    // The row wraps where it is too narrow for its words (small window, larger text): the
+    // text then goes under the picture and keeps the width it needs to be read
+    <li
+      className="motion-row group relative flex flex-wrap items-start gap-x-4 gap-y-3 px-3.5 py-3 transition-colors hover:bg-oled-elevated/60"
+      style={{ "--i": index } as React.CSSProperties}
+      data-news={item.id}
+      data-topic={item.topic}
+    >
+      {/* With pictures on, every row keeps the same place for one: the titles line up */}
+      {pictures && (
+        <div className="news-picture flex aspect-[16/9] w-36 shrink-0 items-center justify-center overflow-hidden rounded-md border border-oled-border bg-oled-bg">
+          {hasPicture ? (
+            <img
+              src={item.imageUrl ?? undefined}
+              alt=""
+              loading="lazy"
+              draggable={false}
+              referrerPolicy="no-referrer"
+              onError={() => setImageFailed(true)}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <Newspaper className="h-5 w-5 text-zinc-600" aria-hidden="true" />
+          )}
+        </div>
+      )}
+      <div className="flex min-w-[12rem] flex-1 flex-col gap-1.5">
+        <div className="flex items-center gap-2 text-3xs">
+          <span className={`inline-block rounded border px-1.5 py-px font-medium ${TOPIC_BADGE[item.topic]}`}>{t(`news.${item.topic}`)}</span>
+          <span className="truncate font-medium text-zinc-300">{item.sourceName}</span>
+          {item.publishedAt !== null && <span className="shrink-0 text-zinc-500">· {relativePast(item.publishedAt)}</span>}
+        </div>
+        <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-zinc-100">{item.title}</h3>
+        {summaries && item.summary && <p className="news-summary line-clamp-2 text-xs leading-relaxed text-zinc-400">{item.summary}</p>}
+      </div>
+      <ExternalLink className="mt-0.5 h-3 w-3 shrink-0 text-zinc-500 opacity-0 transition-opacity group-hover:opacity-100" />
+      <button
+        type="button"
+        onClick={() => onOpen(item)}
+        aria-label={t("news.open", { title: item.title, source: item.sourceName })}
+        className="absolute inset-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
+      />
+    </li>
+  );
+}
+
 interface NewsViewProps {
+  /** How the active theme lays the news out, and what each item shows. */
+  theme: ThemeNews;
   /** Changes when the user's choice of sources does: the page reads again. */
   sourcesKey: string;
   onOpenSettings: () => void;
@@ -80,9 +142,11 @@ interface NewsViewProps {
 
 /**
  * The News page: the latest PC gaming and hardware news from the sites the user keeps, read
- * from their public feeds. Each piece opens on the site that published it.
+ * from their public feeds. Each piece opens on the site that published it. The active theme
+ * says how they are laid out (the first one large and the rest in a grid, all the same
+ * size, or rows) and whether they show their picture and their summary.
  */
-export function NewsView({ sourcesKey, onOpenSettings, onError }: NewsViewProps) {
+export function NewsView({ theme, sourcesKey, onOpenSettings, onError }: NewsViewProps) {
   const { t, relativePast } = useI18n();
   const [report, setReport] = useState<NewsReport | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -138,7 +202,7 @@ export function NewsView({ sourcesKey, onOpenSettings, onError }: NewsViewProps)
     }`;
 
   return (
-    <div className="news-page space-y-5">
+    <div className="news-page space-y-5" data-news-layout={theme.layout}>
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 id="news-title" className="text-lg font-semibold tracking-tight text-zinc-50">
@@ -220,10 +284,33 @@ export function NewsView({ sourcesKey, onOpenSettings, onError }: NewsViewProps)
           {offline && <WifiOff className="mx-auto mb-3 h-7 w-7 text-zinc-500" />}
           <p className="text-sm text-zinc-300">{t(offline ? "news.offline" : "news.empty")}</p>
         </div>
+      ) : theme.layout === "list" ? (
+        <div className="overflow-hidden rounded-xl border border-oled-border bg-oled-surface/50">
+          <ul className="news-rows divide-y divide-oled-border">
+            {listed.map((item, index) => (
+              <NewsRow
+                key={item.id}
+                item={item}
+                index={index}
+                pictures={theme.pictures}
+                summaries={theme.summaries}
+                onOpen={(piece) => void open(piece)}
+              />
+            ))}
+          </ul>
+        </div>
       ) : (
         <ul className="news-list grid" style={{ gap: "var(--grid-gap)", gridTemplateColumns: "repeat(auto-fill, minmax(270px, 1fr))" }}>
           {listed.map((item, index) => (
-            <NewsCard key={item.id} item={item} lead={index === 0 && Boolean(item.imageUrl)} onOpen={(piece) => void open(piece)} />
+            <NewsCard
+              key={item.id}
+              item={item}
+              // The first one leads only in the magazine, and only with a picture to show
+              lead={theme.layout === "magazine" && index === 0 && theme.pictures && Boolean(item.imageUrl)}
+              pictures={theme.pictures}
+              summaries={theme.summaries}
+              onOpen={(piece) => void open(piece)}
+            />
           ))}
         </ul>
       )}

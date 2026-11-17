@@ -1,0 +1,22 @@
+{
+  "kansoPlugin": 1,
+  "id": "daily-pick",
+  "name": {
+    "en": "Today's pick",
+    "it": "Il gioco di oggi",
+    "es": "El juego de hoy",
+    "ru": "Игра дня"
+  },
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "One game a day from your library, on Home: from the backlog first, then the ones left untouched for a long time. Works offline.",
+    "it": "Un gioco al giorno dalla tua libreria, sulla Home: prima quelli del backlog, poi quelli che non apri da tempo. Funziona offline.",
+    "es": "Un juego al día de tu biblioteca, en Inicio: primero los pendientes, luego los que llevas tiempo sin abrir. Funciona sin conexión.",
+    "ru": "Одна игра в день из вашей библиотеки, на главной: сначала из отложенных, затем давно не запускавшиеся. Работает без сети."
+  },
+  "hosts": [],
+  "enabledByDefault": false,
+  "provides": { "home": true },
+  "cacheHours": 1
+}

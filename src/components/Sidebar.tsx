@@ -27,7 +27,15 @@ import {
   type LibraryFilters,
 } from "../lib/library";
 import { PLATFORM_ORDER, platformLabel } from "../lib/platforms";
-import type { HideableSection } from "../types/game";
+import { offeredGroups } from "../lib/themes";
+import type {
+  GamePlatform,
+  GameStatus,
+  HideableSection,
+  NavGroup,
+  NavPage,
+  ThemeNav,
+} from "../types/game";
 import type { CategoryKind } from "./CategoryGrid";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./StatusIcon";
 
@@ -64,7 +72,11 @@ interface SidebarProps {
   genres: GenreSummary[];
   /** Steam community tags found in the library, most common first. */
   tags: GenreSummary[];
-  /** The parts of the panel the user chose to leave out. */
+  /** What the active theme puts in the panel: which groups, in which order, and where the pages go. */
+  nav: ThemeNav;
+  /** The pages on offer, in order: the theme's and the user's word, worked out once for the whole app. */
+  pages: readonly NavPage[];
+  /** The parts of the panel the user chose to leave out, whatever the theme says. */
   hidden: readonly HideableSection[];
 }
 
@@ -227,8 +239,10 @@ function SwitchRow({ id, label, hint, checked, onChange }: SwitchRowProps) {
 }
 
 /**
- * Collapsible side panel: the Home (deals) entry, then the library with its collections
- * (favorites, recently played, hidden), platforms and the genres found in the metadata.
+ * Collapsible side panel: the pages beside the library (Home, Store, News, Statistics,
+ * Emulators) and the groups of the library (its collections, statuses, platforms, genres,
+ * tags). The active theme says which pages and groups there are, in which order, and
+ * whether the pages come before or after the groups; the user can hide some in Settings.
  * Library filters combine; clicking an active one switches it off.
  */
 export function Sidebar({
@@ -246,6 +260,8 @@ export function Sidebar({
   counts,
   genres,
   tags,
+  nav,
+  pages,
   hidden,
   onOpenStore,
   onOpenNews,
@@ -316,280 +332,342 @@ export function Sidebar({
       counts.byPlatform[platform] > 0 || filters.platform === platform
   );
 
+  // The pages, each with its entry; the theme picks among them and orders them
+  const pageRows: Record<NavPage, ReactNode> = {
+    home: (
+      <NavRow
+        key="home"
+        id="nav-home"
+        page
+        label={t("sidebar.home")}
+        active={view === "home"}
+        icon={<Home className="h-3.5 w-3.5 shrink-0" />}
+        onClick={onOpenHome}
+      />
+    ),
+    store: (
+      <NavRow
+        key="store"
+        id="nav-store"
+        page
+        label={t("sidebar.store")}
+        count={storeAlerts > 0 ? storeAlerts : undefined}
+        countLabel={t("store.endingSoon")}
+        active={view === "store"}
+        icon={<Tag className="h-3.5 w-3.5 shrink-0" />}
+        onClick={onOpenStore}
+      />
+    ),
+    news: (
+      <NavRow
+        key="news"
+        id="nav-news"
+        page
+        label={t("sidebar.news")}
+        active={view === "news"}
+        icon={<Newspaper className="h-3.5 w-3.5 shrink-0" />}
+        onClick={onOpenNews}
+      />
+    ),
+    stats: (
+      <NavRow
+        key="stats"
+        id="nav-stats"
+        page
+        label={t("sidebar.stats")}
+        active={view === "stats"}
+        icon={<ChartNoAxesColumn className="h-3.5 w-3.5 shrink-0" />}
+        onClick={onOpenStats}
+      />
+    ),
+    emulators: (
+      <NavRow
+        key="emulators"
+        id="nav-emulators"
+        page
+        label={t("sidebar.emulators")}
+        count={emulatorCount > 0 ? emulatorCount : undefined}
+        active={view === "emulators"}
+        icon={<Joystick className="h-3.5 w-3.5 shrink-0" />}
+        onClick={onOpenEmulators}
+      />
+    ),
+  };
+
+  const statusRow = (status: GameStatus) => {
+    const active = inLibrary && filters.status === status;
+    return (
+      <NavRow
+        key={status}
+        id={`filter-status-${status}`}
+        label={t(STATUS_LABEL_KEYS[status])}
+        count={counts.byStatus[status]}
+        active={active}
+        icon={<StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />}
+        onClick={() => onFiltersChange(withVisiblePool({ status: active ? null : status }))}
+      />
+    );
+  };
+  const platformRow = (platform: GamePlatform) => {
+    const active = inLibrary && filters.platform === platform;
+    return (
+      <NavRow
+        key={platform}
+        id={`filter-platform-${platform}`}
+        label={platformLabel(platform, t)}
+        count={counts.byPlatform[platform]}
+        active={active}
+        onClick={() => onFiltersChange(withVisiblePool({ platform: active ? null : platform }))}
+      />
+    );
+  };
+  const genreRow = (genre: GenreSummary) => {
+    const active = inLibrary && filters.genre === genre.key;
+    return (
+      <NavRow
+        key={genre.key}
+        id={`filter-genre-${genre.key}`}
+        label={genre.label}
+        count={genre.count}
+        active={active}
+        onClick={() => onFiltersChange(withVisiblePool({ genre: active ? null : genre.key }))}
+      />
+    );
+  };
+  const tagRow = (tag: GenreSummary) => {
+    const active = inLibrary && filters.tag === tag.key;
+    return (
+      <NavRow
+        key={tag.key}
+        id={`filter-tag-${tag.key}`}
+        label={tag.label}
+        count={tag.count}
+        active={active}
+        onClick={() => onFiltersChange(withVisiblePool({ tag: active ? null : tag.key }))}
+      />
+    );
+  };
+
+  // The groups, each keeping its own conditions (statuses once in use, platforms with games…)
+  const groupSections: Record<NavGroup, ReactNode> = {
+    library: (
+      <section key="library" data-nav-group="library">
+        <SectionTitle>{t("sidebar.library")}</SectionTitle>
+        <div className="space-y-0.5">
+          {/* Above the lists it changes; pointless while every game is on disk */}
+          {(counts.notInstalled > 0 || installedOnly) && (
+            <SwitchRow
+              id="installed-only-switch"
+              label={t("sidebar.installedOnly")}
+              hint={t("sidebar.installedOnlyHint")}
+              checked={installedOnly}
+              onChange={onInstalledOnlyChange}
+            />
+          )}
+          <NavRow
+            id="filter-all"
+            label={t("collection.all")}
+            count={counts.visible}
+            active={inLibrary && nothingFiltered}
+            icon={<Library className="h-3.5 w-3.5 shrink-0" />}
+            onClick={() => onFiltersChange(EMPTY_FILTERS)}
+          />
+          <NavRow
+            id="filter-favorites"
+            label={t("collection.favorites")}
+            count={counts.favorites}
+            active={collectionActive("favorites")}
+            icon={
+              <Star
+                className={`h-3.5 w-3.5 shrink-0 ${
+                  collectionActive("favorites") ? "fill-accent text-accent" : ""
+                }`}
+              />
+            }
+            onClick={() => toggleCollection("favorites")}
+          />
+          <NavRow
+            id="filter-recent"
+            label={t("collection.recent")}
+            count={counts.recent}
+            active={collectionActive("recent")}
+            icon={<History className="h-3.5 w-3.5 shrink-0" />}
+            onClick={() => toggleCollection("recent")}
+          />
+          {(counts.notInstalled > 0 || collectionActive("notInstalled")) && (
+            <NavRow
+              id="filter-not-installed"
+              label={t("collection.notInstalled")}
+              count={counts.notInstalled}
+              active={collectionActive("notInstalled")}
+              icon={<CloudDownload className="h-3.5 w-3.5 shrink-0" />}
+              onClick={() => toggleCollection("notInstalled")}
+            />
+          )}
+          {(counts.hidden > 0 || viewingHidden) && (
+            <NavRow
+              id="filter-hidden"
+              label={t("collection.hidden")}
+              count={counts.hidden}
+              active={collectionActive("hidden")}
+              icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
+              onClick={() => toggleCollection("hidden")}
+            />
+          )}
+        </div>
+      </section>
+    ),
+
+    status: statusesInUse ? (
+      <section key="status" data-nav-group="status">
+        <SectionTitle>{t("sidebar.status")}</SectionTitle>
+        <div className="space-y-0.5">{GAME_STATUSES.map(statusRow)}</div>
+      </section>
+    ) : null,
+
+    platform:
+      platformsWithGames.length > 0 ? (
+        <section key="platform" data-nav-group="platform">
+          <SectionTitle>{t("sidebar.platform")}</SectionTitle>
+          <div className="space-y-0.5">{platformsWithGames.map(platformRow)}</div>
+        </section>
+      ) : null,
+
+    genres: (
+      <section key="genres" data-nav-group="genres">
+        {genres.length === 0 ? (
+          <>
+            <SectionTitle>{t("sidebar.genre")}</SectionTitle>
+            <p className="px-2.5 text-2xs leading-relaxed text-zinc-500">
+              {t("sidebar.genresEmpty")}
+            </p>
+          </>
+        ) : (
+          <>
+            <SectionToggle
+              id="browse-genres"
+              label={t("sidebar.genre")}
+              hint={t("sidebar.browseGenres")}
+              count={genres.length}
+              expanded={unfolded.genres}
+              active={view === "genres"}
+              controls="sidebar-genres"
+              onClick={() => browse("genres")}
+            />
+            {/* Keyed by its state: unfolding is a new list, which comes in as such */}
+            <div
+              id="sidebar-genres"
+              key={unfolded.genres ? "open" : "closed"}
+              className="motion-list space-y-0.5"
+            >
+              {shownGenres.map(genreRow)}
+            </div>
+          </>
+        )}
+      </section>
+    ),
+
+    tags:
+      tags.length > 0 ? (
+        <section key="tags" data-nav-group="tags">
+          <SectionToggle
+            id="browse-tags"
+            label={t("sidebar.tags")}
+            hint={t("sidebar.browseTags")}
+            count={tags.length}
+            expanded={unfolded.tags}
+            active={view === "tags"}
+            controls="sidebar-tags"
+            onClick={() => browse("tags")}
+          />
+          <div
+            id="sidebar-tags"
+            key={unfolded.tags ? "open" : "closed"}
+            className="motion-list space-y-0.5"
+          >
+            {shownTags.map(tagRow)}
+          </div>
+          {unfolded.tags && tags.length > TAGS_SHOWN_AT_FIRST && (
+            <button
+              id="toggle-all-tags-button"
+              type="button"
+              onClick={() => setShowAllTags((all) => !all)}
+              aria-expanded={showAllTags}
+              className="mt-1 w-full rounded-md px-2.5 py-1.5 text-left text-2xs text-zinc-500 transition-colors hover:bg-oled-surface hover:text-zinc-200"
+            >
+              {showAllTags
+                ? t("sidebar.showFewerTags")
+                : t("sidebar.showAllTags", { count: tags.length })}
+            </button>
+          )}
+        </section>
+      ) : null,
+  };
+
+  /*
+   * A group the theme leaves out can still be filtering the library: a genre picked on a
+   * game's sheet, a filter chosen before the theme changed. What is selected stays in
+   * sight here too — the group shows up with its title and that one entry, which switches
+   * the filter off — and goes away with it. (The tags the user hid in Settings stay hidden.)
+   */
+  const leftOut = (group: NavGroup) => !nav.groups.includes(group);
+  const activeGenre = genres.find((genre) => genre.key === filters.genre);
+  const activeTag = tags.find((tag) => tag.key === filters.tag);
+  const selectedOnly: [NavGroup, string, ReactNode][] = [];
+  if (leftOut("status") && filters.status !== null) {
+    selectedOnly.push(["status", t("sidebar.status"), statusRow(filters.status)]);
+  }
+  if (leftOut("platform") && filters.platform !== null) {
+    selectedOnly.push(["platform", t("sidebar.platform"), platformRow(filters.platform)]);
+  }
+  if (leftOut("genres") && activeGenre) {
+    selectedOnly.push(["genres", t("sidebar.genre"), genreRow(activeGenre)]);
+  }
+  if (leftOut("tags") && activeTag && !hidden.includes("tags")) {
+    selectedOnly.push(["tags", t("sidebar.tags"), tagRow(activeTag)]);
+  }
+
+  const pagesAtBottom = nav.pagesPosition === "bottom";
+  const pageList = pages.length > 0 && (
+    <div id="sidebar-pages" className="space-y-0.5">
+      {pages.map((page) => pageRows[page])}
+    </div>
+  );
+  const groupList = (
+    <>
+      {offeredGroups(nav, hidden).map((group) => groupSections[group])}
+      {selectedOnly.map(([group, title, row]) => (
+        <section key={`selected-${group}`} data-nav-group={group} data-selected-only>
+          <SectionTitle>{title}</SectionTitle>
+          <div className="space-y-0.5">{row}</div>
+        </section>
+      ))}
+    </>
+  );
+
   return (
     <aside
       id="library-sidebar"
       aria-label={t("sidebar.label")}
+      data-pages={nav.pagesPosition}
       className={`h-full shrink-0 overflow-hidden transition-[width,visibility] duration-200 ease-out ${
         isOpen ? "app-sidebar visible w-[var(--sidebar-width)]" : "invisible w-0"
       }`}
     >
-      <nav className="app-sidebar-nav scroll-area fade-top flex h-full flex-col gap-5 overflow-y-auto">
-        {/* The two pages that are not the library */}
-        <div className="space-y-0.5">
-          {!hidden.includes("home") && (
-            <NavRow
-              id="nav-home"
-              page
-              label={t("sidebar.home")}
-              active={view === "home"}
-              icon={<Home className="h-3.5 w-3.5 shrink-0" />}
-              onClick={onOpenHome}
-            />
-          )}
-          {!hidden.includes("store") && (
-            <NavRow
-              id="nav-store"
-              page
-              label={t("sidebar.store")}
-              count={storeAlerts > 0 ? storeAlerts : undefined}
-              countLabel={t("store.endingSoon")}
-              active={view === "store"}
-              icon={<Tag className="h-3.5 w-3.5 shrink-0" />}
-              onClick={onOpenStore}
-            />
-          )}
-          {!hidden.includes("news") && (
-            <NavRow
-              id="nav-news"
-              page
-              label={t("sidebar.news")}
-              active={view === "news"}
-              icon={<Newspaper className="h-3.5 w-3.5 shrink-0" />}
-              onClick={onOpenNews}
-            />
-          )}
-          <NavRow
-            id="nav-stats"
-            page
-            label={t("sidebar.stats")}
-            active={view === "stats"}
-            icon={<ChartNoAxesColumn className="h-3.5 w-3.5 shrink-0" />}
-            onClick={onOpenStats}
-          />
-          <NavRow
-            id="nav-emulators"
-            page
-            label={t("sidebar.emulators")}
-            count={emulatorCount > 0 ? emulatorCount : undefined}
-            active={view === "emulators"}
-            icon={<Joystick className="h-3.5 w-3.5 shrink-0" />}
-            onClick={onOpenEmulators}
-          />
-        </div>
-
-        <section>
-          <SectionTitle>{t("sidebar.library")}</SectionTitle>
-          <div className="space-y-0.5">
-            {/* Above the lists it changes; pointless while every game is on disk */}
-            {(counts.notInstalled > 0 || installedOnly) && (
-              <SwitchRow
-                id="installed-only-switch"
-                label={t("sidebar.installedOnly")}
-                hint={t("sidebar.installedOnlyHint")}
-                checked={installedOnly}
-                onChange={onInstalledOnlyChange}
-              />
-            )}
-            <NavRow
-              id="filter-all"
-              label={t("collection.all")}
-              count={counts.visible}
-              active={inLibrary && nothingFiltered}
-              icon={<Library className="h-3.5 w-3.5 shrink-0" />}
-              onClick={() => onFiltersChange(EMPTY_FILTERS)}
-            />
-            <NavRow
-              id="filter-favorites"
-              label={t("collection.favorites")}
-              count={counts.favorites}
-              active={collectionActive("favorites")}
-              icon={
-                <Star
-                  className={`h-3.5 w-3.5 shrink-0 ${
-                    collectionActive("favorites") ? "fill-accent text-accent" : ""
-                  }`}
-                />
-              }
-              onClick={() => toggleCollection("favorites")}
-            />
-            <NavRow
-              id="filter-recent"
-              label={t("collection.recent")}
-              count={counts.recent}
-              active={collectionActive("recent")}
-              icon={<History className="h-3.5 w-3.5 shrink-0" />}
-              onClick={() => toggleCollection("recent")}
-            />
-            {(counts.notInstalled > 0 || collectionActive("notInstalled")) && (
-              <NavRow
-                id="filter-not-installed"
-                label={t("collection.notInstalled")}
-                count={counts.notInstalled}
-                active={collectionActive("notInstalled")}
-                icon={<CloudDownload className="h-3.5 w-3.5 shrink-0" />}
-                onClick={() => toggleCollection("notInstalled")}
-              />
-            )}
-            {(counts.hidden > 0 || viewingHidden) && (
-              <NavRow
-                id="filter-hidden"
-                label={t("collection.hidden")}
-                count={counts.hidden}
-                active={collectionActive("hidden")}
-                icon={<EyeOff className="h-3.5 w-3.5 shrink-0" />}
-                onClick={() => toggleCollection("hidden")}
-              />
-            )}
+      {pagesAtBottom ? (
+        // The groups scroll; the pages stay within reach under them
+        <nav className="flex h-full flex-col">
+          <div className="app-sidebar-nav scroll-area fade-ends flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
+            {groupList}
           </div>
-        </section>
-
-        {statusesInUse && (
-          <section>
-            <SectionTitle>{t("sidebar.status")}</SectionTitle>
-            <div className="space-y-0.5">
-              {GAME_STATUSES.map((status) => {
-                const active = inLibrary && filters.status === status;
-                return (
-                  <NavRow
-                    key={status}
-                    id={`filter-status-${status}`}
-                    label={t(STATUS_LABEL_KEYS[status])}
-                    count={counts.byStatus[status]}
-                    active={active}
-                    icon={<StatusIcon status={status} className="h-3.5 w-3.5 shrink-0" />}
-                    onClick={() =>
-                      onFiltersChange(withVisiblePool({ status: active ? null : status }))
-                    }
-                  />
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {platformsWithGames.length > 0 && (
-          <section>
-            <SectionTitle>{t("sidebar.platform")}</SectionTitle>
-            <div className="space-y-0.5">
-              {platformsWithGames.map((platform) => {
-                const active = inLibrary && filters.platform === platform;
-                return (
-                  <NavRow
-                    key={platform}
-                    id={`filter-platform-${platform}`}
-                    label={platformLabel(platform, t)}
-                    count={counts.byPlatform[platform]}
-                    active={active}
-                    onClick={() =>
-                      onFiltersChange(
-                        withVisiblePool({ platform: active ? null : platform })
-                      )
-                    }
-                  />
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        <section>
-          {genres.length === 0 ? (
-            <>
-              <SectionTitle>{t("sidebar.genre")}</SectionTitle>
-              <p className="px-2.5 text-2xs leading-relaxed text-zinc-500">
-                {t("sidebar.genresEmpty")}
-              </p>
-            </>
-          ) : (
-            <>
-              <SectionToggle
-                id="browse-genres"
-                label={t("sidebar.genre")}
-                hint={t("sidebar.browseGenres")}
-                count={genres.length}
-                expanded={unfolded.genres}
-                active={view === "genres"}
-                controls="sidebar-genres"
-                onClick={() => browse("genres")}
-              />
-              {/* Keyed by its state: unfolding is a new list, which comes in as such */}
-              <div
-                id="sidebar-genres"
-                key={unfolded.genres ? "open" : "closed"}
-                className="motion-list space-y-0.5"
-              >
-                {shownGenres.map((genre) => {
-                  const active = inLibrary && filters.genre === genre.key;
-                  return (
-                    <NavRow
-                      key={genre.key}
-                      id={`filter-genre-${genre.key}`}
-                      label={genre.label}
-                      count={genre.count}
-                      active={active}
-                      onClick={() =>
-                        onFiltersChange(
-                          withVisiblePool({ genre: active ? null : genre.key })
-                        )
-                      }
-                    />
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </section>
-
-        {tags.length > 0 && !hidden.includes("tags") && (
-          <section>
-            <SectionToggle
-              id="browse-tags"
-              label={t("sidebar.tags")}
-              hint={t("sidebar.browseTags")}
-              count={tags.length}
-              expanded={unfolded.tags}
-              active={view === "tags"}
-              controls="sidebar-tags"
-              onClick={() => browse("tags")}
-            />
-            <div
-              id="sidebar-tags"
-              key={unfolded.tags ? "open" : "closed"}
-              className="motion-list space-y-0.5"
-            >
-              {shownTags.map((tag) => {
-                const active = inLibrary && filters.tag === tag.key;
-                return (
-                  <NavRow
-                    key={tag.key}
-                    id={`filter-tag-${tag.key}`}
-                    label={tag.label}
-                    count={tag.count}
-                    active={active}
-                    onClick={() =>
-                      onFiltersChange(withVisiblePool({ tag: active ? null : tag.key }))
-                    }
-                  />
-                );
-              })}
-            </div>
-            {unfolded.tags && tags.length > TAGS_SHOWN_AT_FIRST && (
-              <button
-                id="toggle-all-tags-button"
-                type="button"
-                onClick={() => setShowAllTags((all) => !all)}
-                aria-expanded={showAllTags}
-                className="mt-1 w-full rounded-md px-2.5 py-1.5 text-left text-2xs text-zinc-500 transition-colors hover:bg-oled-surface hover:text-zinc-200"
-              >
-                {showAllTags
-                  ? t("sidebar.showFewerTags")
-                  : t("sidebar.showAllTags", { count: tags.length })}
-              </button>
-            )}
-          </section>
-        )}
-      </nav>
+          {pageList && <div className="app-sidebar-pages scroll-area">{pageList}</div>}
+        </nav>
+      ) : (
+        <nav className="app-sidebar-nav scroll-area fade-top flex h-full flex-col gap-5 overflow-y-auto">
+          {pageList}
+          {groupList}
+        </nav>
+      )}
     </aside>
   );
 }

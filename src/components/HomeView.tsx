@@ -1,14 +1,19 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, ChevronRight, Play, Plus, SlidersHorizontal, X } from "lucide-react";
+import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ChevronLeft, ChevronRight, Eye, Play, Plus, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { useI18n } from "../i18n";
 import type { Ambience } from "../lib/ambience";
 import { MAX_UP_NEXT, resolveCoverUrl } from "../lib/backend";
 import { isRecentlyPlayed } from "../lib/library";
 import { platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
-import type { DetectedGame, HomeConfig, HomeSection, ThemeHome } from "../types/game";
+import type { HomePluginPartData } from "../lib/useHomePlugins";
+import type { BadgeEntry, CardInfoItem, DetectedGame, HomeConfig, HomeSection, ThemeHome } from "../types/game";
+import { CardInfoPanel, PluginBadges, useCardFacts, type CardFact } from "./CardInfo";
 import { Cover } from "./Cover";
+import { PluginFailure } from "./GameExtras";
 import { HomeAmbience } from "./HomeAmbience";
+import { PluginBlocks } from "./PluginBlocks";
+import { PluginPicks, resolvePicks, usePickReveal } from "./PluginPicks";
 
 interface HomeViewProps {
   /** Every game that is not hidden, the emulated ones included. */
@@ -33,6 +38,14 @@ interface HomeViewProps {
   /** The best discounts of the moment, and the suggestions by genre: both from the Store. */
   deals: ReactNode;
   recommendations: ReactNode;
+  /** What the plugins add to the page, in their order; drawn where the theme puts "plugins". */
+  pluginParts: HomePluginPartData[];
+  /** The list of plugins was read once: until then nobody knows whether one has a part for Home. */
+  pluginsListed: boolean;
+  /** Short labels plugins have for the games, by game id. */
+  badges: Record<string, BadgeEntry[]>;
+  /** What a cover tells under the pointer besides the title, as the user chose. */
+  cardInfo: readonly CardInfoItem[];
 }
 
 /** The narrowest a cover on a shelf gets, in rem. */
@@ -74,8 +87,18 @@ interface ShelfCardProps {
   controls?: ReactNode;
 }
 
+/** What the covers of the page's shelves tell under the pointer, as the user chose for the library. */
+interface CardTelling {
+  cardInfo: readonly CardInfoItem[];
+  badges: Record<string, BadgeEntry[]>;
+  factsOf: (game: DetectedGame) => CardFact[];
+}
+
+const CardTellingContext = createContext<CardTelling>({ cardInfo: [], badges: {}, factsOf: () => [] });
+
 function ShelfCard({ game, note, rank, isLaunching, onOpen, onLaunch, controls }: ShelfCardProps) {
   const { t } = useI18n();
+  const { cardInfo, badges, factsOf } = useContext(CardTellingContext);
   const { usableCover, markBroken } = useBrokenCovers();
   const coverUrl = usableCover(resolveCoverUrl(game.coverPath, game.updatedAt));
   const canStart = game.isInstalled && Boolean(game.launchUri || game.executablePath);
@@ -113,8 +136,16 @@ function ShelfCard({ game, note, rank, isLaunching, onOpen, onLaunch, controls }
           </div>
         )}
 
-        {canStart && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+        {/* Under the pointer: the button that starts the game and, in themes whose cards tell
+            about the game over the blurred cover, the same lines as in the library. A game
+            that cannot be started has only those lines to show. */}
+        <div
+          data-info-only={canStart ? undefined : ""}
+          className="game-card-hover pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/85 to-transparent p-2 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100"
+        >
+          {/* The title stands under the cover already */}
+          <CardInfoPanel game={game} cardInfo={cardInfo} facts={factsOf(game)} showTitle={false} />
+          {canStart && (
             <button
               type="button"
               onClick={() => onLaunch(game)}
@@ -125,14 +156,20 @@ function ShelfCard({ game, note, rank, isLaunching, onOpen, onLaunch, controls }
               <Play className="h-3.5 w-3.5 fill-current" />
               <span>{isLaunching ? t("common.launching") : t("common.play")}</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       <div className="space-y-0.5 px-2.5 py-2">
         <h3 className="truncate text-xs font-medium text-zinc-100" title={game.title}>
           {game.title}
         </h3>
-        <p className="truncate text-2xs text-zinc-500">{note}</p>
+        <div className="flex items-center justify-between gap-2 text-2xs text-zinc-500">
+          <p className="min-w-0 truncate">{note}</p>
+          {/* Where covers tell nothing under the pointer, the plugins' labels stand here */}
+          <span className="home-card-badges shrink-0">
+            <PluginBadges entries={badges[game.id]} />
+          </span>
+        </div>
       </div>
     </article>
   );
@@ -147,22 +184,154 @@ function Shelf({ children }: { children: (columns: number) => ReactNode }) {
   );
 }
 
-function SectionHeader({ id, title, note }: { id: string; title: string; note?: string }) {
+interface SectionHeaderProps {
+  id: string;
+  title: string;
+  note?: string;
+  /** Small controls of the section, after its title. */
+  actions?: ReactNode;
+}
+
+function SectionHeader({ id, title, note, actions }: SectionHeaderProps) {
   return (
     <header className="flex items-baseline gap-2.5">
       <h2 id={id} className="home-heading text-sm font-semibold">
         {title}
       </h2>
       {note && <span className="truncate text-2xs text-zinc-500">{note}</span>}
+      {actions && <span className="flex shrink-0 items-center gap-1 self-center">{actions}</span>}
     </header>
+  );
+}
+
+/** Whether a plugin's part has something to draw: words, games of the library, or a failure to report. */
+function partHasContent(part: HomePluginPartData, games: DetectedGame[]): boolean {
+  const { answer } = part;
+  if (!answer) return false;
+  const view = answer.data;
+  return (view?.sections.length ?? 0) > 0 || resolvePicks(view, games).length > 0 || Boolean(answer.error);
+}
+
+interface HomePluginPartProps {
+  part: HomePluginPartData;
+  games: DetectedGame[];
+  onOpenGame: (game: DetectedGame) => void;
+  onLaunch: (game: DetectedGame) => void;
+}
+
+/**
+ * The part of Home a plugin adds: a heading like the other parts' (the plugin's own title, or
+ * its name), its words drawn with Kanso's blocks, and the games it points at laid out as it
+ * asked. A plugin that failed with nothing older to show gets one line, with "Try again".
+ */
+function HomePluginPart({ part, games, onOpenGame, onLaunch }: HomePluginPartProps) {
+  const { t } = useI18n();
+  const { plugin, answer, isLoading, refresh } = part;
+  const view = answer?.data ?? null;
+  const { deal, revealed, reveal } = usePickReveal(view);
+  // Covers as wide as those of the shelves above and below
+  const [picksRef, columns] = useShelfColumns();
+  if (!answer) return null;
+
+  const sections = view?.sections ?? [];
+  const picks = resolvePicks(view, games);
+  const hasView = sections.length > 0 || picks.length > 0;
+  const covered = view?.gamesStyle === "mystery" ? picks.filter(({ game }) => !revealed.has(game.id)) : [];
+  const title = view?.title ?? plugin.name;
+  const headingId = `home-plugin-${plugin.id}`;
+  const control = "rounded p-1 text-zinc-500 transition-colors hover:text-zinc-100";
+
+  return (
+    <section
+      aria-labelledby={hasView ? headingId : undefined}
+      aria-label={hasView ? undefined : plugin.name}
+      data-home-section={`plugin:${plugin.id}`}
+      className="space-y-2.5"
+    >
+      {hasView && (
+        <SectionHeader
+          id={headingId}
+          title={title}
+          // A part with a title of its own still says whose it is
+          note={title === plugin.name ? undefined : plugin.name}
+          actions={
+            <>
+              {covered.length > 0 && (
+                <button
+                  type="button"
+                  data-reveal-all={plugin.id}
+                  onClick={() => reveal(covered.map(({ game }) => game.id))}
+                  title={t("plugins.revealAll")}
+                  aria-label={t("plugins.revealAll")}
+                  className={control}
+                >
+                  <Eye className="h-3 w-3" />
+                </button>
+              )}
+              <button
+                type="button"
+                data-refresh-plugin={plugin.id}
+                // Busy, not disabled: a disabled button would drop the keyboard focus it has
+                onClick={isLoading ? undefined : refresh}
+                aria-disabled={isLoading}
+                title={t("plugins.refresh", { name: plugin.name })}
+                aria-label={t("plugins.refresh", { name: plugin.name })}
+                className={control}
+              >
+                <RefreshCw className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`} />
+              </button>
+            </>
+          }
+        />
+      )}
+
+      {sections.length > 0 && (
+        <div className="home-plugin-words space-y-3.5">
+          {sections.map((section, index) => (
+            <div key={index} className="space-y-2">
+              {section.title && <h3 className="micro-label text-zinc-500">{section.title}</h3>}
+              <PluginBlocks blocks={section.blocks} />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div ref={picksRef} className="home-picks empty:hidden">
+        <PluginPicks
+          picks={picks}
+          style={view?.gamesStyle ?? "list"}
+          idPrefix={`home-pick-${plugin.id}`}
+          deal={deal}
+          revealed={revealed}
+          onReveal={reveal}
+          columns={columns}
+          onOpenGame={onOpenGame}
+          onLaunch={onLaunch}
+        />
+      </div>
+
+      {answer.error && (
+        <div className={isLoading ? "opacity-60" : undefined}>
+          <PluginFailure
+            pluginId={plugin.id}
+            name={plugin.name}
+            error={answer.error}
+            logs={answer.logs}
+            staleSince={hasView ? answer.fetchedAt : null}
+            onRetry={refresh}
+          />
+        </div>
+      )}
+    </section>
   );
 }
 
 /**
  * The Home page: the user's own games first. What is being played, to pick up again; the
  * games lined up to play next, which the user chooses (five at most); the ones played the
- * longest; and the stores' discounts. The active theme says which parts there are and in
- * which order; the user can leave any of them out in Settings. Behind the top of the page
+ * longest; the stores' discounts; and what the plugins the user switched on add. The active
+ * theme says which parts there are and in which order; the user can leave any of them out in
+ * Settings. Behind the top of the page
  * something of the season moves, unless the theme, the user or the animations say no.
  */
 export function HomeView({
@@ -180,8 +349,14 @@ export function HomeView({
   onOpenSettings,
   deals,
   recommendations,
+  pluginParts,
+  pluginsListed,
+  badges,
+  cardInfo,
 }: HomeViewProps) {
   const { t, relativePast, duration } = useI18n();
+  const factsOf = useCardFacts(cardInfo, badges);
+  const telling: CardTelling = { cardInfo, badges, factsOf };
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
   const shown = theme.sections.filter((section) => !home.hidden.includes(section));
@@ -235,6 +410,7 @@ export function HomeView({
   const timeNote = (game: DetectedGame) => duration(Math.max(1, game.playtimeMinutes ?? 0));
   const control =
     "rounded-md border border-white/15 bg-black/75 p-1 text-white/85 transition-colors hover:bg-black hover:text-white disabled:opacity-30";
+  const drawnParts = pluginParts.filter((part) => partHasContent(part, games));
 
   const sections: Record<HomeSection, ReactNode> = {
     resume:
@@ -416,11 +592,33 @@ export function HomeView({
         {deals}
       </div>
     ),
+
+    // What the plugins add, one part each in the plugins' order. A plugin that has not
+    // answered yet, or has nothing for today, takes no room.
+    plugins: drawnParts.length > 0 ? (
+      <Fragment key="plugins">
+        {drawnParts.map((part) => (
+          <HomePluginPart
+            key={part.plugin.id}
+            part={part}
+            games={games}
+            onOpenGame={onOpenGame}
+            onLaunch={onLaunch}
+          />
+        ))}
+      </Fragment>
+    ) : null,
   };
 
   const drawn = shown.map((section) => sections[section]).filter((section) => section !== null);
+  // A plugin that has not answered yet may still have something for the page, and so may one
+  // not listed yet (at startup the plugins are read after the settings): until they have,
+  // nobody can say there is nothing to show
+  const awaitingPlugins =
+    shown.includes("plugins") && (!pluginsListed || pluginParts.some((part) => part.answer === null));
 
   return (
+    <CardTellingContext.Provider value={telling}>
     <div className="home-page relative space-y-7">
       {ambience && <HomeAmbience kind={ambience.kind} themeKey={themeKey} />}
 
@@ -462,12 +660,13 @@ export function HomeView({
       <div className="relative space-y-7">
         {drawn.length > 0 ? (
           drawn
-        ) : (
+        ) : awaitingPlugins ? null : (
           <div id="home-empty" className="rounded-xl border border-oled-border bg-oled-surface/40 px-6 py-12 text-center">
             <p className="mx-auto max-w-xl text-sm leading-relaxed text-zinc-400">{t("home.empty")}</p>
           </div>
         )}
       </div>
     </div>
+    </CardTellingContext.Provider>
   );
 }

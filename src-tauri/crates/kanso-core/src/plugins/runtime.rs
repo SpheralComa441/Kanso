@@ -62,7 +62,7 @@ pub struct HookCall<'a> {
     /// Interface language code (`it`, `en`, ...).
     pub locale: &'a str,
     pub app_version: &'a str,
-    /// `gameDetails`, or `commands.<id>`.
+    /// `gameDetails`, `home`, or `commands.<id>`.
     pub hook: &'a str,
     pub args: &'a Value,
 }
@@ -399,6 +399,69 @@ pub(crate) mod tests {
         assert_eq!(missing.unwrap_err().message, "the plugin does not implement commands.other");
         let no_register = fixture.run("var x = 1;", "gameDetails", json!({}), FakeTransport::offline());
         assert!(no_register.unwrap_err().message.contains("never called kanso.plugin"));
+    }
+
+    #[test]
+    fn the_home_hook_gets_the_library_and_may_have_nothing_to_show() {
+        let fixture = Fixture::new();
+        let code = r#"
+            kanso.plugin({
+              async home(context) {
+                if (context.games.length === 0) return null;
+                return { title: kanso.t({ en: "Today", it: "Oggi" }), games: [{ id: context.games[0].id, note: String(context.now) }] };
+              },
+            });
+        "#;
+        let output = fixture
+            .run(code, "home", json!({"games": [{"id": "steam:1"}], "now": 42}), FakeTransport::offline())
+            .expect("runs");
+        assert_eq!(output.value, json!({"title": "Oggi", "games": [{"id": "steam:1", "note": "42"}]}));
+
+        // `null` and `undefined` both arrive as "nothing"
+        let nothing = fixture.run(code, "home", json!({"games": [], "now": 42}), FakeTransport::offline());
+        assert_eq!(nothing.expect("runs").value, Value::Null);
+        let undefined = fixture.run("kanso.plugin({ home() {} });", "home", json!({}), FakeTransport::offline());
+        assert_eq!(undefined.expect("runs").value, Value::Null);
+
+        // A plugin that says it provides a part of Home and does not: told so by name
+        let missing = fixture.run("kanso.plugin({ gameDetails: () => null });", "home", json!({}), FakeTransport::offline());
+        assert_eq!(missing.unwrap_err().message, "the plugin does not implement home");
+    }
+
+    #[test]
+    fn the_example_in_the_plugin_guide_runs_as_written() {
+        // The guide's first block of JavaScript is what authors copy: its `home` and its
+        // command must run in the real sandbox and return what the guide says
+        // On a Windows checkout the guide's lines may end in CR LF
+        let guide = include_str!("../../../../../docs/PLUGINS.md").replace("\r\n", "\n");
+        let start = guide.find("```js\n").expect("the guide has an example") + "```js\n".len();
+        let code = &guide[start..start + guide[start..].find("\n```").expect("the example ends")];
+        let fixture = Fixture::new();
+        let library = json!({
+            "games": [
+                {"id": "steam:1", "title": "One", "status": "backlog", "genres": ["GDR"]},
+                {"id": "gog:2", "title": "Two", "status": "playing", "genres": []},
+                {"id": "epic:3", "title": "Three", "status": "backlog", "genres": []},
+            ],
+            "now": 42,
+        });
+
+        let home = fixture.run(code, "home", library.clone(), FakeTransport::offline()).expect("home runs");
+        assert_eq!(
+            home.value,
+            json!({
+                "title": "Ti aspettano",
+                "gamesStyle": "cards",
+                // A game without genres simply has no note
+                "games": [{"id": "steam:1", "note": "GDR"}, {"id": "epic:3"}],
+            })
+        );
+        let nothing = fixture.run(code, "home", json!({"games": [], "now": 42}), FakeTransport::offline());
+        assert_eq!(nothing.expect("home runs").value, Value::Null, "no backlog: nothing on Home");
+
+        let pick = fixture.run(code, "commands.pick", library, FakeTransport::offline()).expect("the command runs");
+        assert_eq!(pick.value["title"], "Try this");
+        assert_eq!(pick.value["games"][0]["note"], "Why not?");
     }
 
     #[test]

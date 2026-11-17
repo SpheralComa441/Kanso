@@ -1,0 +1,107 @@
+{
+  "kansoTheme": 3,
+  "name": "Arcade Rows",
+  "author": "Kanso",
+  "description": "Arcade with its own arrangement: emulators after Home, Store and News as rows.",
+  "colorScheme": "dark",
+  "colors": {
+    "background": "#0b0b1a",
+    "surface": "#13132b",
+    "elevated": "#1d1d40",
+    "border": "#2c2c5e",
+    "borderStrong": "#5a5ab0",
+    "text": "#f5f3ff",
+    "textSecondary": "#d6d3f5",
+    "textMuted": "#a29fd0",
+    "textFaint": "#7673a8",
+    "accent": "#ff3d9a",
+    "accentHover": "#ff6fb5",
+    "onAccent": "#14021f",
+    "accentSecondary": "#35e8ff"
+  },
+  "fontFamily": "Tektur",
+  "typography": {
+    "headingFont": "Pixelify Sans",
+    "headingWeight": 600,
+    "headingUppercase": true,
+    "headingSpacing": 0.06,
+    "scale": 1,
+    "labelFont": null,
+    "labelUppercase": true
+  },
+  "layout": {
+    "cardMinWidth": 180,
+    "cardRadius": 14,
+    "sidebarWidth": 216,
+    "gridGap": 18,
+    "headerHeight": 56,
+    "contentPadding": 24,
+    "sidebarSide": "left",
+    "dividers": true,
+    "scrollbars": "auto",
+    "windowControls": "bars",
+    "navHeadings": "accent",
+    "navPages": "secondary"
+  },
+  "cards": {
+    "shape": "cut",
+    "aspect": "2:3",
+    "borderWidth": 2,
+    "shadow": "none",
+    "hover": "glow",
+    "caption": "hover"
+  },
+  "shapes": {
+    "controlRadius": 2,
+    "panelRadius": 4,
+    "chipRadius": 0,
+    "panelShape": "rounded"
+  },
+  "icons": {
+    "strokeWidth": 2.25,
+    "corners": "sharp",
+    "scale": 1.05,
+    "fill": 0
+  },
+  "effects": {
+    "backgroundGradient": [],
+    "backgroundAngle": 180
+  },
+  "detail": {
+    "layout": "bento",
+    "backdrop": "art",
+    "backdropBlur": 18,
+    "backdropDim": 0.7,
+    "tiles": "filled",
+    "tileGap": 12,
+    "cards": "rail",
+    "keyTitles": "accent",
+    "cardTitles": "secondary"
+  },
+  "motion": {
+    "level": "lively",
+    "sheet": "zoom",
+    "view": "slide",
+    "stagger": true
+  },
+  "home": {
+    "sections": ["resume", "upNext", "mostPlayed", "recommendations", "deals", "plugins"],
+    "effects": "seasonal"
+  },
+  "nav": {
+    "pages": ["home", "emulators", "store", "news", "stats"],
+    "groups": ["library", "platform", "status", "genres", "tags"],
+    "pagesPosition": "top"
+  },
+  "store": {
+    "tabs": ["all", "picks", "steam", "epic", "gog", "others", "liked"],
+    "layout": "list",
+    "figures": false
+  },
+  "news": {
+    "layout": "list",
+    "pictures": true,
+    "summaries": true
+  },
+  "fontFiles": []
+}

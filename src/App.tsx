@@ -4,6 +4,7 @@ import { ApiKeyBanner } from "./components/ApiKeyBanner";
 import { CategoryGrid, type CategoryKind } from "./components/CategoryGrid";
 import { HomeView } from "./components/HomeView";
 import { ambienceFor, isSouthernTimeZone, type WeatherNow } from "./lib/ambience";
+import { useHomePlugins } from "./lib/useHomePlugins";
 import { EmulatorsView } from "./components/EmulatorsView";
 import { EditGameModal } from "./components/EditGameModal";
 import { GameDetail } from "./components/GameDetail";
@@ -79,7 +80,13 @@ import {
 import { isEmulated, platformLabel, uninstallMode } from "./lib/platforms";
 import { CARD_INFO_DEFAULT } from "./lib/cardInfo";
 import { gamesToUpdate, loadDlssStatus, useDlssStatus } from "./lib/dlss";
-import { DEFAULT_ACCESSIBILITY, applyTheme, resolveTheme } from "./lib/themes";
+import {
+  DEFAULT_ACCESSIBILITY,
+  applyTheme,
+  offeredGroups,
+  offeredPages,
+  resolveTheme,
+} from "./lib/themes";
 import type {
   AccessibilityConfig,
   AnimationsChoice,
@@ -222,10 +229,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [searchQuery, setSearchQuery] = useState("");
   /** The emulators of this PC, as the last scan found them. */
   const [emulators, setEmulators] = useState<EmulatorInfo[]>([]);
+  /** They were read once: until then nobody knows whether this PC has any. */
+  const [emulatorsRead, setEmulatorsRead] = useState(false);
   /** The emulator whose page is open in the Emulators section. */
   const [openEmulatorId, setOpenEmulatorId] = useState<string | null>(null);
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY_FILTERS);
-  const [mainView, setMainView] = useState<MainView>(() =>
+  /** The page the user chose; what is on screen is `mainView`, further down. */
+  const [chosenView, setMainView] = useState<MainView>(() =>
     readUiPreference(
       MAIN_VIEW_PREF_KEY,
       ["home", "store", "news", "library", "stats", "emulators", "genres", "tags"],
@@ -245,6 +255,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [launchingId, setLaunchingId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [userThemes, setUserThemes] = useState<Theme[]>([]);
+  /** The installed themes were read once: until then the saved theme may not be the one on screen. */
+  const [themesLoaded, setThemesLoaded] = useState(false);
   /** Theme shown but not saved: a selection in Settings or a draft in the editor. */
   const [previewTheme, setPreviewTheme] = useState<Theme | null>(null);
   const [themeEditorBase, setThemeEditorBase] = useState<Theme | null>(null);
@@ -254,6 +266,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   /** The level of animations being tried in Settings, before it is saved. */
   const [previewAnimations, setPreviewAnimations] = useState<AnimationsChoice | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  /** The list of plugins was read once: until then nobody knows which ones there are. */
+  const [pluginsListed, setPluginsListed] = useState(false);
   const [pluginWarnings, setPluginWarnings] = useState<string[]>([]);
   /** Short labels plugins have for the game cards, by game id. */
   const [badges, setBadges] = useState<Record<string, BadgeEntry[]>>({});
@@ -273,27 +287,64 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   }, []);
 
   useEffect(() => {
-    void reloadThemes();
+    void reloadThemes().finally(() => setThemesLoaded(true));
   }, [reloadThemes]);
 
   const savedTheme = useMemo(
     () => resolveTheme(config.themeId, userThemes),
     [config.themeId, userThemes]
   );
+  /** The theme on screen: the saved one, or the one being tried in Settings or the editor. */
+  const activeTheme = previewTheme ?? savedTheme;
   useEffect(() => {
     applyTheme(
-      previewTheme ?? savedTheme,
+      activeTheme,
       previewAccessibility ?? config.accessibility,
       previewAnimations ?? config.animations
     );
   }, [
-    previewTheme,
-    savedTheme,
+    activeTheme,
     previewAccessibility,
     config.accessibility,
     previewAnimations,
     config.animations,
   ]);
+
+  // What the side panel offers besides the library: the pages and groups the theme lists,
+  // less what the user hid in Settings. Entries and links are drawn from this alone
+  const hiddenSections = config.hiddenSections;
+  // The Emulators page is the only one that lists the games emulators run: while there are
+  // emulators, or such games, it stays offered whatever the theme lists. Until the first
+  // scan has said, the page is kept for who was left on it, and not shown to anyone else
+  const hasEmulation = emulatorsRead
+    ? emulators.length > 0 || report.games.some(isEmulated)
+    : chosenView === "emulators";
+  const navPages = useMemo(
+    () => offeredPages(activeTheme.nav, hiddenSections, hasEmulation),
+    [activeTheme.nav, hiddenSections, hasEmulation]
+  );
+  const navGroups = useMemo(
+    () => offeredGroups(activeTheme.nav, hiddenSections),
+    [activeTheme.nav, hiddenSections]
+  );
+  // A page the user hid, or one the theme does not list, is not a place to be left on:
+  // the library takes over. The same goes for the tiles of genres and tags
+  const viewOffered =
+    chosenView === "library" ||
+    (chosenView === "genres" || chosenView === "tags"
+      ? navGroups.includes(chosenView)
+      : navPages.includes(chosenView));
+  /** The page on screen: the one the user chose, while the panel offers it. */
+  const mainView: MainView = viewOffered ? chosenView : "library";
+  // The library becomes the place the user is in, and where Kanso opens next time. Not while
+  // a theme is only being tried in Settings or in the editor: leaving it brings the page back
+  const tryingTheme = previewTheme !== null;
+  useEffect(() => {
+    if (!viewOffered && !tryingTheme) {
+      setMainView("library");
+      writeUiPreference(MAIN_VIEW_PREF_KEY, "library");
+    }
+  }, [viewOffered, tryingTheme]);
 
   /* ---------------------------------------------------------------- plugins */
 
@@ -312,6 +363,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       setPluginWarnings(listed.warnings);
     } catch {
       setPlugins([]);
+    } finally {
+      // Before the labels, which take longer: Home waits for this to say it has nothing
+      setPluginsListed(true);
     }
     await reloadBadges();
   }, [reloadBadges]);
@@ -443,7 +497,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         const res = await scanGames(userRequested);
         setReport(res);
         // The scan is what finds the emulators kept in the user's games folders
-        void listEmulators().then(setEmulators).catch(() => {});
+        void listEmulators()
+          .then(setEmulators)
+          .catch(() => {})
+          .finally(() => setEmulatorsRead(true));
         void runMetadataSync(userRequested);
       } catch (err) {
         setStatusMessage(typeof err === "string" ? err : t("app.scanError"));
@@ -612,15 +669,6 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     writeUiPreference(MAIN_VIEW_PREF_KEY, view);
   };
 
-  // A page the user hid is not a place to be left on: the library takes over
-  const hiddenSections = config.hiddenSections;
-  useEffect(() => {
-    if ((mainView === "home" || mainView === "store" || mainView === "news" || mainView === "tags") && hiddenSections.includes(mainView)) {
-      setMainView("library");
-      writeUiPreference(MAIN_VIEW_PREF_KEY, "library");
-    }
-  }, [hiddenSections, mainView]);
-
   const changeFilters = (next: LibraryFilters) => {
     setFilters(next);
     showView("library");
@@ -631,7 +679,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     // The search box searches the library, wherever it is typed from; on an emulator's
     // page it searches that emulator's games
     const onEmulatorPage = mainView === "emulators" && openEmulatorId !== null;
-    if (value.trim() && mainView !== "library" && !onEmulatorPage) showView("library");
+    // The page the user chose is what counts, not the one on screen: while a theme that
+    // does not offer it is being tried, the library is already shown in its place, and a
+    // search typed there must leave the user on the library
+    if (value.trim() && chosenView !== "library" && !onEmulatorPage) showView("library");
   };
 
   const toggleSidebar = () => {
@@ -691,7 +742,6 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const emulatedGames = useMemo(() => allGames.filter(isEmulated), [allGames]);
   // Home is about every game the user plays, whatever runs it
   const homeGames = useMemo(() => allGames.filter((game) => !game.isHidden), [allGames]);
-  const activeTheme = previewTheme ?? savedTheme;
   // The background of Home moves only where things are allowed to move at all
   const animationsChoice = previewAnimations ?? config.animations;
   const motionOff =
@@ -768,7 +818,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         setStatusMessage(typeof err === "string" ? err : t("settings.saveError"));
       });
   };
-  const storeHidden = config.hiddenSections.includes("store");
+  // The way from Home to the Store is there only while the Store has its page
+  const storeOffered = navPages.includes("store");
   /** One Store view or another: the page, or what the Home page shows of it. */
   const storeView = (compact?: "picks" | "top") => (
     <StoreView
@@ -778,8 +829,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       onChangeStore={changeStore}
       onOpenSettings={() => openSettings("store")}
       onError={setStatusMessage}
+      theme={activeTheme.store}
       compact={compact}
-      onOpenStore={storeHidden ? undefined : () => showView("store")}
+      onOpenStore={storeOffered ? () => showView("store") : undefined}
     />
   );
   // What genres, tags, platforms and statuses are counted on: everything, what is on disk
@@ -825,6 +877,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const detailPlugins = useMemo(
     () => plugins.filter((plugin) => plugin.enabled && plugin.gameDetails),
     [plugins]
+  );
+  // What the plugins add to Home: asked only while Home is the page on screen and its theme
+  // has a place for them (once the installed themes are read: before that the theme on screen
+  // may not be the user's), never at startup on another page
+  const homePluginParts = useHomePlugins(
+    plugins,
+    config.home.hidden,
+    settingsLoaded && themesLoaded && mainView === "home" && activeTheme.home.sections.includes("plugins")
   );
   const pluginCommands = useMemo<PluginCommandEntry[]>(
     () =>
@@ -990,6 +1050,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           counts={counts}
           genres={genres}
           tags={tags}
+          nav={activeTheme.nav}
+          pages={navPages}
           hidden={config.hiddenSections}
         />
 
@@ -1022,12 +1084,17 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
               onOpenSettings={() => openSettings("home")}
               deals={storeView("top")}
               recommendations={storeView("picks")}
+              pluginParts={homePluginParts}
+              pluginsListed={pluginsListed}
+              badges={badges}
+              cardInfo={config.cardInfo}
             />
           ) : mainView === "store" ? (
             storeView()
           ) : mainView === "news" ? (
             // Not before the settings are in: the sources to ask are theirs to say
             settingsLoaded && <NewsView
+              theme={activeTheme.news}
               sourcesKey={`${lang}|${config.newsSources === null ? "default" : config.newsSources.join(",")}|${config.newsFeeds.map((feed) => `${feed.url} ${feed.topic} ${feed.name}`).join(",")}`}
               onOpenSettings={() => openSettings("news")}
               onError={setStatusMessage}
@@ -1085,7 +1152,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
               {isNarrowed && games.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
                   {/* The way back to the tiles the genre or tag was picked from */}
-                  {(activeGenre || activeTag) && (
+                  {(activeGenre ? navGroups.includes("genres") : activeTag !== null && navGroups.includes("tags")) && (
                     <button
                       id="back-to-overview"
                       type="button"
@@ -1190,8 +1257,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
       <GameDetail
         game={detailGame}
-        layout={(previewTheme ?? savedTheme).detail.layout}
-        cards={(previewTheme ?? savedTheme).detail.cards}
+        layout={activeTheme.detail.layout}
+        cards={activeTheme.detail.cards}
         emulatorName={
           detailGame?.platform === "emulator"
             ? (emulators.find((emulator) => emulator.id === detailGame.platformAppId)?.name ?? null)

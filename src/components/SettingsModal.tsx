@@ -42,6 +42,7 @@ import {
   pickCustomFolder,
   searchWeatherPlaces,
   DEAL_STORES,
+  homePluginPart,
 } from "../lib/backend";
 import {
   BUILTIN_THEMES,
@@ -891,6 +892,43 @@ export function SettingsModal({
                     />
                   </div>
                 ))}
+                {/* One more for each plugin switched on (here, saved or not yet) that adds a part */}
+                {plugins
+                  .filter((plugin) => plugin.home && (pluginStates[plugin.id]?.enabled ?? plugin.enabled))
+                  .map((plugin) => {
+                    const part = homePluginPart(plugin.id);
+                    return (
+                      <div
+                        key={part}
+                        data-home-plugin={plugin.id}
+                        className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2"
+                      >
+                        <div>
+                          <label
+                            htmlFor={`home-section-plugin-${plugin.id}`}
+                            className="block text-xs font-medium text-zinc-200"
+                          >
+                            {plugin.name}
+                          </label>
+                          <p className="text-2xs text-zinc-500">{t("settings.homePluginHelp")}</p>
+                        </div>
+                        <input
+                          id={`home-section-plugin-${plugin.id}`}
+                          type="checkbox"
+                          checked={!home.hidden.includes(part)}
+                          onChange={(e) =>
+                            setHome((current) => ({
+                              ...current,
+                              hidden: e.target.checked
+                                ? current.hidden.filter((entry) => entry !== part)
+                                : [...current.hidden, part],
+                            }))
+                          }
+                          className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                        />
+                      </div>
+                    );
+                  })}
                 <p className="text-2xs leading-relaxed text-zinc-500">{t("settings.homeSectionsHelp")}</p>
               </section>
 
@@ -1409,6 +1447,14 @@ export function SettingsModal({
                   states={pluginStates}
                   onStatesChange={setPluginStates}
                   onInstalledChanged={onPluginsChanged}
+                  // A removed plugin takes its part of Home with it, here as in what is saved:
+                  // left in this dialog's copy, Save would write the entry back
+                  onRemoved={(id) =>
+                    setHome((current) => ({
+                      ...current,
+                      hidden: current.hidden.filter((entry) => entry !== homePluginPart(id)),
+                    }))
+                  }
                 />
               </section>
             </Panel>

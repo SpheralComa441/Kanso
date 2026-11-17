@@ -68,8 +68,8 @@ export interface DetectedGame {
   updatedAt: number;
 }
 
-/** A part of the Home page. */
-export type HomeSection = "resume" | "upNext" | "mostPlayed" | "recommendations" | "deals";
+/** A part of the Home page; `plugins` is where what the plugins add goes. */
+export type HomeSection = "resume" | "upNext" | "mostPlayed" | "recommendations" | "deals" | "plugins";
 
 /** A place the user named for the weather on the Home page, kept coarse (about a kilometre). */
 export interface WeatherPlace {
@@ -87,10 +87,13 @@ export interface PlaceMatch {
   longitude: number;
 }
 
+/** The part of Home a plugin adds, as the user's settings name it. */
+export type HomePluginPart = `plugin:${string}`;
+
 /** How the user wants the Home page. */
 export interface HomeConfig {
-  /** Parts left out. */
-  hidden: HomeSection[];
+  /** Parts left out: Kanso's own by name, and the one each plugin adds by the plugin's id. */
+  hidden: (HomeSection | HomePluginPart)[];
   /** The moving background of the season and of the holidays. */
   effects: boolean;
   /** Let the background follow the weather at `place` (asks Open-Meteo; off until chosen). */
@@ -326,6 +329,8 @@ export interface PluginInfo {
   enabled: boolean;
   showBadge: boolean;
   gameDetails: boolean;
+  /** Adds a part to the Home page. */
+  home: boolean;
   badge: boolean;
   background: boolean;
   commands: { id: string; title: string; description: string }[];
@@ -367,6 +372,17 @@ export interface GameDataAnswer {
   fetchedAt: number;
 }
 
+/** What a plugin adds to the Home page; an empty view is "nothing for today". */
+export interface HomeDataAnswer {
+  pluginId: string;
+  pluginName: string;
+  data: PluginView | null;
+  error: string | null;
+  /** The plugin's last log lines when it failed, for its author. */
+  logs: string[];
+  fetchedAt: number;
+}
+
 export interface BadgeEntry {
   pluginId: string;
   pluginName: string;
@@ -376,7 +392,7 @@ export interface BadgeEntry {
   tooltip: string | null;
 }
 
-/** What a plugin command shows in its dialog. */
+/** What a plugin command shows in its dialog, or a plugin's `home` in its part of the Home page. */
 export interface PluginView {
   title: string | null;
   sections: PluginSection[];
@@ -515,6 +531,45 @@ export interface ThemeHome {
   effects: "seasonal" | "none";
 }
 
+/** A page of the side panel beside the library. */
+export type NavPage = "home" | "store" | "news" | "stats" | "emulators";
+
+/** A group of entries of the side panel. */
+export type NavGroup = "library" | "status" | "platform" | "genres" | "tags";
+
+/** The side panel as a theme arranges it. */
+export interface ThemeNav {
+  /** The pages listed, in order; a page not named is not offered. */
+  pages: NavPage[];
+  /** The groups listed, in order; one not named is not shown. The library is always there. */
+  groups: NavGroup[];
+  /** The pages above the groups, or below them. */
+  pagesPosition: "top" | "bottom";
+}
+
+/** A tab of the Store page. */
+export type StoreTab = "all" | "picks" | "liked" | DealStore;
+
+/** The Store page as a theme arranges it. */
+export interface ThemeStore {
+  /** The tabs offered, in order; the page opens on the first. */
+  tabs: StoreTab[];
+  /** Tiles with the picture on top, or compact rows. */
+  layout: "grid" | "list";
+  /** The row of figures at the top of the tab with every discount. */
+  figures: boolean;
+}
+
+/** The News page as a theme arranges it. */
+export interface ThemeNews {
+  /** The first item large and the others in a grid; all the same size; or rows. */
+  layout: "magazine" | "grid" | "list";
+  /** Items show their picture. */
+  pictures: boolean;
+  /** Items show the summary under the title. */
+  summaries: boolean;
+}
+
 /** How much the interface moves, and how. */
 export interface ThemeMotion {
   level: MotionLevel;
@@ -646,6 +701,9 @@ export interface Theme {
   detail: ThemeDetail;
   motion: ThemeMotion;
   home: ThemeHome;
+  nav: ThemeNav;
+  store: ThemeStore;
+  news: ThemeNews;
   fontFiles: ThemeFontFile[];
 }
 

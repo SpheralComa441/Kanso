@@ -80,6 +80,13 @@ impl Bench {
         answer.data.expect("data")
     }
 
+    /// What the plugin adds to Home, asked afresh (past the cache).
+    fn home(&self, plugin: &Plugin, config: &AppConfig, lang: Lang, games: &[DetectedGame], now: u64) -> PluginView {
+        let answer = self.engine.home_data(&self.db, plugin, config, lang, games, true, now);
+        assert_eq!(answer.error, None, "logs: {:?}", answer.logs);
+        answer.data.expect("a view")
+    }
+
     fn command(&self, plugin: &Plugin, config: &AppConfig, games: &[DetectedGame], now: u64) -> PluginView {
         self.engine
             .run_command(&self.db, plugin, config, Lang::It, "pick", games, now)
@@ -187,6 +194,215 @@ fn play_tonight_suggests_one_to_continue_one_from_the_backlog_and_one_to_redisco
     let view = bench.command(&plugin, &config, &[], now);
     assert!(view.games.is_empty());
     assert!(matches!(&view.sections[0].blocks[0], Block::Notice { .. }));
+    assert!(bench.transport.urls().is_empty());
+}
+
+#[test]
+fn daily_pick_proposes_one_game_a_day_on_home_from_the_backlog_first() {
+    let offline = || Bench::new(|request| Err(format!("this plugin has no network: {}", request.url)));
+    let plugin = plugin("daily-pick");
+    assert!(plugin.manifest.home, "it adds a part to Home");
+    assert!(!plugin.manifest.game_details && plugin.manifest.commands.is_empty(), "and nothing else");
+    assert!(plugin.manifest.hosts.is_empty(), "it works offline");
+    assert!(
+        !is_enabled(&plugin, &AppConfig::default()),
+        "nobody's Home changes until they switch it on"
+    );
+    let config = config_with("daily-pick", &[]);
+    let hour = 3_600_000_u64;
+    let day = 24 * hour;
+    // 12:00 UTC. What must fall on the same day stays within two minutes of it: in no time
+    // zone does midnight come between 12:00 and 12:02 UTC
+    let noon = 20_000 * day + 12 * hour;
+
+    let never = |id: &str, title: &str| other_game(id, title);
+    let mut old = other_game("gog:old", "Dimenticato");
+    old.playtime_minutes = Some(90);
+    old.last_played_at = Some(noon - 200 * day);
+    let mut playing = other_game("gog:playing", "In corso");
+    playing.status = Some(GameStatus::Playing);
+    playing.playtime_minutes = Some(600);
+    playing.last_played_at = Some(noon - 2 * day);
+    let mut finished = other_game("gog:finished", "Finito");
+    finished.status = Some(GameStatus::Finished);
+    let mut abandoned = other_game("gog:abandoned", "Abbandonato");
+    abandoned.status = Some(GameStatus::Abandoned);
+    let mut hidden = other_game("gog:hidden", "Nascosto");
+    hidden.is_hidden = true;
+    // Never played, but not on disk: what can be started right now comes first
+    let mut absent = other_game("gog:absent", "Non installato");
+    absent.is_installed = false;
+    let waiting = ["gog:never-a", "gog:never-b", "gog:never-c"];
+    let games = vec![
+        playing.clone(),
+        never("gog:never-a", "Mai aperto A"),
+        old.clone(),
+        finished.clone(),
+        never("gog:never-b", "Mai aperto B"),
+        abandoned.clone(),
+        hidden.clone(),
+        absent.clone(),
+        never("gog:never-c", "Mai aperto C"),
+    ];
+
+    // One game, as a whole cover, with a line that says why
+    let bench = offline();
+    let view = bench.home(&plugin, &config, Lang::It, &games, noon);
+    assert_eq!(view.title.as_deref(), Some("Il gioco di oggi"));
+    assert_eq!(view.games_style, GamesStyle::Cards);
+    assert!(view.sections.is_empty());
+    assert_eq!(view.games.len(), 1, "one game a day: {:?}", view.games);
+    let today = view.games[0].id.clone();
+    assert!(waiting.contains(&today.as_str()), "from what was never played and is on disk: {today}");
+    assert_eq!(view.games[0].note.as_deref(), Some("Dal backlog · mai giocato"));
+
+    // Asked again the same day it is the same game: with the library in another order,
+    // from a plugin that remembers nothing, and after the game was started
+    let mut reversed = games.clone();
+    reversed.reverse();
+    assert_eq!(bench.home(&plugin, &config, Lang::It, &reversed, noon + 60_000).games[0].id, today);
+    assert_eq!(offline().home(&plugin, &config, Lang::It, &reversed, noon + 60_000).games[0].id, today);
+    let mut started = games.clone();
+    for game in started.iter_mut().filter(|game| game.id == today) {
+        game.playtime_minutes = Some(45);
+        game.play_count = 1;
+        game.last_played_at = Some(noon + 60_000);
+    }
+    let view = bench.home(&plugin, &config, Lang::It, &started, noon + 2 * 60_000);
+    assert_eq!(view.games[0].id, today, "starting it does not make another take its place");
+    assert_eq!(view.games[0].note.as_deref(), Some("Dalla tua libreria · 45 min di gioco"));
+
+    // The days after: still from the games that wait, and never the same two days running
+    let mut previous = today;
+    for n in 1..=8 {
+        let view = bench.home(&plugin, &config, Lang::It, &games, noon + n * day);
+        let pick = view.games[0].id.clone();
+        assert!(waiting.contains(&pick.as_str()), "day {n}: {pick}");
+        assert_ne!(pick, previous, "day {n} repeats the day before");
+        previous = pick;
+    }
+    // Over many days every game that waits has its turn, none far more often than another
+    let turns = offline();
+    let mut times = std::collections::BTreeMap::new();
+    for n in 0..90 {
+        let view = turns.home(&plugin, &config, Lang::It, &games, noon + n * day);
+        *times.entry(view.games[0].id.clone()).or_insert(0_u32) += 1;
+    }
+    assert_eq!(times.len(), waiting.len(), "{times:?}");
+    assert!(times.values().all(|count| (20..=40).contains(count)), "no game is passed over: {times:?}");
+
+    // One game alone in its group is not proposed every day while the library has others:
+    // the next group has its day, then the first one again
+    let lone = offline();
+    let few = [playing.clone(), never("gog:never-a", "Mai aperto A"), old.clone()];
+    let mut days = Vec::new();
+    for n in 0..6 {
+        days.push(lone.home(&plugin, &config, Lang::It, &few, noon + n * day).games[0].id.clone());
+    }
+    assert!(days.windows(2).all(|pair| pair[0] != pair[1]), "{days:?}");
+    assert_eq!(days.iter().filter(|id| *id == "gog:never-a").count(), 3, "every other day: {days:?}");
+    assert!(days.iter().all(|id| id == "gog:never-a" || id == "gog:old"), "the long untouched one in between: {days:?}");
+    // The group that gets the days in between proposes all of its games, not the same half
+    // of them for weeks: the date's number grows by one a day, the group is used every two
+    let mut old_b = old.clone();
+    old_b.id = "gog:old-b".to_string();
+    old_b.title = "Dimenticato B".to_string();
+    let shared = [never("gog:never-a", "Mai aperto A"), old.clone(), old_b];
+    let between = offline();
+    let mut days = Vec::new();
+    for n in 0..60 {
+        days.push(between.home(&plugin, &config, Lang::It, &shared, noon + n * day).games[0].id.clone());
+    }
+    assert!(days.windows(2).all(|pair| pair[0] != pair[1]), "{days:?}");
+    assert_eq!(days.iter().filter(|id| *id == "gog:never-a").count(), 30, "every other day: {days:?}");
+    for id in ["gog:old", "gog:old-b"] {
+        let count = days.iter().filter(|day| *day == id).count();
+        assert!((10..=20).contains(&count), "{id} has its share of the days in between: {count} in {days:?}");
+        let longest = days.split(|day| day == id).map(<[String]>::len).max().unwrap_or(0);
+        assert!(longest <= 12, "{id} is not left out for weeks: {longest} days in {days:?}");
+    }
+    // With a single game to propose, that one is the pick every day
+    let single = offline();
+    for n in 0..3 {
+        assert_eq!(single.home(&plugin, &config, Lang::It, &few[1..2], noon + n * day).games[0].id, "gog:never-a");
+    }
+
+    // With nothing waiting on disk: what was left untouched for months, then anything that
+    // is installed, then what is not; finished, abandoned and hidden games never
+    let pick = |games: &[DetectedGame], lang: Lang| {
+        let view = offline().home(&plugin, &config, lang, games, noon);
+        view.games.first().map(|pick| (pick.id.clone(), pick.note.clone().unwrap_or_default()))
+    };
+    let leftovers = [playing.clone(), old, finished.clone(), abandoned.clone(), hidden.clone(), absent.clone()];
+    assert_eq!(
+        pick(&leftovers, Lang::It),
+        Some(("gog:old".to_string(), "Riscopri · non lo apri da 6 mesi".to_string()))
+    );
+    assert_eq!(
+        pick(&leftovers[..1], Lang::It),
+        Some(("gog:playing".to_string(), "Dalla tua libreria · 10 h di gioco".to_string()))
+    );
+    assert_eq!(pick(&[playing, absent.clone()], Lang::It).map(|(id, _)| id).as_deref(), Some("gog:playing"));
+    assert_eq!(
+        pick(&leftovers[2..], Lang::It),
+        Some(("gog:absent".to_string(), "Dal backlog · mai giocato".to_string()))
+    );
+    // Marked "to play" and already tried: from the backlog, without saying it was never played
+    let mut marked = other_game("gog:marked", "Da giocare");
+    marked.status = Some(GameStatus::Backlog);
+    marked.playtime_minutes = Some(20);
+    assert_eq!(pick(&[marked], Lang::It), Some(("gog:marked".to_string(), "Dal backlog".to_string())));
+    // Marked as being played, with no hours known to Kanso: not from the backlog, and not
+    // ahead of a game that really waits
+    let mut elsewhere = other_game("gog:elsewhere", "Giocato altrove");
+    elsewhere.status = Some(GameStatus::Playing);
+    assert_eq!(
+        pick(std::slice::from_ref(&elsewhere), Lang::It),
+        Some(("gog:elsewhere".to_string(), "Dalla tua libreria".to_string()))
+    );
+    assert_eq!(
+        pick(&[elsewhere, never("gog:never-z", "Mai aperto Z")], Lang::It).map(|(id, _)| id).as_deref(),
+        Some("gog:never-z")
+    );
+
+    // Nothing to propose: no part on Home, rather than an empty one
+    let nothing = offline();
+    assert!(nothing.home(&plugin, &config, Lang::It, &[finished, abandoned, hidden], noon).is_empty());
+    assert!(nothing.home(&plugin, &config, Lang::It, &[], noon).is_empty());
+
+    // In the interface's language
+    let one = [absent];
+    for (lang, title, note) in [
+        (Lang::En, "Today's pick", "From your backlog · never played"),
+        (Lang::Es, "El juego de hoy", "De tus pendientes · nunca jugado"),
+        (Lang::Ru, "Игра дня", "Из отложенных · ещё не запускалась"),
+    ] {
+        let view = offline().home(&plugin, &config, lang, &one, noon);
+        assert_eq!(view.title.as_deref(), Some(title));
+        assert_eq!(view.games[0].note.as_deref(), Some(note));
+    }
+    // The units of the time played are words of the line as well
+    for (minutes, lang, note) in [
+        (45, Lang::Ru, "Из вашей библиотеки · 45 мин в игре"),
+        (600, Lang::Ru, "Из вашей библиотеки · 10 ч в игре"),
+        (45, Lang::En, "From your library · 45 min played"),
+        (600, Lang::Es, "De tu biblioteca · 10 h de juego"),
+    ] {
+        let mut recent = other_game("gog:recent", "Di ieri");
+        recent.playtime_minutes = Some(minutes);
+        recent.last_played_at = Some(noon - day);
+        let view = offline().home(&plugin, &config, lang, &[recent], noon);
+        assert_eq!(view.games[0].note.as_deref(), Some(note));
+    }
+
+    // Kept for an hour, so that the pick changes soon after midnight
+    assert_eq!(plugin.manifest.cache_hours, 1);
+    let cached = offline();
+    let ask = |now: u64| cached.engine.home_data(&cached.db, &plugin, &config, Lang::It, &games, false, now);
+    assert_eq!(ask(noon).fetched_at, noon);
+    assert_eq!(ask(noon + 59 * 60_000).fetched_at, noon, "within the hour: from the cache");
+    assert_eq!(ask(noon + hour).fetched_at, noon + hour, "then asked again");
+
     assert!(bench.transport.urls().is_empty());
 }
 

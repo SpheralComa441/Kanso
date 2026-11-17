@@ -1,6 +1,6 @@
 use crate::i18n::{Lang, T};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -70,6 +70,9 @@ pub const HIDEABLE_SECTIONS: [&str; 4] = ["home", "store", "news", "tags"];
 pub const HOME_SECTIONS: [&str; 5] = ["resume", "upNext", "mostPlayed", "recommendations", "deals"];
 /// Most games lined up to play next.
 pub const MAX_UP_NEXT: usize = 5;
+/// What a part of Home added by a plugin is called in [`HomeConfig::hidden`]: this, then the
+/// plugin's id.
+const HOME_PLUGIN_PREFIX: &str = "plugin:";
 
 /// A place the user named for the weather on the Home page. Kept coarse on purpose: the
 /// coordinates are rounded to two decimals (about a kilometre), which is all a forecast
@@ -89,7 +92,8 @@ impl Eq for WeatherPlace {}
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct HomeConfig {
-    /// Parts left out, from [`HOME_SECTIONS`].
+    /// Parts left out: names from [`HOME_SECTIONS`], and `plugin:<id>` for the part a plugin
+    /// adds.
     pub hidden: Vec<String>,
     /// The moving background of the season and of the holidays.
     pub effects: bool,
@@ -110,6 +114,19 @@ impl Default for HomeConfig {
 }
 
 impl HomeConfig {
+    /// Whether the user left out the part of Home that the plugin `plugin_id` adds.
+    pub fn hides_plugin(&self, plugin_id: &str) -> bool {
+        self.hidden
+            .iter()
+            .any(|item| item.strip_prefix(HOME_PLUGIN_PREFIX) == Some(plugin_id))
+    }
+
+    /// Forgets that the part of the plugin `plugin_id` was left out (the plugin was removed).
+    pub fn forget_plugin(&mut self, plugin_id: &str) {
+        self.hidden
+            .retain(|item| item.strip_prefix(HOME_PLUGIN_PREFIX) != Some(plugin_id));
+    }
+
     fn sanitized(self) -> Self {
         let place = self.place.and_then(|place| {
             let name: String = place.name.trim().chars().filter(|c| !c.is_control()).take(80).collect();
@@ -123,12 +140,26 @@ impl HomeConfig {
                 longitude: (place.longitude * 100.0).round() / 100.0,
             })
         });
+        // The parts of plugins: well-formed ids only, each once. Whether such a plugin is
+        // installed is not checked: an entry for one that is not hides nothing.
+        let plugin_parts: BTreeSet<&str> = self
+            .hidden
+            .iter()
+            .filter_map(|item| item.trim().strip_prefix(HOME_PLUGIN_PREFIX))
+            .filter(|id| is_valid_plugin_id(id))
+            .collect();
         let mut seen = HashSet::new();
         Self {
             hidden: HOME_SECTIONS
                 .iter()
                 .filter(|choice| self.hidden.iter().any(|item| item.trim() == **choice))
                 .map(|choice| choice.to_string())
+                .chain(
+                    plugin_parts
+                        .into_iter()
+                        .take(MAX_PLUGIN_STATES)
+                        .map(|id| format!("{HOME_PLUGIN_PREFIX}{id}")),
+                )
                 .collect(),
             effects: self.effects,
             // Without a place there is no weather to ask about
@@ -645,7 +676,12 @@ mod tests {
             ],
             hidden_sections: vec![" tags ".to_string(), "library".to_string(), "home".to_string(), "tags".to_string()],
             home: HomeConfig {
-                hidden: vec!["deals".to_string(), "everything".to_string(), "resume".to_string()],
+                hidden: [
+                    "plugin:steam-news", "deals", "everything", "plugin:../../etc", " plugin:daily-pick ", "resume",
+                    "plugin:", "plugin:Daily Pick", "plugins", "plugin:steam-news", "PLUGIN:x1",
+                ]
+                .map(str::to_string)
+                .to_vec(),
                 effects: false,
                 weather: true,
                 place: Some(WeatherPlace { name: "  Torino\n ".to_string(), latitude: 45.070_312, longitude: 7.686_856 }),
@@ -693,7 +729,16 @@ mod tests {
         assert!(!saved.track_playtime);
         assert_eq!(saved.card_info, ["genres", "badges"], "known names, once, in Kanso's order");
         assert_eq!(saved.hidden_sections, ["home", "tags"], "only what can be hidden, once each");
-        assert_eq!(saved.home.hidden, ["resume", "deals"], "known parts of Home, in Kanso's order");
+        assert_eq!(
+            saved.home.hidden,
+            ["resume", "deals", "plugin:daily-pick", "plugin:steam-news"],
+            "known parts of Home, in Kanso's order, then the parts of plugins by id, each once"
+        );
+        assert!(saved.home.hides_plugin("daily-pick") && saved.home.hides_plugin("steam-news"));
+        assert!(!saved.home.hides_plugin("play-tonight") && !saved.home.hides_plugin("deals"));
+        let mut forgotten = saved.home.clone();
+        forgotten.forget_plugin("steam-news");
+        assert_eq!(forgotten.hidden, ["resume", "deals", "plugin:daily-pick"]);
         assert!(!saved.home.effects && saved.home.weather);
         assert_eq!(
             saved.home.place,

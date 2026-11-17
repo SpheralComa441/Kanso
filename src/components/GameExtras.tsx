@@ -299,7 +299,7 @@ export function PluginRefreshButton({ panel }: { panel: PluginPanelData }) {
  * card around it already carries it.
  */
 export function PluginPanelBody({ panel, titled = false }: { panel: PluginPanelData; titled?: boolean }) {
-  const { t, shortDate } = useI18n();
+  const { t } = useI18n();
   const { plugin, state } = panel;
 
   if (state.phase === "loading") {
@@ -330,34 +330,62 @@ export function PluginPanelBody({ panel, titled = false }: { panel: PluginPanelD
       ))}
 
       {answer.error && (
-        <div className="space-y-1 text-2xs" data-plugin-error={plugin.id}>
-          <p className="text-zinc-500">
-            <span className="select-text">
-              {sections.length > 0
-                ? `${plugin.name} — ${t("plugins.stale", { date: shortDate(answer.fetchedAt) })}`
-                : `${plugin.name} — ${answer.error}`}
-            </span>{" "}
-            <button
-              type="button"
-              onClick={panel.refresh}
-              className="text-zinc-300 underline-offset-2 hover:text-zinc-100 hover:underline"
-            >
-              {t("plugins.retry")}
-            </button>
-          </p>
-          {answer.logs.length > 0 && (
-            <details className="text-zinc-600">
-              <summary className="cursor-pointer hover:text-zinc-400">
-                {t("plugins.technical")}
-              </summary>
-              <pre className="mt-1 max-h-32 select-text overflow-auto whitespace-pre-wrap rounded-md bg-oled-bg/60 p-2 font-mono text-3xs leading-relaxed text-zinc-500">
-                {(sections.length > 0 ? [answer.error, ...answer.logs] : answer.logs).join("\n")}
-              </pre>
-            </details>
-          )}
-        </div>
+        <PluginFailure
+          pluginId={plugin.id}
+          name={plugin.name}
+          error={answer.error}
+          logs={answer.logs}
+          staleSince={sections.length > 0 ? answer.fetchedAt : null}
+          onRetry={panel.refresh}
+        />
       )}
     </>
+  );
+}
+
+interface PluginFailureProps {
+  pluginId: string;
+  name: string;
+  error: string;
+  /** The plugin's last log lines, for its author. */
+  logs: string[];
+  /** When the answer still on screen is from (ms); `null` when there is nothing older to show. */
+  staleSince: number | null;
+  onRetry: () => void;
+}
+
+/**
+ * The line a plugin gets when its last attempt failed: its name, what went wrong (or, under an
+ * older answer that is still shown, since when that answer is) and "Try again", with the
+ * technical details folded away. The same in a game's sheet and on the Home page.
+ */
+export function PluginFailure({ pluginId, name, error, logs, staleSince, onRetry }: PluginFailureProps) {
+  const { t, shortDate } = useI18n();
+  return (
+    <div className="space-y-1 text-2xs" data-plugin-error={pluginId}>
+      <p className="text-zinc-500">
+        <span className="select-text">
+          {staleSince !== null
+            ? `${name} — ${t("plugins.stale", { date: shortDate(staleSince) })}`
+            : `${name} — ${error}`}
+        </span>{" "}
+        <button
+          type="button"
+          onClick={onRetry}
+          className="text-zinc-300 underline-offset-2 hover:text-zinc-100 hover:underline"
+        >
+          {t("plugins.retry")}
+        </button>
+      </p>
+      {logs.length > 0 && (
+        <details className="text-zinc-600">
+          <summary className="cursor-pointer hover:text-zinc-400">{t("plugins.technical")}</summary>
+          <pre className="mt-1 max-h-32 select-text overflow-auto whitespace-pre-wrap rounded-md bg-oled-bg/60 p-2 font-mono text-3xs leading-relaxed text-zinc-500">
+            {(staleSince !== null ? [error, ...logs] : logs).join("\n")}
+          </pre>
+        </details>
+      )}
+    </div>
   );
 }
 
