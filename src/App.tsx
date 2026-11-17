@@ -1080,6 +1080,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
               deals={storeView("top")}
               recommendations={storeView("picks")}
               pluginParts={homePluginParts}
+              badges={badges}
+              cardInfo={config.cardInfo}
             />
           ) : mainView === "store" ? (
             storeView()

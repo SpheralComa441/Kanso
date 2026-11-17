@@ -1083,6 +1083,24 @@
   }
 
   /*
+   * On Home a cover keeps its title under it in every theme. A game that cannot be started
+   * has nothing under the pointer but what the cover tells, so its veil exists only where
+   * covers tell; and where they tell, the plugins' labels are among the lines over the
+   * cover and need no second place under it.
+   */
+  .game-card-hover[data-info-only] {
+    display: none;
+  }
+
+  :root[data-card-caption="hover"] .game-card-hover[data-info-only] {
+    display: flex;
+  }
+
+  :root[data-card-caption="hover"] .home-card-badges {
+    display: none;
+  }
+
+  /*
    * The name next to the logo. The logo's own typeface, Afronaut, is a commercial font that
    * cannot be distributed with an open-source app: Kanso names it and uses it where it is
    * installed on the PC, and falls back to the theme's heading font everywhere else. No

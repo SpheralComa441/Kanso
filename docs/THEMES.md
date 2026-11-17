@@ -285,7 +285,7 @@ Le misure sono in pixel. *Sizes are in pixels.*
 | `borderWidth` | 0 – 4 | Spessore del bordo |
 | `shadow` | `none`, `soft`, `strong`, `glow` | Ombra a riposo; `glow` è un alone nel colore d'accento. Con `cut` e `slant` l'ombra non è disponibile |
 | `hover` | `lift`, `zoom`, `glow`, `none` | Al passaggio del mouse: la card si solleva; la copertina si ingrandisce; bordo e alone d'accento; nessun effetto |
-| `caption` | `below`, `overlay`, `hover`, `none` | Titolo e generi sotto la copertina; sopra la parte bassa della copertina; solo copertina, che al passaggio del mouse (o con il fuoco da tastiera) si sfoca e mostra titolo, generi, ore giocate e le etichette dei plugin; solo copertina |
+| `caption` | `below`, `overlay`, `hover`, `none` | Titolo e generi sotto la copertina; sopra la parte bassa della copertina; solo copertina, che al passaggio del mouse (o con il fuoco da tastiera) si sfoca e mostra titolo, generi, ore giocate e le etichette dei plugin (le righe le sceglie l'utente nelle Impostazioni; vale anche per le copertine della Home, che tengono il titolo sotto); solo copertina |
 
 ### `shapes` — Controlli e pannelli
 

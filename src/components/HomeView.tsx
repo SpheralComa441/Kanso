@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, ChevronRight, Eye, Play, Plus, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { useI18n } from "../i18n";
 import type { Ambience } from "../lib/ambience";
@@ -7,7 +7,8 @@ import { isRecentlyPlayed } from "../lib/library";
 import { platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { HomePluginPartData } from "../lib/useHomePlugins";
-import type { DetectedGame, HomeConfig, HomeSection, ThemeHome } from "../types/game";
+import type { BadgeEntry, CardInfoItem, DetectedGame, HomeConfig, HomeSection, ThemeHome } from "../types/game";
+import { CardInfoPanel, PluginBadges, useCardFacts, type CardFact } from "./CardInfo";
 import { Cover } from "./Cover";
 import { PluginFailure } from "./GameExtras";
 import { HomeAmbience } from "./HomeAmbience";
@@ -39,6 +40,10 @@ interface HomeViewProps {
   recommendations: ReactNode;
   /** What the plugins add to the page, in their order; drawn where the theme puts "plugins". */
   pluginParts: HomePluginPartData[];
+  /** Short labels plugins have for the games, by game id. */
+  badges: Record<string, BadgeEntry[]>;
+  /** What a cover tells under the pointer besides the title, as the user chose. */
+  cardInfo: readonly CardInfoItem[];
 }
 
 /** The narrowest a cover on a shelf gets, in rem. */
@@ -80,8 +85,18 @@ interface ShelfCardProps {
   controls?: ReactNode;
 }
 
+/** What every cover of the page tells under the pointer, as the user chose for the library. */
+interface CardTelling {
+  cardInfo: readonly CardInfoItem[];
+  badges: Record<string, BadgeEntry[]>;
+  factsOf: (game: DetectedGame) => CardFact[];
+}
+
+const CardTellingContext = createContext<CardTelling>({ cardInfo: [], badges: {}, factsOf: () => [] });
+
 function ShelfCard({ game, note, rank, isLaunching, onOpen, onLaunch, controls }: ShelfCardProps) {
   const { t } = useI18n();
+  const { cardInfo, badges, factsOf } = useContext(CardTellingContext);
   const { usableCover, markBroken } = useBrokenCovers();
   const coverUrl = usableCover(resolveCoverUrl(game.coverPath, game.updatedAt));
   const canStart = game.isInstalled && Boolean(game.launchUri || game.executablePath);
@@ -119,8 +134,16 @@ function ShelfCard({ game, note, rank, isLaunching, onOpen, onLaunch, controls }
           </div>
         )}
 
-        {canStart && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+        {/* Under the pointer: the button that starts the game and, in themes whose cards tell
+            about the game over the blurred cover, the same lines as in the library. A game
+            that cannot be started has only those lines to show. */}
+        <div
+          data-info-only={canStart ? undefined : ""}
+          className="game-card-hover pointer-events-none absolute inset-x-0 bottom-0 flex items-end bg-gradient-to-t from-black/85 to-transparent p-2 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100"
+        >
+          {/* The title stands under the cover already */}
+          <CardInfoPanel game={game} cardInfo={cardInfo} facts={factsOf(game)} showTitle={false} />
+          {canStart && (
             <button
               type="button"
               onClick={() => onLaunch(game)}
@@ -131,14 +154,20 @@ function ShelfCard({ game, note, rank, isLaunching, onOpen, onLaunch, controls }
               <Play className="h-3.5 w-3.5 fill-current" />
               <span>{isLaunching ? t("common.launching") : t("common.play")}</span>
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       <div className="space-y-0.5 px-2.5 py-2">
         <h3 className="truncate text-xs font-medium text-zinc-100" title={game.title}>
           {game.title}
         </h3>
-        <p className="truncate text-2xs text-zinc-500">{note}</p>
+        <div className="flex items-center justify-between gap-2 text-2xs text-zinc-500">
+          <p className="min-w-0 truncate">{note}</p>
+          {/* Where covers tell nothing under the pointer, the plugins' labels stand here */}
+          <span className="home-card-badges shrink-0">
+            <PluginBadges entries={badges[game.id]} />
+          </span>
+        </div>
       </div>
     </article>
   );
@@ -319,8 +348,12 @@ export function HomeView({
   deals,
   recommendations,
   pluginParts,
+  badges,
+  cardInfo,
 }: HomeViewProps) {
   const { t, relativePast, duration } = useI18n();
+  const factsOf = useCardFacts(cardInfo, badges);
+  const telling: CardTelling = { cardInfo, badges, factsOf };
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState("");
   const shown = theme.sections.filter((section) => !home.hidden.includes(section));
@@ -580,6 +613,7 @@ export function HomeView({
   const awaitingPlugins = shown.includes("plugins") && pluginParts.some((part) => part.answer === null);
 
   return (
+    <CardTellingContext.Provider value={telling}>
     <div className="home-page relative space-y-7">
       {ambience && <HomeAmbience kind={ambience.kind} themeKey={themeKey} />}
 
@@ -628,5 +662,6 @@ export function HomeView({
         )}
       </div>
     </div>
+    </CardTellingContext.Provider>
   );
 }
