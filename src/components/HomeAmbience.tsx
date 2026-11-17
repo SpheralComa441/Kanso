@@ -546,6 +546,10 @@ export function HomeAmbience({ kind, themeKey }: HomeAmbienceProps) {
       if (look.sideways) {
         particle.y = Math.random() * (height - stamp.height);
         if (!anywhere) particle.x = -stamp.width;
+      } else if (look.drift[1] < 0 && particle.speed > 0) {
+        // Rain blown to the left: born as far upwind as it will travel sideways on its way
+        // down, or the bottom right of the page would never see a drop
+        particle.x = Math.random() * (width + stamp.width + (height * -particle.drift) / particle.speed);
       }
       return particle;
     };
@@ -558,7 +562,10 @@ export function HomeAmbience({ kind, themeKey }: HomeAmbienceProps) {
       // page starts below the top of the window, and is that much taller than the window: so
       // it covers everything in view both before and after the page is scrolled
       const above = Math.max(0, pageBox.top - scrollerBox.top + scroller.scrollTop);
-      const tall = scroller.clientHeight + above;
+      // ...but no taller than the page gives it room for: on a Home shorter than the window
+      // the extra height would make the page scroll by itself
+      const pageEnd = pageBox.bottom - scrollerBox.top + scroller.scrollTop + (parseFloat(getComputedStyle(scroller).paddingBottom) || 0);
+      const tall = scroller.clientHeight + Math.min(above, Math.max(0, pageEnd - scroller.clientHeight));
       canvas.style.top = `${-above}px`;
       canvas.style.left = `${scrollerBox.left - pageBox.left}px`;
       canvas.style.width = `${scroller.clientWidth}px`;
@@ -580,6 +587,10 @@ export function HomeAmbience({ kind, themeKey }: HomeAmbienceProps) {
     const observer = new ResizeObserver(fit);
     observer.observe(scroller);
     observer.observe(page);
+    // The page comes in with a short animation that moves it: where things are is measured
+    // again once it has settled (a move alone does not tell the observer)
+    scroller.addEventListener("animationend", fit);
+    scroller.addEventListener("animationcancel", fit);
 
     let frame = 0;
     let last = performance.now();
@@ -587,7 +598,8 @@ export function HomeAmbience({ kind, themeKey }: HomeAmbienceProps) {
     const draw = (now: number) => {
       frame = requestAnimationFrame(draw);
       // A window left in the background does not pile up a long step
-      const step = Math.min(0.05, (now - last) / 1000);
+      // ...and the first frame can be stamped a hair before the effect started: never backwards
+      const step = Math.max(0, Math.min(0.05, (now - last) / 1000));
       last = now;
       if (document.hidden || width <= 1) return;
       context.clearRect(0, 0, width, height);
@@ -610,11 +622,14 @@ export function HomeAmbience({ kind, themeKey }: HomeAmbienceProps) {
         particle.y += particle.speed * step;
         particle.x += (particle.drift + Math.sin(particle.phase) * look.sway * ratio) * step;
         const { stamp } = particle;
-        if (particle.y > height || particle.x < -stamp.width * 2 || particle.x > width + stamp.width * 2) {
+        // Past the right edge only what moves right is gone for good: rain is born there
+        const goneRight = (particle.drift > 0 || look.sideways === true) && particle.x > width + stamp.width * 2;
+        if (particle.y > height || particle.x < -stamp.width * 2 || goneRight) {
           particles[index] = born(false);
           continue;
         }
-        const picture = stamp.frames[Math.floor(particle.turn) % stamp.frames.length];
+        const picture = stamp.frames[Math.floor(Math.abs(particle.turn)) % stamp.frames.length];
+        if (!picture) continue;
         context.globalAlpha = particle.alpha;
         // On the grid of the drawn pixels: sprites move a pixel at a time, as pixel art does
         context.drawImage(
@@ -630,6 +645,8 @@ export function HomeAmbience({ kind, themeKey }: HomeAmbienceProps) {
     return () => {
       cancelAnimationFrame(frame);
       observer.disconnect();
+      scroller.removeEventListener("animationend", fit);
+      scroller.removeEventListener("animationcancel", fit);
     };
   }, [kind, themeKey]);
 

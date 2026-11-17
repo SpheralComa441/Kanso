@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalLink, RefreshCw, SlidersHorizontal, WifiOff } from "lucide-react";
 import { useI18n } from "../i18n";
 import { fetchNews, openNewsLink } from "../lib/backend";
@@ -29,13 +29,13 @@ function NewsCard({ item, lead = false, onOpen }: NewsCardProps) {
   const hasPicture = Boolean(item.imageUrl) && !imageFailed;
   return (
     <li
-      className={`game-card group relative flex h-full overflow-hidden ${lead ? "flex-col md:col-span-2 md:flex-row" : "flex-col"}`}
+      className="game-card group relative flex h-full flex-col overflow-hidden"
       data-news={item.id}
       data-topic={item.topic}
       data-lead={lead || undefined}
     >
       {hasPicture && (
-        <div className={`relative shrink-0 overflow-hidden bg-oled-bg ${lead ? "aspect-[16/9] md:aspect-auto md:w-1/2" : "aspect-[16/9] w-full"}`}>
+        <div className="news-picture relative aspect-[16/9] w-full shrink-0 overflow-hidden bg-oled-bg">
           <img
             src={item.imageUrl ?? undefined}
             alt=""
@@ -43,7 +43,7 @@ function NewsCard({ item, lead = false, onOpen }: NewsCardProps) {
             draggable={false}
             referrerPolicy="no-referrer"
             onError={() => setImageFailed(true)}
-            className="game-card-art h-full w-full object-cover"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
           />
         </div>
       )}
@@ -90,16 +90,21 @@ export function NewsView({ sourcesKey, onOpenSettings, onError }: NewsViewProps)
   const [tab, setTab] = useState<Tab>("all");
   const [source, setSource] = useState<string | null>(null);
 
+  // Only the answer to the latest question counts: an older, slower one (asked before the
+  // sources were changed) must not put back what it found
+  const latest = useRef(0);
   const load = useCallback(
     async (forceRefresh: boolean) => {
+      const mine = (latest.current += 1);
       setIsLoading(true);
       setFailed(false);
       try {
-        setReport(await fetchNews(forceRefresh));
+        const answer = await fetchNews(forceRefresh);
+        if (mine === latest.current) setReport(answer);
       } catch {
-        setFailed(true);
+        if (mine === latest.current) setFailed(true);
       } finally {
-        setIsLoading(false);
+        if (mine === latest.current) setIsLoading(false);
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -216,7 +221,7 @@ export function NewsView({ sourcesKey, onOpenSettings, onError }: NewsViewProps)
           <p className="text-sm text-zinc-300">{t(offline ? "news.offline" : "news.empty")}</p>
         </div>
       ) : (
-        <ul className="grid" style={{ gap: "var(--grid-gap)", gridTemplateColumns: "repeat(auto-fill, minmax(270px, 1fr))" }}>
+        <ul className="news-list grid" style={{ gap: "var(--grid-gap)", gridTemplateColumns: "repeat(auto-fill, minmax(270px, 1fr))" }}>
           {listed.map((item, index) => (
             <NewsCard key={item.id} item={item} lead={index === 0 && Boolean(item.imageUrl)} onOpen={(piece) => void open(piece)} />
           ))}

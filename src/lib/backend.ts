@@ -1081,9 +1081,12 @@ function withNewsSources(value: unknown): string[] | null {
 /** Most feeds a user can add by hand. */
 export const MAX_CUSTOM_FEEDS = 12;
 
-/** Whether `url` can be a feed's address: https, a real host, nothing odd in it. */
+/**
+ * Whether `url` can be a feed's address, as the backend judges it: `https://` in lower case,
+ * a host with a dot and neither a user name nor a port, nothing odd after it.
+ */
 export function isFeedUrl(url: string): boolean {
-  return /^https:\/\/[a-z0-9.-]+\.[a-z0-9-]+(\/[^\s"<>\\]*)?$/i.test(url) && url.length <= 300;
+  return /^https:\/\/[^\s/?#@:"<>\\]+\.[^\s/?#@:"<>\\]+([/?#][^\s"<>\\]*)?$/.test(url) && url.length <= 300;
 }
 
 /** The feeds added by hand as the backend would keep them. */

@@ -38,6 +38,13 @@ export function NewsSettings({ active, value, onChange, language, feeds, onFeeds
     setName("");
     setUrl("");
   };
+  /** Enter in either field adds the feed; it never saves the whole dialog from here. */
+  const addOnEnter = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addFeed();
+    }
+  };
   useEffect(() => {
     if (active && all === null) {
       newsSources()
@@ -137,22 +144,23 @@ export function NewsSettings({ active, value, onChange, language, feeds, onFeeds
           value={name}
           maxLength={40}
           onChange={(e) => setName(e.target.value)}
+          onKeyDown={addOnEnter}
           placeholder={t("settings.newsFeedName")}
           aria-label={t("settings.newsFeedName")}
           className="rounded-lg border border-oled-border bg-oled-bg px-3 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:border-accent/60 focus:outline-none"
         />
         <input
           id="news-feed-url"
-          type="url"
+          // Plain text: the dialog's own note says what is wrong with an address, and a
+          // browser "invalid field" here would silently block saving the whole dialog
+          type="text"
+          inputMode="url"
+          autoComplete="off"
+          spellCheck={false}
           value={url}
           maxLength={300}
           onChange={(e) => setUrl(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              addFeed();
-            }
-          }}
+          onKeyDown={addOnEnter}
           placeholder={t("settings.newsFeedUrl")}
           aria-label={t("settings.newsFeedUrl")}
           aria-invalid={address !== "" && !isFeedUrl(address)}

@@ -1026,8 +1026,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           ) : mainView === "store" ? (
             storeView()
           ) : mainView === "news" ? (
-            <NewsView
-              sourcesKey={`${lang}|${config.newsSources === null ? "default" : config.newsSources.join(",")}|${config.newsFeeds.map((feed) => feed.url).join(",")}`}
+            // Not before the settings are in: the sources to ask are theirs to say
+            settingsLoaded && <NewsView
+              sourcesKey={`${lang}|${config.newsSources === null ? "default" : config.newsSources.join(",")}|${config.newsFeeds.map((feed) => `${feed.url} ${feed.topic} ${feed.name}`).join(",")}`}
               onOpenSettings={() => openSettings("news")}
               onError={setStatusMessage}
             />

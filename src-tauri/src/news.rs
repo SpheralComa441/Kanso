@@ -37,7 +37,7 @@ fn chosen_feeds(app: &AppHandle) -> Vec<Feed> {
 pub(crate) async fn fetch_news(app: AppHandle, state: State<'_, AppState>, force_refresh: bool) -> Result<NewsReport, String> {
     let sources = chosen_feeds(&app);
     // What was asked: a feed added, removed or changed asks afresh
-    let ids: Vec<String> = sources.iter().map(|feed| format!("{}|{}", feed.id, feed.feed_url)).collect();
+    let ids: Vec<String> = sources.iter().map(|feed| format!("{}|{}|{}|{:?}", feed.id, feed.feed_url, feed.name, feed.topic)).collect();
     let cache = Arc::clone(&state.news_cache);
     if !force_refresh {
         if let Some((cached_ids, report)) = cache.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {

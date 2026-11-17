@@ -336,7 +336,8 @@ fn decode_entities(text: &str) -> String {
     while let Some(at) = rest.find('&') {
         out.push_str(&rest[..at]);
         let after = &rest[at + 1..];
-        let resolved = after.find(';').filter(|end| *end <= 10).and_then(|end| {
+        // A reference is a few characters long: the ';' is looked for no further than that
+        let resolved = after.bytes().take(11).position(|byte| byte == b';').and_then(|end| {
             let name = &after[..end];
             let character = match name.strip_prefix('#') {
                 Some(number) => {
@@ -369,16 +370,34 @@ fn decode_entities(text: &str) -> String {
 /// resolved, spaces collapsed, no control characters, at most `max` characters.
 pub fn plain_text(html: &str, max: usize) -> String {
     let mut text = String::with_capacity(html.len());
+    // Lower-cased once, for finding where a script or a style ends: same length, same offsets
+    let lowered = html.to_ascii_lowercase();
     let mut rest = html;
     while let Some(at) = rest.find('<') {
         text.push_str(&rest[..at]);
-        text.push(' ');
         let tag = &rest[at..];
-        let lower = tag.get(..8).unwrap_or(tag).to_ascii_lowercase();
+        let name = &tag.as_bytes()[1..];
+        // A '<' that opens nothing ("I <3 this", "for <$250") is a character like any other
+        if !name.first().is_some_and(|byte| byte.is_ascii_alphabetic() || matches!(byte, b'/' | b'!' | b'?')) {
+            text.push('<');
+            rest = &tag[1..];
+            continue;
+        }
+        text.push(' ');
         // What a script or a style holds is not text
-        let skip_to = ["script", "style"].iter().find(|name| lower[1..].starts_with(*name)).map(|name| format!("</{name}"));
-        let after = match skip_to.and_then(|close| tag.to_ascii_lowercase().find(&close).map(|end| &tag[end..])) {
-            Some(closing) => closing,
+        let holds_code = ["script", "style"].iter().find(|kind| name.get(..kind.len()).is_some_and(|start| start.eq_ignore_ascii_case(kind.as_bytes())));
+        let after = match holds_code {
+            Some(kind) => {
+                let from = html.len() - tag.len();
+                match lowered[from..].find(&format!("</{kind}")) {
+                    Some(end) => &tag[end..],
+                    // Never closed: nothing after it is text either
+                    None => {
+                        rest = "";
+                        break;
+                    }
+                }
+            }
             None => tag,
         };
         match after.find('>') {
@@ -445,21 +464,36 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 }
 
 fn to_epoch_ms(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64, offset_minutes: i64) -> Option<u64> {
-    if !(1970..=2200).contains(&year) || !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+    if !(1970..=2200).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=60).contains(&second)
+    {
         return None;
     }
     let seconds = days_from_civil(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second - offset_minutes * 60;
     u64::try_from(seconds).ok().map(|s| s * 1000)
 }
 
-/// `+0100`, `+01:00`, `Z`, `GMT`, `UT`: minutes east of UTC. Named zones other than those
-/// count as UTC, which is at most a few hours off: enough to order the news.
+/// `+0100`, `+01:00`, `Z`, `GMT`, `UT` and the North American names RFC 822 allows: minutes
+/// east of UTC. Any other name counts as UTC.
 fn offset_minutes(zone: &str) -> i64 {
     let zone = zone.trim();
     let sign = match zone.chars().next() {
         Some('+') => 1,
         Some('-') => -1,
-        _ => return 0,
+        _ => {
+            return match zone.to_ascii_uppercase().as_str() {
+                "EDT" => -240,
+                "EST" | "CDT" => -300,
+                "CST" | "MDT" => -360,
+                "MST" | "PDT" => -420,
+                "PST" => -480,
+                _ => 0,
+            }
+        }
     };
     let digits: String = zone[1..].chars().filter(char::is_ascii_digit).collect();
     if digits.len() != 4 {
@@ -550,6 +584,27 @@ pub fn parse_feed(xml: &str, source: &Feed) -> Vec<NewsItem> {
     items
 }
 
+/// The text of a feed's bytes. Most feeds are UTF-8; an older site may still write in a
+/// national encoding (windows-1251, ISO-8859-1…), named by the server or in the first line
+/// of the file (`<?xml … encoding="…"?>`).
+pub fn decode_feed(bytes: &[u8], declared: Option<&str>) -> String {
+    let in_file = || {
+        let head = String::from_utf8_lossy(&bytes[..bytes.len().min(200)]).to_ascii_lowercase();
+        let after = head.split("encoding=").nth(1)?;
+        let quote = after.chars().next().filter(|c| *c == '"' || *c == '\'')?;
+        after[1..].split(quote).next().map(str::to_string)
+    };
+    let label = declared
+        // "windows-1251"; other=parameter -> windows-1251
+        .map(|label| label.split(';').next().unwrap_or_default().trim_matches(|c: char| c == '"' || c == '\'' || c.is_whitespace()).to_string())
+        .filter(|label| !label.is_empty())
+        .or_else(in_file);
+    match label.and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes())) {
+        Some(encoding) if encoding != encoding_rs::UTF_8 => encoding.decode(bytes).0.into_owned(),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
 /// Reads the feeds of the publishers. Each request asks one site for its public feed and
 /// says nothing of the user.
 pub struct NewsClient {
@@ -566,7 +621,9 @@ impl NewsClient {
     pub fn new() -> Self {
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(8))
-            .timeout_read(Duration::from_secs(15))
+            // The whole answer, not each piece of it: a site that sends a few bytes now and
+            // then would otherwise keep the page waiting, and with it every other source
+            .timeout(Duration::from_secs(25))
             .user_agent("KansoLauncher/0.1.0 (feed reader)")
             .build();
         Self { agent }
@@ -580,9 +637,11 @@ impl NewsClient {
             .set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml")
             .call()
             .map_err(|e| e.to_string())?;
+        // What the server says the text is written in, if it says
+        let declared = response.header("Content-Type").and_then(|kind| kind.to_ascii_lowercase().split("charset=").nth(1).map(str::to_string));
         let mut bytes = Vec::new();
         response.into_reader().take(MAX_FEED_BYTES).read_to_end(&mut bytes).map_err(|e| e.to_string())?;
-        Ok(String::from_utf8_lossy(&bytes).into_owned())
+        Ok(decode_feed(&bytes, declared.as_deref()))
     }
 
     /// The news of the feeds named, newest first; a feed that fails is reported without
@@ -712,6 +771,46 @@ mod tests {
     }
 
     #[test]
+    fn hostile_text_costs_no_more_than_its_length() {
+        // Each of these once took time growing with the square of the length
+        let started = std::time::Instant::now();
+        assert_eq!(plain_text(&"<script>".repeat(200_000), 50), "");
+        assert!(plain_text(&"<я>я".repeat(200_000), 5).starts_with("<я>я"), "not a tag: kept as written");
+        assert_eq!(plain_text(&"<p>я".repeat(200_000), 5), "я я…");
+        assert!(plain_text(&"&".repeat(1_000_000), 20).chars().count() <= 21);
+        assert_eq!(decode_entities(&"&".repeat(1_000_000)).len(), 1_000_000);
+        assert!(started.elapsed() < std::time::Duration::from_secs(5), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn a_less_than_sign_that_opens_nothing_is_kept() {
+        assert_eq!(plain_text("I <3 this game", 50), "I <3 this game");
+        assert_eq!(plain_text("Arc B580 for <$250 is a steal", 50), "Arc B580 for <$250 is a steal");
+        assert_eq!(plain_text("5 > 3 & 2 < 4", 50), "5 > 3 & 2 < 4");
+        assert_eq!(plain_text("a <b>bold</b> move<br/>here", 50), "a bold move here");
+        assert_eq!(plain_text("ends with <", 50), "ends with <");
+        assert_eq!(plain_text("<!-- note -->kept<?pi?> too", 50), "kept too");
+    }
+
+    #[test]
+    fn feeds_in_a_national_encoding_are_read() {
+        // "Новость дня" in windows-1251, as an older Russian site would send it
+        let cyrillic = [0xCD, 0xEE, 0xE2, 0xEE, 0xF1, 0xF2, 0xFC, 0x20, 0xE4, 0xED, 0xFF];
+        let mut feed = b"<?xml version=\"1.0\" encoding=\"windows-1251\"?><rss><title>".to_vec();
+        feed.extend_from_slice(&cyrillic);
+        assert!(decode_feed(&feed, None).ends_with("<title>Новость дня"), "named in the file");
+        assert_eq!(decode_feed(&cyrillic, Some("windows-1251")), "Новость дня", "named by the server");
+        assert_eq!(decode_feed(&cyrillic, Some("\"Windows-1251\"; boundary=x")), "Новость дня");
+        // "Análisis" in ISO-8859-1
+        assert_eq!(decode_feed(&[0x41, 0x6E, 0xE1, 0x6C, 0x69, 0x73, 0x69, 0x73], Some("iso-8859-1")), "Análisis");
+        // UTF-8 by default, by name, and when the name means nothing
+        assert_eq!(decode_feed("Новость".as_bytes(), None), "Новость");
+        assert_eq!(decode_feed("Новость".as_bytes(), Some("utf-8")), "Новость");
+        assert_eq!(decode_feed("Новость".as_bytes(), Some("no-such-encoding")), "Новость");
+        assert_eq!(decode_feed(b"", None), "");
+    }
+
+    #[test]
     fn reads_the_dates_feeds_use() {
         assert_eq!(parse_feed_date("Mon, 16 Nov 2026 21:11:04 +0000"), Some(1_794_863_464_000));
         assert_eq!(parse_feed_date("16 Nov 2026 21:11:04 GMT"), Some(1_794_863_464_000));
@@ -719,6 +818,9 @@ mod tests {
         assert_eq!(parse_feed_date("2026-11-16T21:11:04Z"), Some(1_794_863_464_000));
         assert_eq!(parse_feed_date("2026-11-16T22:11:04.123+01:00"), Some(1_794_863_464_000));
         assert_eq!(parse_feed_date("2026-11-16T21:11Z"), Some(1_794_863_460_000));
+        assert_eq!(parse_feed_date("Mon, 16 Nov 2026 16:11:04 EST"), Some(1_794_863_464_000), "the zone names RFC 822 allows");
+        assert_eq!(parse_feed_date("Mon, 16 Nov 2026 13:11:04 pst"), Some(1_794_863_464_000));
+        assert_eq!(parse_feed_date("1 Jan 2026 -99999999999999999:00 GMT"), None, "no clock runs backwards");
         assert_eq!(parse_feed_date("yesterday"), None);
         assert_eq!(parse_feed_date("32 Nov 2026 21:11:04 GMT"), None);
         assert_eq!(parse_feed_date(""), None);
