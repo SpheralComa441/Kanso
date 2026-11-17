@@ -2247,7 +2247,8 @@ mod tests {
     fn the_full_example_in_the_theme_guide_is_valid_and_shows_the_default_arrangement() {
         // The guide's first block of JSON is the template people copy: every name in it must
         // be one this version accepts
-        let guide = include_str!("../../../../docs/THEMES.md");
+        // On a Windows checkout the guide's lines may end in CR LF
+        let guide = include_str!("../../../../docs/THEMES.md").replace("\r\n", "\n");
         let start = guide.find("```json\n").expect("the guide has a full example") + "```json\n".len();
         let example = &guide[start..start + guide[start..].find("\n```").expect("the example ends")];
         let theme = Theme::from_json(example).expect("the full example in docs/THEMES.md must stay importable");

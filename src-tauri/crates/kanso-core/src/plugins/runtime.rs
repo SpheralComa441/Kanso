@@ -432,7 +432,8 @@ pub(crate) mod tests {
     fn the_example_in_the_plugin_guide_runs_as_written() {
         // The guide's first block of JavaScript is what authors copy: its `home` and its
         // command must run in the real sandbox and return what the guide says
-        let guide = include_str!("../../../../../docs/PLUGINS.md");
+        // On a Windows checkout the guide's lines may end in CR LF
+        let guide = include_str!("../../../../../docs/PLUGINS.md").replace("\r\n", "\n");
         let start = guide.find("```js\n").expect("the guide has an example") + "```js\n".len();
         let code = &guide[start..start + guide[start..].find("\n```").expect("the example ends")];
         let fixture = Fixture::new();

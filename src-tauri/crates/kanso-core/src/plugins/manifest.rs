@@ -454,7 +454,8 @@ mod tests {
     #[test]
     fn the_manifest_in_the_plugin_guide_is_valid() {
         // The guide's first block of JSON is the manifest authors start from
-        let guide = include_str!("../../../../../docs/PLUGINS.md");
+        // On a Windows checkout the guide's lines may end in CR LF
+        let guide = include_str!("../../../../../docs/PLUGINS.md").replace("\r\n", "\n");
         let start = guide.find("```json\n").expect("the guide has a manifest") + "```json\n".len();
         let example = &guide[start..start + guide[start..].find("\n```").expect("the example ends")];
         let manifest = PluginManifest::parse(example).expect("the manifest in docs/PLUGINS.md must stay valid");
