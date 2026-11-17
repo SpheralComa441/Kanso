@@ -360,7 +360,8 @@ impl PluginEngine {
     /// a new one (always with `force`). An answer is stale as soon as the plugin's code,
     /// version, settings or the interface language change. When the call fails, the last good
     /// answer is handed back together with the error; with nothing to fall back on, the error
-    /// itself is remembered for a while so that the plugin is not asked at every look.
+    /// itself is. Either way the failure is remembered for a while (the old answer is served
+    /// alone meanwhile), so that the plugin is not asked at every look.
     ///
     /// `args` is built only if the plugin really runs. The database is locked only to read
     /// and write the cache, never while the plugin runs.
@@ -445,6 +446,12 @@ impl PluginEngine {
                 let previous = cached.as_ref().and_then(|entry| Some((cached_data(entry)?, entry.fetched_at)));
                 match previous {
                     Some((data, fetched_at)) => {
+                        // The failure is remembered here too: the old answer is served as
+                        // it is for a while before the plugin is asked again
+                        if let Some(entry) = cached {
+                            let kept = PluginCacheEntry { expires_at: now_ms + ERROR_RETRY_MS, ..entry };
+                            let _ = lock(db).put_plugin_cache(plugin_id, call.key, &kept);
+                        }
                         CachedAnswer { data: Some(data), error: Some(message), logs, fetched_at }
                     }
                     None => {
@@ -1058,6 +1065,21 @@ mod tests {
             assert!(stale.error.as_deref().unwrap().contains("dns error"));
             assert!(!stale.logs.is_empty());
         }
+
+        // This failure is remembered too: the next looks get the old answer as it is, and
+        // the plugin is asked again only after a while or when the user says so
+        let asked = transport.urls().len();
+        for minutes in [1, 10, 29] {
+            let kept = engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 2 * day + minutes * minute);
+            assert_eq!((kept.data, kept.fetched_at), (good.data.clone(), 40 * minute));
+        }
+        assert_eq!(transport.urls().len(), asked, "an old answer is not asked for again at every look");
+        let entry = lock(&db).get_plugin_cache("demo", HOME_CACHE_KEY).unwrap().unwrap();
+        assert!(entry.ok && entry.fetched_at == 40 * minute, "the answer kept is the good one: {entry:?}");
+        engine.home_data(&db, &plugin, &config, Lang::En, &games, true, 2 * day + 5 * minute);
+        assert_eq!(transport.urls().len(), asked + 1, "the user asking again is not held back");
+        engine.home_data(&db, &plugin, &config, Lang::En, &games, false, 2 * day + 36 * minute);
+        assert_eq!(transport.urls().len(), asked + 2, "asked again once the window passed");
 
         // A plugin that says it adds a part of Home and has no such hook fails the same way
         let hookless = home_plugin("kanso.plugin({ gameDetails: () => null });", 24);

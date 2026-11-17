@@ -1,0 +1,111 @@
+{
+  "kansoTheme": 3,
+  "name": "Aurora Grid",
+  "author": "Kanso",
+  "description": "Aurora with its own arrangement: pages at the bottom, Store on the picks, News as a grid.",
+  "colorScheme": "dark",
+  "colors": {
+    "background": "#0d1026",
+    "surface": "#171b3a",
+    "elevated": "#222750",
+    "border": "#2e3463",
+    "borderStrong": "#5964a8",
+    "text": "#f3f5ff",
+    "textSecondary": "#d5daf5",
+    "textMuted": "#a3abd6",
+    "textFaint": "#7982b3",
+    "accent": "#7ef0c6",
+    "accentHover": "#a5f7d9",
+    "onAccent": "#062019",
+    "accentSecondary": "#b9a3ff"
+  },
+  "fontFamily": "Nunito",
+  "typography": {
+    "headingFont": "Unbounded",
+    "headingWeight": 500,
+    "headingUppercase": false,
+    "headingSpacing": -0.01,
+    "scale": 1,
+    "labelFont": null,
+    "labelUppercase": true
+  },
+  "layout": {
+    "cardMinWidth": 200,
+    "cardRadius": 22,
+    "sidebarWidth": 220,
+    "gridGap": 22,
+    "headerHeight": 56,
+    "contentPadding": 28,
+    "sidebarSide": "left",
+    "dividers": false,
+    "scrollbars": "auto",
+    "windowControls": "dots",
+    "navHeadings": "secondary",
+    "navPages": "accent"
+  },
+  "cards": {
+    "shape": "rounded",
+    "aspect": "3:4",
+    "borderWidth": 0,
+    "shadow": "soft",
+    "hover": "zoom",
+    "caption": "hover"
+  },
+  "shapes": {
+    "controlRadius": 14,
+    "panelRadius": 24,
+    "chipRadius": 12,
+    "panelShape": "rounded"
+  },
+  "icons": {
+    "strokeWidth": 1.75,
+    "corners": "round",
+    "scale": 1,
+    "fill": 0.18
+  },
+  "effects": {
+    "backgroundGradient": [
+      "#0d1026",
+      "#1a1440",
+      "#0c2a3a"
+    ],
+    "backgroundAngle": 155
+  },
+  "detail": {
+    "layout": "bento",
+    "backdrop": "art",
+    "backdropBlur": 32,
+    "backdropDim": 0.45,
+    "tiles": "glass",
+    "tileGap": 16,
+    "cards": "rail",
+    "keyTitles": "secondary",
+    "cardTitles": "accent"
+  },
+  "motion": {
+    "level": "smooth",
+    "sheet": "rise",
+    "view": "fade",
+    "stagger": true
+  },
+  "home": {
+    "sections": ["resume", "upNext", "mostPlayed", "recommendations", "deals", "plugins"],
+    "effects": "seasonal"
+  },
+  "nav": {
+    "pages": ["home", "store", "news", "stats", "emulators"],
+    "groups": ["library", "genres", "tags", "platform", "status"],
+    "pagesPosition": "bottom"
+  },
+  "store": {
+    "tabs": ["picks", "all", "steam", "epic", "gog", "others", "liked"],
+    "layout": "grid",
+    "figures": true
+  },
+  "news": {
+    "layout": "grid",
+    "pictures": true,
+    "summaries": true
+  },
+  "fontFiles": []
+}

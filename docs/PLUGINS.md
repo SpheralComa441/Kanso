@@ -207,7 +207,8 @@ Requests are refused (the call throws) when the address is not `https`, its host
   not in the visible library is dropped.
 - **`gamesStyle`** (commands and `home`): how those games are laid out. One of three names;
   anything else is read as `list`. All three work on Home as they do in a command's dialog.
-  - `list` (default): rows with a small cover, the note and *Open sheet* / *Play*.
+  - `list` (default): rows with a small cover, the note and *Open sheet*, plus *Play* when the
+    game is installed or *Install* when its store can install it (otherwise *Open sheet* alone).
   - `cards`: whole covers, as in the library, with the note and the same buttons on them.
   - `mystery`: whole covers dealt face down. Each shows a question mark and its `hint` (at most
     40 characters: say what kind of suggestion it is, not which game) until the user turns it
@@ -233,8 +234,9 @@ shows the host in the tooltip first).
 
 With `"provides": { "home": true }` the plugin gets a part of the Home page of its own: a heading
 (the `title` it returns, or its name), a small button that asks it again, its `sections` drawn
-with the blocks above, and its `games` with *Open sheet* and *Play* on each. The official
-[`daily-pick`](../plugins/daily-pick/) is some ninety lines and shows the whole of it.
+with the blocks above, and its `games`, each with *Open sheet* and, where it applies, *Play*
+(the game is installed) or *Install* (its store can install it). The official
+[`daily-pick`](../plugins/daily-pick/) is some hundred lines and shows the whole of it.
 
 - **What it gets.** `home(context)` is called with what a command gets: `context.games` (the
   visible library, as game objects) and `context.now` (ms). Take the time from `context.now`.
@@ -247,7 +249,9 @@ with the blocks above, and its `games` with *Open sheet* and *Play* on each. The
 - **When it runs.** Only while the Home page is on screen, never at startup on another page,
   and only if the theme has a place for plugins there. Each plugin is asked on its own: a slow
   one does not hold back the page or the other plugins. Nothing is drawn for a plugin until it
-  has answered.
+  has answered. While Home stays on screen the plugins are asked again every quarter of an
+  hour, and when the window comes back; an answer still within its `cacheHours` comes from the
+  cache, so the plugin itself runs only when that has expired.
 - **Who decides.** The user switches the plugin on in *Settings → Plugins*, and from then on
   finds its part listed in *Settings → Home* next to Kanso's own, where it can be left out
   without switching the plugin off. The theme decides where on the page the parts of plugins
@@ -268,8 +272,10 @@ with the blocks above, and its `games` with *Open sheet* and *Play* on each. The
   cached answer points at are checked against the library every time it is shown.
 - When a call fails, the last good answer stays on screen with a note; with nothing cached the
   section (on Home: one line with the plugin's name) shows the error and *Try again*, with the
-  plugin's log lines under *Technical details*. Failures are not retried for 30 minutes in the
-  background, and a plugin that fails three times in a row is left alone until the next pass.
+  plugin's log lines under *Technical details*. Either way a failure is not retried for 30
+  minutes unless the user presses the refresh icon (an older good answer is shown as it is
+  meanwhile), and in the background a plugin that fails three times in a row is left alone
+  until the next pass.
 - Return `null` when a game simply has no data: that answer is cached too, so the service is not
   asked again at every opening.
 

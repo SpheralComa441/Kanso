@@ -616,6 +616,7 @@ export const it = {
   "store.picksDifferentNote": "offerte lontane da quello che giochi di solito",
   "store.picksHow": "I consigli nascono dal confronto tra i generi delle offerte e le ore dei giochi che hai in libreria.",
   "store.noStores": "Tutti gli store sono nascosti. Sceglili da Personalizza.",
+  "store.noTabs": "Questo tema mostra solo store che hai nascosto. Puoi mostrarli di nuovo da Personalizza.",
   "store.figureDeals": "Offerte",
   "store.figureFree": "Gratis ora",
   "store.figureBest": "Sconto più alto",

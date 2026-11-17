@@ -25,6 +25,8 @@ interface PluginsSettingsProps {
   onStatesChange: (states: Record<string, PluginState>) => void;
   /** A plugin was installed or removed: the saved settings changed and the list must be re-read. */
   onInstalledChanged: (saved: AppConfig) => Promise<void>;
+  /** The plugin with this id was removed: what is being edited about it is to be forgotten. */
+  onRemoved: (pluginId: string) => void;
 }
 
 /** The choices for a plugin as edited so far, falling back to what the backend reported. */
@@ -114,6 +116,7 @@ export function PluginsSettings({
   states,
   onStatesChange,
   onInstalledChanged,
+  onRemoved,
 }: PluginsSettingsProps) {
   const { t } = useI18n();
   const [pending, setPending] = useState<{ path: string; preview: PluginPreview } | null>(null);
@@ -164,6 +167,7 @@ export function PluginsSettings({
       const next = { ...states };
       delete next[plugin.id];
       onStatesChange(next);
+      onRemoved(plugin.id);
       await onInstalledChanged(saved);
       setNotice({ type: "success", text: t("plugins.removedNotice", { name: plugin.name }) });
     } catch (error) {

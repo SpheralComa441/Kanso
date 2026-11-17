@@ -190,11 +190,16 @@ function DealRow({ deal, owned, liked, index, onOpen, onToggleLike, onHide }: De
   const [imageFailed, setImageFailed] = useState(false);
   const { store, endsSoon, timing } = useDealWords(deal);
   const isFree = deal.finalPrice === 0;
-  const action = "rounded-lg p-1.5 text-zinc-500 transition-colors hover:bg-oled-elevated hover:text-zinc-200";
+  const action = "rounded-lg p-1.5 transition-colors hover:bg-oled-elevated";
+  // One color at a time: two color classes on one button would leave the choice to their
+  // order in the stylesheet
+  const quiet = "text-zinc-500 hover:text-zinc-200";
 
   return (
+    // The row wraps where it is too narrow for its words (a small window, larger text):
+    // price and actions go under the title, which keeps a width it can be read in
     <li
-      className="motion-row group relative flex items-center gap-3.5 px-3.5 py-2.5 transition-colors hover:bg-oled-elevated/60"
+      className="motion-row group relative flex flex-wrap items-center gap-x-3.5 gap-y-2 px-3.5 py-2.5 transition-colors hover:bg-oled-elevated/60"
       style={{ "--i": index } as React.CSSProperties}
       data-deal={deal.id}
       data-store={deal.store}
@@ -220,7 +225,7 @@ function DealRow({ deal, owned, liked, index, onOpen, onToggleLike, onHide }: De
         )}
       </div>
 
-      <div className="min-w-0 flex-1 space-y-1">
+      <div className="min-w-[9rem] flex-1 space-y-1">
         <div className="flex items-center gap-2">
           <h3 className="truncate text-sm font-medium text-zinc-100" title={deal.title}>
             {deal.title}
@@ -241,50 +246,53 @@ function DealRow({ deal, owned, liked, index, onOpen, onToggleLike, onHide }: De
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-3 tabular-nums">
-        {!deal.upcoming && (
-          <span className="rounded-md bg-accent px-1.5 py-0.5 text-2xs font-bold text-zinc-950">
-            {isFree ? t("deals.free") : `-${deal.discountPercent}%`}
-          </span>
-        )}
-        <div className="min-w-[4.5rem] text-right">
-          {!deal.upcoming && deal.originalPrice !== null && deal.originalPrice > deal.finalPrice && (
-            <p className="text-3xs leading-tight text-zinc-500 line-through">{money(deal.originalPrice, deal.currency)}</p>
+      {/* Price and actions stay together, at the end of the row or of the line under it */}
+      <div className="ml-auto flex shrink-0 items-center gap-3.5">
+        <div className="flex shrink-0 items-center gap-3 tabular-nums">
+          {!deal.upcoming && (
+            <span className="rounded-md bg-accent px-1.5 py-0.5 text-2xs font-bold text-zinc-950">
+              {isFree ? t("deals.free") : `-${deal.discountPercent}%`}
+            </span>
           )}
-          <p className="text-sm font-semibold leading-tight text-zinc-100">
-            {deal.upcoming
-              ? deal.originalPrice !== null
-                ? money(deal.originalPrice, deal.currency)
-                : ""
-              : isFree
-                ? t("deals.free")
-                : money(deal.finalPrice, deal.currency)}
-          </p>
+          <div className="min-w-[4.5rem] text-right">
+            {!deal.upcoming && deal.originalPrice !== null && deal.originalPrice > deal.finalPrice && (
+              <p className="text-3xs leading-tight text-zinc-500 line-through">{money(deal.originalPrice, deal.currency)}</p>
+            )}
+            <p className="text-sm font-semibold leading-tight text-zinc-100">
+              {deal.upcoming
+                ? deal.originalPrice !== null
+                  ? money(deal.originalPrice, deal.currency)
+                  : ""
+                : isFree
+                  ? t("deals.free")
+                  : money(deal.finalPrice, deal.currency)}
+            </p>
+          </div>
         </div>
-      </div>
 
-      <div className="relative flex shrink-0 items-center gap-0.5">
-        <button
-          type="button"
-          data-hide-deal={deal.id}
-          onClick={() => onHide(deal)}
-          aria-label={t("store.hideDeal", { title: deal.title })}
-          title={t("store.hideDeal", { title: deal.title })}
-          className={action}
-        >
-          <EyeOff className="h-3.5 w-3.5" />
-        </button>
-        <button
-          type="button"
-          data-like-deal={deal.id}
-          onClick={() => onToggleLike(deal)}
-          aria-pressed={liked}
-          aria-label={t(liked ? "store.unlike" : "store.like", { title: deal.title })}
-          title={t(liked ? "store.unlike" : "store.like", { title: deal.title })}
-          className={`${action} ${liked ? "text-accent" : ""}`}
-        >
-          <Heart className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
-        </button>
+        <div className="relative flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            data-hide-deal={deal.id}
+            onClick={() => onHide(deal)}
+            aria-label={t("store.hideDeal", { title: deal.title })}
+            title={t("store.hideDeal", { title: deal.title })}
+            className={`${action} ${quiet}`}
+          >
+            <EyeOff className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            data-like-deal={deal.id}
+            onClick={() => onToggleLike(deal)}
+            aria-pressed={liked}
+            aria-label={t(liked ? "store.unlike" : "store.like", { title: deal.title })}
+            title={t(liked ? "store.unlike" : "store.like", { title: deal.title })}
+            className={`${action} ${liked ? "text-accent" : quiet}`}
+          >
+            <Heart className={`h-3.5 w-3.5 ${liked ? "fill-current" : ""}`} />
+          </button>
+        </div>
       </div>
     </li>
   );
@@ -507,7 +515,7 @@ export function StoreView({
     });
   // The tabs the theme lists, in its order. A store the user hid has no tab, whatever the
   // theme says
-  const tabs: [StoreTab, string, number][] = theme.tabs.flatMap((name): [StoreTab, string, number][] => {
+  const themed: [StoreTab, string, number][] = theme.tabs.flatMap((name): [StoreTab, string, number][] => {
     switch (name) {
       case "all":
         return [[name, t("store.all"), deals.length]];
@@ -521,6 +529,13 @@ export function StoreView({
           : [];
     }
   });
+  // The deals the user likes are theirs: while there are any, their tab is there, last,
+  // also under a theme that leaves it out. It is the one place that lists them, where one
+  // can be taken off the list, and what the alert about deals ending leads to
+  const tabs: [StoreTab, string, number][] =
+    theme.tabs.includes("liked") || store.liked.length === 0
+      ? themed
+      : [...themed, ["liked", t("store.liked"), store.liked.length]];
   // `null` when the theme lists only stores and the user hid every one of them
   const tab: StoreTab | null = tabs.some(([name]) => name === pickedTab) ? pickedTab : (tabs[0]?.[0] ?? null);
   // The liked deals as the stores list them now; the ones no longer listed, as remembered
@@ -564,27 +579,29 @@ export function StoreView({
       </header>
 
       {/* The stores, as tabs: what the page lists */}
-      <div id="store-tabs" role="tablist" aria-label={t("store.tabs")} className="flex flex-wrap gap-1.5">
-        {tabs.map(([name, label, count]) => (
-          <button
-            key={name}
-            id={`store-tab-${name}`}
-            type="button"
-            role="tab"
-            aria-selected={tab === name}
-            onClick={() => setPickedTab(name)}
-            className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-1.5 text-xs font-medium transition-colors ${
-              tab === name
-                ? "border-accent bg-accent text-zinc-950"
-                : "border-oled-border bg-oled-surface/60 text-zinc-300 hover:bg-oled-elevated"
-            }`}
-          >
-            {name === "liked" && <Heart className={`h-3 w-3 ${tab === name ? "fill-current" : ""}`} />}
-            <span>{label}</span>
-            <span className={`tabular-nums ${tab === name ? "opacity-75" : "text-zinc-500"}`}>{count}</span>
-          </button>
-        ))}
-      </div>
+      {tabs.length > 0 && (
+        <div id="store-tabs" role="tablist" aria-label={t("store.tabs")} className="flex flex-wrap gap-1.5">
+          {tabs.map(([name, label, count]) => (
+            <button
+              key={name}
+              id={`store-tab-${name}`}
+              type="button"
+              role="tab"
+              aria-selected={tab === name}
+              onClick={() => setPickedTab(name)}
+              className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                tab === name
+                  ? "border-accent bg-accent text-zinc-950"
+                  : "border-oled-border bg-oled-surface/60 text-zinc-300 hover:bg-oled-elevated"
+              }`}
+            >
+              {name === "liked" && <Heart className={`h-3 w-3 ${tab === name ? "fill-current" : ""}`} />}
+              <span>{label}</span>
+              <span className={`tabular-nums ${tab === name ? "opacity-75" : "text-zinc-500"}`}>{count}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* A liked deal about to end is said first, wherever on the page one is */}
       {endingSoon.length > 0 && (
@@ -623,7 +640,10 @@ export function StoreView({
           </div>
         ) : (
           <div className="space-y-4">
-            <Deals layout={layout}>{likedNow.flatMap(({ deal }) => (deal ? [deal] : [])).map(tile)}</Deals>
+            {/* Nothing is drawn for no deal: a list would leave its empty frame */}
+            {likedNow.some(({ deal }) => deal !== null) && (
+              <Deals layout={layout}>{likedNow.flatMap(({ deal }) => (deal ? [deal] : [])).map(tile)}</Deals>
+            )}
             {likedNow.some(({ deal }) => deal === null) && (
               <section id="store-liked-gone" className="space-y-2">
                 <h2 className="micro-label">{t("store.likedGone")}</h2>
@@ -680,7 +700,7 @@ export function StoreView({
       ) : listed.length === 0 ? (
         <div id="store-empty" className="rounded-xl border border-oled-border bg-oled-surface/60 px-6 py-14 text-center">
           {offline && <WifiOff className="mx-auto mb-3 h-7 w-7 text-zinc-500" />}
-          <p className="text-sm text-zinc-300">{t(offline ? "deals.offline" : shownStores.length === 0 || tab === null ? "store.noStores" : "deals.empty")}</p>
+          <p className="text-sm text-zinc-300">{t(offline ? "deals.offline" : shownStores.length === 0 ? "store.noStores" : tab === null ? "store.noTabs" : "deals.empty")}</p>
         </div>
       ) : (
         <>

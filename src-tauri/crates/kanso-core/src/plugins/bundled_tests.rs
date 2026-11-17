@@ -211,7 +211,8 @@ fn daily_pick_proposes_one_game_a_day_on_home_from_the_backlog_first() {
     let config = config_with("daily-pick", &[]);
     let hour = 3_600_000_u64;
     let day = 24 * hour;
-    // Midday, so that the day is the same one in whatever time zone the tests run
+    // 12:00 UTC. What must fall on the same day stays within two minutes of it: in no time
+    // zone does midnight come between 12:00 and 12:02 UTC
     let noon = 20_000 * day + 12 * hour;
 
     let never = |id: &str, title: &str| other_game(id, title);
@@ -265,9 +266,9 @@ fn daily_pick_proposes_one_game_a_day_on_home_from_the_backlog_first() {
     for game in started.iter_mut().filter(|game| game.id == today) {
         game.playtime_minutes = Some(45);
         game.play_count = 1;
-        game.last_played_at = Some(noon + 30 * 60_000);
+        game.last_played_at = Some(noon + 60_000);
     }
-    let view = bench.home(&plugin, &config, Lang::It, &started, noon + hour);
+    let view = bench.home(&plugin, &config, Lang::It, &started, noon + 2 * 60_000);
     assert_eq!(view.games[0].id, today, "starting it does not make another take its place");
     assert_eq!(view.games[0].note.as_deref(), Some("Dalla tua libreria · 45 min di gioco"));
 
@@ -279,6 +280,32 @@ fn daily_pick_proposes_one_game_a_day_on_home_from_the_backlog_first() {
         assert!(waiting.contains(&pick.as_str()), "day {n}: {pick}");
         assert_ne!(pick, previous, "day {n} repeats the day before");
         previous = pick;
+    }
+    // Over many days every game that waits has its turn, none far more often than another
+    let turns = offline();
+    let mut times = std::collections::BTreeMap::new();
+    for n in 0..90 {
+        let view = turns.home(&plugin, &config, Lang::It, &games, noon + n * day);
+        *times.entry(view.games[0].id.clone()).or_insert(0_u32) += 1;
+    }
+    assert_eq!(times.len(), waiting.len(), "{times:?}");
+    assert!(times.values().all(|count| (20..=40).contains(count)), "no game is passed over: {times:?}");
+
+    // One game alone in its group is not proposed every day while the library has others:
+    // the next group has its day, then the first one again
+    let lone = offline();
+    let few = [playing.clone(), never("gog:never-a", "Mai aperto A"), old.clone()];
+    let mut days = Vec::new();
+    for n in 0..6 {
+        days.push(lone.home(&plugin, &config, Lang::It, &few, noon + n * day).games[0].id.clone());
+    }
+    assert!(days.windows(2).all(|pair| pair[0] != pair[1]), "{days:?}");
+    assert_eq!(days.iter().filter(|id| *id == "gog:never-a").count(), 3, "every other day: {days:?}");
+    assert!(days.iter().all(|id| id == "gog:never-a" || id == "gog:old"), "the long untouched one in between: {days:?}");
+    // With a single game to propose, that one is the pick every day
+    let single = offline();
+    for n in 0..3 {
+        assert_eq!(single.home(&plugin, &config, Lang::It, &few[1..2], noon + n * day).games[0].id, "gog:never-a");
     }
 
     // With nothing waiting on disk: what was left untouched for months, then anything that
@@ -306,6 +333,18 @@ fn daily_pick_proposes_one_game_a_day_on_home_from_the_backlog_first() {
     marked.status = Some(GameStatus::Backlog);
     marked.playtime_minutes = Some(20);
     assert_eq!(pick(&[marked], Lang::It), Some(("gog:marked".to_string(), "Dal backlog".to_string())));
+    // Marked as being played, with no hours known to Kanso: not from the backlog, and not
+    // ahead of a game that really waits
+    let mut elsewhere = other_game("gog:elsewhere", "Giocato altrove");
+    elsewhere.status = Some(GameStatus::Playing);
+    assert_eq!(
+        pick(std::slice::from_ref(&elsewhere), Lang::It),
+        Some(("gog:elsewhere".to_string(), "Dalla tua libreria".to_string()))
+    );
+    assert_eq!(
+        pick(&[elsewhere, never("gog:never-z", "Mai aperto Z")], Lang::It).map(|(id, _)| id).as_deref(),
+        Some("gog:never-z")
+    );
 
     // Nothing to propose: no part on Home, rather than an empty one
     let nothing = offline();
@@ -321,6 +360,19 @@ fn daily_pick_proposes_one_game_a_day_on_home_from_the_backlog_first() {
     ] {
         let view = offline().home(&plugin, &config, lang, &one, noon);
         assert_eq!(view.title.as_deref(), Some(title));
+        assert_eq!(view.games[0].note.as_deref(), Some(note));
+    }
+    // The units of the time played are words of the line as well
+    for (minutes, lang, note) in [
+        (45, Lang::Ru, "Из вашей библиотеки · 45 мин в игре"),
+        (600, Lang::Ru, "Из вашей библиотеки · 10 ч в игре"),
+        (45, Lang::En, "From your library · 45 min played"),
+        (600, Lang::Es, "De tu biblioteca · 10 h de juego"),
+    ] {
+        let mut recent = other_game("gog:recent", "Di ieri");
+        recent.playtime_minutes = Some(minutes);
+        recent.last_played_at = Some(noon - day);
+        let view = offline().home(&plugin, &config, lang, &[recent], noon);
         assert_eq!(view.games[0].note.as_deref(), Some(note));
     }
 

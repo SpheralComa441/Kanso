@@ -275,9 +275,18 @@ export function resolveTheme(id: string | null, userThemes: Theme[]): Theme {
 /**
  * The pages the side panel offers: the theme's, in its order, less the ones the user chose
  * to hide in Settings. A page that is not here has no entry and no link leading to it.
+ *
+ * `hasEmulation`: the user has emulators, or games that run in one. The Emulators page is
+ * the only place that lists those games, so a theme that leaves it out gets it all the same,
+ * after its own pages: like the library among the groups, it can be moved but not taken away.
  */
-export function offeredPages(nav: ThemeNav, hidden: readonly HideableSection[]): NavPage[] {
-  return nav.pages.filter((page) => !(hidden as readonly string[]).includes(page));
+export function offeredPages(
+  nav: ThemeNav,
+  hidden: readonly HideableSection[],
+  hasEmulation: boolean
+): NavPage[] {
+  const pages = nav.pages.filter((page) => !(hidden as readonly string[]).includes(page));
+  return hasEmulation && !pages.includes("emulators") ? [...pages, "emulators"] : pages;
 }
 
 /**

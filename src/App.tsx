@@ -229,6 +229,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [searchQuery, setSearchQuery] = useState("");
   /** The emulators of this PC, as the last scan found them. */
   const [emulators, setEmulators] = useState<EmulatorInfo[]>([]);
+  /** They were read once: until then nobody knows whether this PC has any. */
+  const [emulatorsRead, setEmulatorsRead] = useState(false);
   /** The emulator whose page is open in the Emulators section. */
   const [openEmulatorId, setOpenEmulatorId] = useState<string | null>(null);
   const [filters, setFilters] = useState<LibraryFilters>(EMPTY_FILTERS);
@@ -309,9 +311,15 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   // What the side panel offers besides the library: the pages and groups the theme lists,
   // less what the user hid in Settings. Entries and links are drawn from this alone
   const hiddenSections = config.hiddenSections;
+  // The Emulators page is the only one that lists the games emulators run: while there are
+  // emulators, or such games, it stays offered whatever the theme lists. Until the first
+  // scan has said, the page is kept for who was left on it, and not shown to anyone else
+  const hasEmulation = emulatorsRead
+    ? emulators.length > 0 || report.games.some(isEmulated)
+    : chosenView === "emulators";
   const navPages = useMemo(
-    () => offeredPages(activeTheme.nav, hiddenSections),
-    [activeTheme.nav, hiddenSections]
+    () => offeredPages(activeTheme.nav, hiddenSections, hasEmulation),
+    [activeTheme.nav, hiddenSections, hasEmulation]
   );
   const navGroups = useMemo(
     () => offeredGroups(activeTheme.nav, hiddenSections),
@@ -484,7 +492,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         const res = await scanGames(userRequested);
         setReport(res);
         // The scan is what finds the emulators kept in the user's games folders
-        void listEmulators().then(setEmulators).catch(() => {});
+        void listEmulators()
+          .then(setEmulators)
+          .catch(() => {})
+          .finally(() => setEmulatorsRead(true));
         void runMetadataSync(userRequested);
       } catch (err) {
         setStatusMessage(typeof err === "string" ? err : t("app.scanError"));
@@ -663,7 +674,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     // The search box searches the library, wherever it is typed from; on an emulator's
     // page it searches that emulator's games
     const onEmulatorPage = mainView === "emulators" && openEmulatorId !== null;
-    if (value.trim() && mainView !== "library" && !onEmulatorPage) showView("library");
+    // The page the user chose is what counts, not the one on screen: while a theme that
+    // does not offer it is being tried, the library is already shown in its place, and a
+    // search typed there must leave the user on the library
+    if (value.trim() && chosenView !== "library" && !onEmulatorPage) showView("library");
   };
 
   const toggleSidebar = () => {
@@ -1032,6 +1046,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           genres={genres}
           tags={tags}
           nav={activeTheme.nav}
+          pages={navPages}
           hidden={config.hiddenSections}
         />
 

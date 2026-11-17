@@ -983,13 +983,15 @@ impl<'a> Fields<'a> {
         }
     }
 
-    /// One of the names an enum accepts.
+    /// One of the names an enum accepts, written as a string: serde alone would also take
+    /// the name as the one key of an object.
     fn choice<C: DeserializeOwned>(&self, key: &str, default: C) -> Result<C, String> {
         match self.get(key) {
             None => Ok(default),
-            Some(value) => {
+            Some(value) if value.is_string() => {
                 serde_json::from_value(value.clone()).map_err(|_| self.wrong(key, value))
             }
+            Some(value) => Err(self.wrong(key, value)),
         }
     }
 
@@ -1001,6 +1003,9 @@ impl<'a> Fields<'a> {
             Some(value @ Value::Array(entries)) => {
                 let mut names: Vec<C> = Vec::new();
                 for entry in entries {
+                    if !entry.is_string() {
+                        return Err(self.wrong(key, value));
+                    }
                     let name: C =
                         serde_json::from_value(entry.clone()).map_err(|_| self.wrong(key, value))?;
                     if !names.contains(&name) {
@@ -1846,6 +1851,7 @@ mod tests {
         for (raw, expected) in [
             (r##"{"name":"X","colors":{},"home":{"sections":["resume","<script>"]}}"##, "home.sections"),
             (r##"{"name":"X","colors":{},"home":{"sections":"resume"}}"##, "home.sections"),
+            (r##"{"name":"X","colors":{},"home":{"sections":[{"plugins":null}]}}"##, "home.sections"),
             (r##"{"name":"X","colors":{},"home":{"effects":"url(x.gif)"}}"##, "home.effects"),
         ] {
             let err = Theme::from_json(raw).expect_err(raw);
@@ -1941,6 +1947,10 @@ mod tests {
             (r##"{"name":"X","colors":{},"nav":{"pages":["home","<script>"]}}"##, "nav.pages"),
             (r##"{"name":"X","colors":{},"nav":{"pages":"home"}}"##, "nav.pages"),
             (r##"{"name":"X","colors":{},"nav":{"pages":[1]}}"##, "nav.pages"),
+            // A name is a string: not the one key of an object, which serde would also read
+            (r##"{"name":"X","colors":{},"nav":{"pages":[{"home":null}]}}"##, "nav.pages"),
+            (r##"{"name":"X","colors":{},"nav":{"groups":[{"tags":null}]}}"##, "nav.groups"),
+            (r##"{"name":"X","colors":{},"nav":{"pagesPosition":{"bottom":null}}}"##, "nav.pagesPosition"),
             (r##"{"name":"X","colors":{},"nav":{"groups":["library","home"]}}"##, "nav.groups"),
             (r##"{"name":"X","colors":{},"nav":{"groups":["Library"]}}"##, "nav.groups"),
             (r##"{"name":"X","colors":{},"nav":{"groups":{"library":true}}}"##, "nav.groups"),
@@ -1984,8 +1994,10 @@ mod tests {
             (r##"{"name":"X","colors":{},"store":{"tabs":["https://evil.example/deals"]}}"##, "store.tabs"),
             (r##"{"name":"X","colors":{},"store":{"tabs":"all"}}"##, "store.tabs"),
             (r##"{"name":"X","colors":{},"store":{"tabs":[["all"]]}}"##, "store.tabs"),
+            (r##"{"name":"X","colors":{},"store":{"tabs":[{"all":null}]}}"##, "store.tabs"),
             (r##"{"name":"X","colors":{},"store":{"layout":"table"}}"##, "store.layout"),
             (r##"{"name":"X","colors":{},"store":{"layout":"display: none"}}"##, "store.layout"),
+            (r##"{"name":"X","colors":{},"store":{"layout":{"list":null}}}"##, "store.layout"),
             (r##"{"name":"X","colors":{},"store":{"figures":"no"}}"##, "store.figures"),
             (r##"{"name":"X","colors":{},"store":{"figures":0}}"##, "store.figures"),
             (r##"{"name":"X","colors":{},"store":"list"}"##, "store"),
@@ -2023,6 +2035,7 @@ mod tests {
         for (raw, expected) in [
             (r##"{"name":"X","colors":{},"news":{"layout":"masonry"}}"##, "news.layout"),
             (r##"{"name":"X","colors":{},"news":{"layout":["list"]}}"##, "news.layout"),
+            (r##"{"name":"X","colors":{},"news":{"layout":{"grid":null}}}"##, "news.layout"),
             (r##"{"name":"X","colors":{},"news":{"pictures":"https://evil.example/x.png"}}"##, "news.pictures"),
             (r##"{"name":"X","colors":{},"news":{"pictures":1}}"##, "news.pictures"),
             (r##"{"name":"X","colors":{},"news":{"summaries":"yes"}}"##, "news.summaries"),
@@ -2221,25 +2234,56 @@ mod tests {
             .expect("docs/themes/arcade.kanso-theme.json must stay importable");
         assert_eq!(arcade.cards.shape, CardShape::Cut);
         assert_eq!(arcade.icons.corners, IconCorners::Sharp);
-        // Format 3: the emulators right after Home, the Store and the News as lists
-        assert_eq!(arcade.nav.pages, [NavPage::Home, NavPage::Emulators, NavPage::Store, NavPage::News, NavPage::Stats]);
-        assert_eq!((arcade.store.layout, arcade.store.figures, arcade.news.layout), (StoreLayout::List, false, NewsLayout::List));
 
         let aurora = Theme::from_json(include_str!("../../../../docs/themes/aurora.kanso-theme.json"))
             .expect("docs/themes/aurora.kanso-theme.json must stay importable");
         assert_eq!(aurora.cards.caption, CardCaption::Hover);
         assert_eq!(aurora.effects.background_gradient.len(), 3);
-        // Format 3: the pages at the bottom, the Store opening on the picks, the News as a grid
-        assert_eq!(aurora.nav.pages_position, PagesPosition::Bottom);
-        assert_eq!(aurora.nav.groups[..3], [NavGroup::Library, NavGroup::Genres, NavGroup::Tags]);
-        assert_eq!((aurora.store.tabs[0], aurora.news.layout), (StoreTab::Picks, NewsLayout::Grid));
 
         // The two that ship inside the app are written as the app itself would export them:
-        // every name they use is known, and reading them back changes nothing
+        // every name they use is known, and reading them back changes nothing. They were
+        // there before a theme could arrange the side panel, the Store and the News, and
+        // keep the arrangement they had: Kanso's
         for theme in [&arcade, &aurora] {
             assert!(theme.to_json().contains("\"kansoTheme\": 3"));
             assert_eq!(theme.home, ThemeHome::default(), "{}", theme.name);
+            assert_eq!(
+                (&theme.nav, &theme.store, &theme.news),
+                (&ThemeNav::default(), &ThemeStore::default(), &ThemeNews::default()),
+                "{}",
+                theme.name
+            );
             assert_eq!(&Theme::from_json(&theme.to_json()).unwrap(), theme, "{}", theme.name);
+        }
+
+        // The format 3 examples: the same two looks, each with an arrangement of its own
+        let rows = Theme::from_json(include_str!("../../../../docs/themes/arcade-rows.kanso-theme.json"))
+            .expect("docs/themes/arcade-rows.kanso-theme.json must stay importable");
+        // The emulators right after Home, the Store and the News as lists
+        assert_eq!(rows.nav.pages, [NavPage::Home, NavPage::Emulators, NavPage::Store, NavPage::News, NavPage::Stats]);
+        assert_eq!((rows.store.layout, rows.store.figures, rows.news.layout), (StoreLayout::List, false, NewsLayout::List));
+
+        let grid = Theme::from_json(include_str!("../../../../docs/themes/aurora-grid.kanso-theme.json"))
+            .expect("docs/themes/aurora-grid.kanso-theme.json must stay importable");
+        // The pages at the bottom, the Store opening on the picks, the News as a grid
+        assert_eq!(grid.nav.pages_position, PagesPosition::Bottom);
+        assert_eq!(grid.nav.groups[..3], [NavGroup::Library, NavGroup::Genres, NavGroup::Tags]);
+        assert_eq!((grid.store.tabs[0], grid.news.layout), (StoreTab::Picks, NewsLayout::Grid));
+
+        // Each differs from the theme it comes from in its name and in what it arranges, only
+        for (example, origin) in [(rows, &arcade), (grid, &aurora)] {
+            assert_ne!(example.name, origin.name);
+            assert_eq!(&Theme::from_json(&example.to_json()).unwrap(), &example, "{}", example.name);
+            let same_look = Theme {
+                id: origin.id.clone(),
+                name: origin.name.clone(),
+                description: origin.description.clone(),
+                nav: origin.nav.clone(),
+                store: origin.store.clone(),
+                news: origin.news,
+                ..example
+            };
+            assert_eq!(&same_look, origin);
         }
     }
 

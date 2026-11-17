@@ -606,6 +606,7 @@ export const en: Dictionary = {
   "store.picksDifferentNote": "deals far from what you usually play",
   "store.picksHow": "Suggestions come from comparing the deals' genres with the hours of the games in your library.",
   "store.noStores": "Every store is hidden. Choose them from Customize.",
+  "store.noTabs": "This theme only lists stores you have hidden. You can show them again from Customize.",
   "store.figureDeals": "Deals",
   "store.figureFree": "Free now",
   "store.figureBest": "Highest discount",

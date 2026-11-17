@@ -611,6 +611,7 @@ export const es: Dictionary = {
   "store.picksDifferentNote": "ofertas lejos de lo que sueles jugar",
   "store.picksHow": "Las sugerencias salen de comparar los géneros de las ofertas con las horas de los juegos que tienes en la biblioteca.",
   "store.noStores": "Todas las tiendas están ocultas. Elígelas en Personalizar.",
+  "store.noTabs": "Este tema solo muestra tiendas que has ocultado. Puedes volver a mostrarlas en Personalizar.",
   "store.figureDeals": "Ofertas",
   "store.figureFree": "Gratis ahora",
   "store.figureBest": "Mayor descuento",

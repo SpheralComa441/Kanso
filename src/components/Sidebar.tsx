@@ -27,7 +27,7 @@ import {
   type LibraryFilters,
 } from "../lib/library";
 import { PLATFORM_ORDER, platformLabel } from "../lib/platforms";
-import { offeredGroups, offeredPages } from "../lib/themes";
+import { offeredGroups } from "../lib/themes";
 import type {
   GamePlatform,
   GameStatus,
@@ -72,8 +72,10 @@ interface SidebarProps {
   genres: GenreSummary[];
   /** Steam community tags found in the library, most common first. */
   tags: GenreSummary[];
-  /** What the active theme puts in the panel: which pages and groups, in which order. */
+  /** What the active theme puts in the panel: which groups, in which order, and where the pages go. */
   nav: ThemeNav;
+  /** The pages on offer, in order: the theme's and the user's word, worked out once for the whole app. */
+  pages: readonly NavPage[];
   /** The parts of the panel the user chose to leave out, whatever the theme says. */
   hidden: readonly HideableSection[];
 }
@@ -259,6 +261,7 @@ export function Sidebar({
   genres,
   tags,
   nav,
+  pages,
   hidden,
   onOpenStore,
   onOpenNews,
@@ -624,7 +627,6 @@ export function Sidebar({
     selectedOnly.push(["tags", t("sidebar.tags"), tagRow(activeTag)]);
   }
 
-  const pages = offeredPages(nav, hidden);
   const pagesAtBottom = nav.pagesPosition === "bottom";
   const pageList = pages.length > 0 && (
     <div id="sidebar-pages" className="space-y-0.5">
@@ -658,7 +660,7 @@ export function Sidebar({
           <div className="app-sidebar-nav scroll-area fade-ends flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
             {groupList}
           </div>
-          {pageList && <div className="app-sidebar-pages">{pageList}</div>}
+          {pageList && <div className="app-sidebar-pages scroll-area">{pageList}</div>}
         </nav>
       ) : (
         <nav className="app-sidebar-nav scroll-area fade-top flex h-full flex-col gap-5 overflow-y-auto">

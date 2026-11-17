@@ -76,7 +76,8 @@ const BROWSER_STORAGE_KEY = "kanso.browser_preview.config";
 const PREVIEW_THEMES_KEY = "kanso.browser_preview.themes";
 /**
  * Optional answers for the parts plugins add to Home, by plugin id, in place of the preview's
- * samples: lets a check of the interface show a list, covered cards, words, or a failure.
+ * samples: lets a check of the interface show a list, covered cards, words, a failure, or
+ * (with `delayMs`) a plugin that is slow to answer.
  */
 const PREVIEW_HOME_PARTS_KEY = "kanso.browser_preview.home_parts";
 
@@ -824,9 +825,14 @@ export async function listEmulators(): Promise<EmulatorInfo[]> {
   if (isTauri()) {
     return invoke<EmulatorInfo[]>("list_emulators");
   }
+  // The preview's samples, or the emulators a page put in `__KANSO_PREVIEW_EMULATORS__`
+  // before the app loaded (an empty list: a PC with none), as for the games
+  const supplied = (globalThis as { __KANSO_PREVIEW_EMULATORS__?: unknown })
+    .__KANSO_PREVIEW_EMULATORS__;
+  const found = Array.isArray(supplied) ? (supplied as EmulatorInfo[]) : PREVIEW_MOCK_EMULATORS;
   const config = await getSettings();
   const added: EmulatorInfo[] = config.emulators
-    .filter((setting) => !PREVIEW_MOCK_EMULATORS.some((known) => known.id === setting.id))
+    .filter((setting) => !found.some((known) => known.id === setting.id))
     .map((setting) => ({
       id: setting.id,
       name: setting.name || setting.id,
@@ -836,7 +842,7 @@ export async function listEmulators(): Promise<EmulatorInfo[]> {
       addedByUser: true,
       version: null,
     }));
-  return [...PREVIEW_MOCK_EMULATORS, ...added];
+  return [...found, ...added];
 }
 
 /** Opens the emulator itself, with no game. */
@@ -1411,7 +1417,13 @@ export async function pluginHomeData(pluginId: string, force = false): Promise<H
   const answer = previewHomeData(pluginId, previewGamesState);
   try {
     const staged = JSON.parse(localStorage.getItem(PREVIEW_HOME_PARTS_KEY) ?? "{}")[pluginId];
-    return staged && typeof staged === "object" ? { ...answer, ...staged } : answer;
+    if (!staged || typeof staged !== "object") return answer;
+    // `delayMs` stages a plugin that takes its time to answer
+    const { delayMs, ...over } = staged as Partial<HomeDataAnswer> & { delayMs?: unknown };
+    if (typeof delayMs === "number" && delayMs > 0) {
+      await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    }
+    return { ...answer, ...over };
   } catch {
     return answer;
   }

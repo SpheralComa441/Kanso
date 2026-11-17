@@ -117,6 +117,12 @@
   outline-offset: 2px !important;
 }
 
+/* A button that covers a whole row of a list sits in a frame that clips what is drawn
+   outside it: there the thick outline stays inside the row, whole on its four sides */
+:root[data-strong-focus] .motion-row > button:focus-visible {
+  outline-offset: -3px !important;
+}
+
 /* Title rules a theme switches on; above utilities, which set these per component. */
 :root[data-heading-weight] :is(h1, h2, h3) {
   font-weight: var(--heading-weight);
@@ -213,6 +219,11 @@
     width: var(--sidebar-width);
     padding: 0.625rem 10px 1rem;
     border-top: var(--divider-width) solid var(--border-subtle);
+    /* Never the whole panel: in a small window with large text the pages scroll in their
+       own space, and the groups above keep theirs */
+    flex-shrink: 0;
+    max-height: 60%;
+    overflow-y: auto;
   }
 
   .app-main {

@@ -94,16 +94,16 @@
   },
   "nav": {
     "pages": ["home", "store", "news", "stats", "emulators"],
-    "groups": ["library", "genres", "tags", "platform", "status"],
-    "pagesPosition": "bottom"
+    "groups": ["library", "status", "platform", "genres", "tags"],
+    "pagesPosition": "top"
   },
   "store": {
-    "tabs": ["picks", "all", "steam", "epic", "gog", "others", "liked"],
+    "tabs": ["all", "picks", "steam", "epic", "gog", "others", "liked"],
     "layout": "grid",
     "figures": true
   },
   "news": {
-    "layout": "grid",
+    "layout": "magazine",
     "pictures": true,
     "summaries": true
   },

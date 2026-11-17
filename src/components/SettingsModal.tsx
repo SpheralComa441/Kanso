@@ -1447,6 +1447,14 @@ export function SettingsModal({
                   states={pluginStates}
                   onStatesChange={setPluginStates}
                   onInstalledChanged={onPluginsChanged}
+                  // A removed plugin takes its part of Home with it, here as in what is saved:
+                  // left in this dialog's copy, Save would write the entry back
+                  onRemoved={(id) =>
+                    setHome((current) => ({
+                      ...current,
+                      hidden: current.hidden.filter((entry) => entry !== homePluginPart(id)),
+                    }))
+                  }
                 />
               </section>
             </Panel>

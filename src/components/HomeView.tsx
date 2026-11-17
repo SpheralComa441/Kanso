@@ -240,8 +240,9 @@ function HomePluginPart({ part, games, onOpenGame, onLaunch }: HomePluginPartPro
               <button
                 type="button"
                 data-refresh-plugin={plugin.id}
-                onClick={refresh}
-                disabled={isLoading}
+                // Busy, not disabled: a disabled button would drop the keyboard focus it has
+                onClick={isLoading ? undefined : refresh}
+                aria-disabled={isLoading}
                 title={t("plugins.refresh", { name: plugin.name })}
                 aria-label={t("plugins.refresh", { name: plugin.name })}
                 className={control}
@@ -574,6 +575,9 @@ export function HomeView({
   };
 
   const drawn = shown.map((section) => sections[section]).filter((section) => section !== null);
+  // A plugin that has not answered yet may still have something for the page: until it
+  // has, nobody can say there is nothing to show
+  const awaitingPlugins = shown.includes("plugins") && pluginParts.some((part) => part.answer === null);
 
   return (
     <div className="home-page relative space-y-7">
@@ -617,7 +621,7 @@ export function HomeView({
       <div className="relative space-y-7">
         {drawn.length > 0 ? (
           drawn
-        ) : (
+        ) : awaitingPlugins ? null : (
           <div id="home-empty" className="rounded-xl border border-oled-border bg-oled-surface/40 px-6 py-12 text-center">
             <p className="mx-auto max-w-xl text-sm leading-relaxed text-zinc-400">{t("home.empty")}</p>
           </div>

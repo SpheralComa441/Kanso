@@ -14,6 +14,11 @@ export interface HomePluginPartData {
   refresh: () => void;
 }
 
+/** How often the plugins are asked again while Home stays on screen. */
+const ASK_AGAIN_MS = 15 * 60 * 1000;
+/** The window coming back asks again too, unless the plugins were asked a moment ago. */
+const ASK_BACK_MIN_MS = 60 * 1000;
+
 interface PartState {
   answer: HomeDataAnswer | null;
   isLoading: boolean;
@@ -27,6 +32,8 @@ interface PartState {
  * them), each on its own: one that is slow or fails does not hold the others back. What they
  * answered stays here between visits to the page, so that coming back to Home draws it at
  * once while the backend is asked again (it answers from its cache while that is fresh).
+ * While Home stays on screen they are asked again every quarter of an hour and when the
+ * window comes back, quietly: Home is about today, also when it is left open for days.
  */
 export function useHomePlugins(
   plugins: PluginInfo[],
@@ -46,7 +53,9 @@ export function useHomePlugins(
     [plugins, hiddenKey]
   );
 
-  const load = (plugin: PluginInfo, force: boolean) => {
+  // `quiet`: asked in passing, as time goes by. Nothing on screen says so, and nothing
+  // changes unless the answer did
+  const load = (plugin: PluginInfo, force: boolean, quiet = false) => {
     const ticket = (tickets.current[plugin.id] ?? 0) + 1;
     tickets.current[plugin.id] = ticket;
     const settle = (answer: HomeDataAnswer) => {
@@ -62,10 +71,12 @@ export function useHomePlugins(
         };
       });
     };
-    setStates((current) => ({
-      ...current,
-      [plugin.id]: { answer: current[plugin.id]?.answer ?? null, isLoading: true },
-    }));
+    if (!quiet) {
+      setStates((current) => ({
+        ...current,
+        [plugin.id]: { answer: current[plugin.id]?.answer ?? null, isLoading: true },
+      }));
+    }
     pluginHomeData(plugin.id, force)
       .then(settle)
       .catch((error) =>
@@ -82,7 +93,26 @@ export function useHomePlugins(
 
   useEffect(() => {
     if (!shown) return;
-    for (const plugin of offered) load(plugin, false);
+    let asked = Date.now();
+    const ask = (quiet: boolean) => {
+      asked = Date.now();
+      for (const plugin of offered) load(plugin, false, quiet);
+    };
+    ask(false);
+    // Home can stay on screen for days (the window waits in the tray while a game runs):
+    // the plugins are asked again as time passes, and when the window comes back. The
+    // backend answers from its cache while that is fresh, so asking costs next to nothing
+    const timer = window.setInterval(() => ask(true), ASK_AGAIN_MS);
+    const back = () => {
+      if (document.visibilityState === "visible" && Date.now() - asked >= ASK_BACK_MIN_MS) ask(true);
+    };
+    window.addEventListener("focus", back);
+    document.addEventListener("visibilitychange", back);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", back);
+      document.removeEventListener("visibilitychange", back);
+    };
     // `load` and `t` change identity on every render; the page shown and the plugins offered
     // (re-read whenever the settings are saved or the language changes) are what matter
     // eslint-disable-next-line react-hooks/exhaustive-deps

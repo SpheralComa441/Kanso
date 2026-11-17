@@ -44,18 +44,23 @@ netti e bagliore al passaggio, riquadri pieni nella scheda del gioco, animazioni
 scheda del gioco sopra la copertina molto sfocata). Entrambi usano i layout attuali: copertine
 che raccontano il gioco al passaggio del mouse e scheda a riquadri con le altre schede che scorrono.
 Arcade e Aurora sono anche inclusi nell'app: il tema incluso e il file sono la stessa cosa.
+Pannello laterale, Store e News hanno in entrambi la disposizione predefinita di Kanso, quella
+che avevano prima che un tema potesse cambiarla: chi li usa li ritrova com'erano.
 
-I due esempi del formato 3 dispongono anche il pannello laterale, lo Store e le News, ciascuno a
-modo suo. *The two format 3 examples also arrange the side panel, the Store and the News, each
-in its own way:*
+Due altri esempi, [`arcade-rows`](themes/arcade-rows.kanso-theme.json) e
+[`aurora-grid`](themes/aurora-grid.kanso-theme.json), hanno lo stesso aspetto di Arcade e Aurora
+e in più dispongono il pannello laterale, lo Store e le News, ciascuno a modo suo. Non sono
+inclusi nell'app: si importano come ogni altro file. *Two more examples look like Arcade and
+Aurora and also arrange the side panel, the Store and the News, each in its own way. They are
+not built in: import them like any other file.*
 
 | | Pannello laterale / Side panel | Store | News |
 | --- | --- | --- | --- |
-| **Arcade** | Pagine in alto con gli Emulatori subito dopo la Home (`home`, `emulators`, `store`, `news`, `stats`); tra i gruppi, le piattaforme prima degli stati | A elenco (`list`), senza la riga delle cifre | A elenco (`list`), con immagine e riassunto |
-| **Aurora** | Pagine in fondo (`pagesPosition: bottom`); generi e tag subito dopo la libreria, poi piattaforme e stati | A griglia, con «Per te» come prima scheda: la pagina si apre lì | A griglia uniforme (`grid`), senza la notizia grande in testa |
+| **Arcade Rows** | Pagine in alto con gli Emulatori subito dopo la Home (`home`, `emulators`, `store`, `news`, `stats`); tra i gruppi, le piattaforme prima degli stati | A elenco (`list`), senza la riga delle cifre | A elenco (`list`), con immagine e riassunto |
+| **Aurora Grid** | Pagine in fondo (`pagesPosition: bottom`); generi e tag subito dopo la libreria, poi piattaforme e stati | A griglia, con «Per te» come prima scheda: la pagina si apre lì | A griglia uniforme (`grid`), senza la notizia grande in testa |
 
 Nord, che è un file del formato 1, non dice nulla di tutto questo e prende la disposizione
-predefinita di Kanso, come i sei temi inclusi nati dal logo.
+predefinita di Kanso, come Arcade, Aurora e i sei temi inclusi nati dal logo.
 
 ## Installare un tema / Installing a theme
 
@@ -378,12 +383,21 @@ Quali pagine e quali gruppi elenca il pannello laterale, in che ordine, e dove s
 
 | Chiave / Key | Valori / Values | Significato / Meaning |
 | --- | --- | --- |
-| `pages` | elenco di `home`, `store`, `news`, `stats`, `emulators` | Le pagine accanto alla libreria, nell'ordine scritto: Home, Store, News, Statistiche, Emulatori. Ogni nome una volta sola. Una pagina non nominata non è offerta: non ha la sua voce e nessun collegamento porta lì (per esempio «Vedi tutto nello Store» dalla Home). `[]` lascia la sola libreria |
+| `pages` | elenco di `home`, `store`, `news`, `stats`, `emulators` | Le pagine accanto alla libreria, nell'ordine scritto: Home, Store, News, Statistiche, Emulatori. Ogni nome una volta sola. Una pagina non nominata non è offerta: non ha la sua voce e nessun collegamento porta lì (per esempio «Vedi tutto nello Store» dalla Home). Fa eccezione `emulators` quando l'utente ha emulatori o giochi emulati (vedi sotto). `[]` lascia la sola libreria, più gli Emulatori per chi ne ha |
 | `groups` | elenco di `library`, `status`, `platform`, `genres`, `tags` | I gruppi di voci, nell'ordine scritto: Libreria (tutti i giochi, preferiti, recenti, non installati, nascosti), Stato, Piattaforma, Generi, Tag. Un gruppo non nominato non viene mostrato, **tranne `library`**: se il tema non la nomina, Kanso la mette per prima |
-| `pagesPosition` | `top`, `bottom` | Le pagine sopra i gruppi, oppure sotto: in quel caso restano ferme in fondo al pannello mentre i gruppi scorrono |
+| `pagesPosition` | `top`, `bottom` | Le pagine sopra i gruppi, oppure sotto: in quel caso restano ferme in fondo al pannello mentre i gruppi scorrono. In una finestra piccola con il testo ingrandito le pagine non prendono mai più di una parte del pannello: scorrono nel loro spazio, e i gruppi tengono il proprio |
 
 - La libreria c'è sempre: un tema non può togliere all'utente la strada verso i suoi giochi.
   *The library is always there: a theme cannot lock the user out of their games.*
+- Per la stessa ragione la pagina degli Emulatori resta finché l'utente ha emulatori o giochi
+  emulati: quei giochi non stanno nell'elenco della libreria né nella sua ricerca, e quella
+  pagina è l'unica che li elenca tutti. Un tema può spostarla (nominando `emulators` dove
+  vuole); se non la nomina, Kanso la mette dopo le pagine del tema. Per chi non ha emulatori né
+  giochi emulati vale la scelta del tema: senza `emulators`, niente voce. *For the same reason
+  the Emulators page stays while the user has emulators or emulated games: those games are not
+  in the library list or its search, and that page is the only one that lists them all. A theme
+  can place it; a theme that leaves `emulators` out gets it after its own pages. With no
+  emulators and no emulated games the theme's choice stands: no entry.*
 - Ciò che l'utente nasconde da *Impostazioni → Generale → Pannello laterale* (Home, Store, News,
   Tag) resta nascosto qualunque cosa dica il tema. *What the user hides in Settings stays hidden
   whatever the theme says.*
@@ -394,12 +408,13 @@ Quali pagine e quali gruppi elenca il pannello laterale, in che ordine, e dove s
   Mentre un tema è solo in prova nelle Impostazioni si vede la libreria, ma annullando si torna
   alla pagina di prima.
 - Una pagina non offerta non sparisce da Kanso: cambia solo ciò che il pannello propone. Senza
-  `emulators`, per esempio, gli emulatori si gestiscono ancora da *Impostazioni → Emulatori* e i
-  giochi emulati restano sulla Home e, se hanno uno stato, nell'elenco di quello stato; ma la
-  pagina che li elenca tutti non c'è finché l'utente non sceglie un altro tema. *A page that is
-  not offered is only out of the panel: without `emulators`, emulated games still show on Home
-  and under their status, but the page listing them all is not there until another theme is
-  chosen.*
+  `store`, per esempio, le offerte restano tra le parti della Home e gli store si scelgono
+  ancora da *Impostazioni → Store*; senza `emulators` (per chi non ne ha) gli emulatori si
+  aggiungono ancora da *Impostazioni → Emulatori*, e dalla scansione successiva la pagina
+  compare da sé. *A page that is not offered is only out of the panel: without `store`, deals
+  still show on Home and the stores are still chosen in Settings; without `emulators` (for
+  someone who has none) emulators are still added in Settings → Emulators, and from the next
+  scan the page shows up by itself.*
 - Un filtro di un gruppo che il tema non mostra può comunque essere attivo (un genere scelto
   dalla scheda di un gioco, un filtro messo prima di cambiare tema). In quel caso il gruppo
   compare ridotto al titolo e alla sola voce selezionata, che lo spegne con un clic, e sparisce
@@ -418,13 +433,23 @@ full page: what Home shows of the Store stays as tiles.*
 
 | Chiave / Key | Valori / Values | Significato / Meaning |
 | --- | --- | --- |
-| `tabs` | elenco di `all`, `picks`, `steam`, `epic`, `gog`, `others`, `liked` | Le schede, nell'ordine scritto: tutte le offerte, «Per te», Steam, Epic Games, GOG, altri store, «Mi piace». Ogni nome una volta sola. Una scheda non nominata non è offerta; **la prima è quella su cui si apre la pagina**. Ne serve almeno una: `[]` fa rifiutare il file |
+| `tabs` | elenco di `all`, `picks`, `steam`, `epic`, `gog`, `others`, `liked` | Le schede, nell'ordine scritto: tutte le offerte, «Per te», Steam, Epic Games, GOG, altri store, «Mi piace». Ogni nome una volta sola. Una scheda non nominata non è offerta (tranne `liked` finché l'utente ha offerte con il cuore, vedi sotto); **la prima è quella su cui si apre la pagina**. Ne serve almeno una: `[]` fa rifiutare il file |
 | `layout` | `grid`, `list` | `grid`: riquadri con l'immagine in alto. `list`: righe compatte con immagine piccola, titolo, store, generi, scadenza, sconto e prezzo; le azioni «Mi piace» e «Nascondi» sono le stesse |
 | `figures` | `true` / `false` | La riga delle quattro cifre (offerte, gratis ora, sconto più alto, in scadenza) in cima alla scheda `all` |
 
 - Gli store che l'utente ha nascosto da *Impostazioni → Store* restano nascosti qualunque cosa
   dica il tema: la loro scheda non compare, e se era la prima la pagina si apre sulla successiva.
   *Stores the user hid stay hidden whatever the theme says.*
+- Se tutte le schede che il tema nomina sono di store nascosti dall'utente, la pagina lo dice e
+  rimanda a *Personalizza*, dove si possono mostrare di nuovo. *If every tab the theme lists
+  belongs to a store the user hid, the page says so and points to Customize.*
+- Le offerte con il cuore sono dell'utente: se il tema non nomina `liked`, la scheda «Mi piace»
+  compare comunque, per ultima, finché ce ne sono. È lì che si vedono tutte, che se ne toglie
+  una, e dove porta l'avviso di quelle in scadenza. *The deals the user liked are theirs: if the
+  theme leaves `liked` out, the tab still shows, last, while there are any.*
+- Nelle righe di `list`, dove la finestra è stretta o il testo è ingrandito, sconto, prezzo e
+  azioni vanno a capo sotto il titolo, che resta leggibile. *In a narrow window or with larger
+  text a row of `list` wraps: discount, price and actions go under the title.*
 - `all` elenca le offerte di tutti gli store che l'utente tiene, anche di quelli a cui il tema
   non dà una scheda propria.
 - Un tema sceglie tra le schede che esistono: non può aggiungere negozi o indirizzi, né cambiare
