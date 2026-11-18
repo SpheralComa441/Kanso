@@ -1,5 +1,5 @@
-import type { DetectedGame, GamePlatform, GameStatus } from "../types/game";
-import { PLATFORM_ORDER } from "./platforms";
+import type { DetectedGame, GameStatus, GameSource } from "../types/game";
+import { PLATFORM_ORDER, sourceOf } from "./platforms";
 
 /**
  * Which slice of the library is shown. Hidden games appear in `hidden` only; every other
@@ -31,7 +31,7 @@ export function isInScope(game: DetectedGame, scope: LibraryScope): boolean {
 /** Quick filters combined with AND; `"all"` / `null` means "no constraint". */
 export interface LibraryFilters {
   collection: LibraryCollection;
-  platform: GamePlatform | null;
+  platform: GameSource | null;
   /** Normalized genre key, see {@link genreKey}. */
   genre: string | null;
   /** Normalized key of a Steam community tag. */
@@ -81,7 +81,8 @@ export interface LibraryCounts {
   notInstalled: number;
   hidden: number;
   /** Platforms and statuses of the games in the scope being browsed. */
-  byPlatform: Record<GamePlatform, number>;
+  /** By store, and by plugin library (`plugin:<id>`) for the plugins that have games. */
+  byPlatform: Record<string, number>;
   byStatus: Record<GameStatus, number>;
 }
 
@@ -178,7 +179,7 @@ export function countLibrary(
 ): LibraryCounts {
   const byPlatform = Object.fromEntries(
     PLATFORM_ORDER.map((p) => [p, 0])
-  ) as Record<GamePlatform, number>;
+  ) as Record<string, number>;
   const counts: LibraryCounts = {
     visible: 0,
     favorites: 0,
@@ -196,7 +197,8 @@ export function countLibrary(
     if (!game.isInstalled) counts.notInstalled += 1;
     if (isInScope(game, scope)) {
       if (game.status) counts.byStatus[game.status] += 1;
-      byPlatform[game.platform] = (byPlatform[game.platform] ?? 0) + 1;
+      const source = sourceOf(game);
+      byPlatform[source] = (byPlatform[source] ?? 0) + 1;
     }
     if (installedOnly && !game.isInstalled) continue;
     counts.visible += 1;
@@ -226,7 +228,7 @@ export function applyLibraryFilters(
     if (!wantHidden && !isInScope(g, scope)) return false;
     if (filters.collection === "favorites" && !g.isFavorite) return false;
     if (filters.collection === "recent" && !isRecentlyPlayed(g)) return false;
-    if (filters.platform && g.platform !== filters.platform) return false;
+    if (filters.platform && sourceOf(g) !== filters.platform) return false;
     if (filters.status && g.status !== filters.status) return false;
     if (
       filters.genre &&

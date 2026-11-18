@@ -26,10 +26,10 @@ import {
   type LibraryCounts,
   type LibraryFilters,
 } from "../lib/library";
-import { PLATFORM_ORDER, platformLabel } from "../lib/platforms";
+import { PLATFORM_ORDER, platformLabel, pluginOfSource } from "../lib/platforms";
 import { offeredGroups } from "../lib/themes";
 import type {
-  GamePlatform,
+  GameSource,
   GameStatus,
   HideableSection,
   NavGroup,
@@ -327,7 +327,13 @@ export function Sidebar({
   const statusesInUse =
     filters.status !== null || GAME_STATUSES.some((status) => counts.byStatus[status] > 0);
 
-  const platformsWithGames = PLATFORM_ORDER.filter(
+  // The stores, then the libraries the plugins brought, each under its own name
+  const pluginLibraries = Object.keys(counts.byPlatform)
+    .filter((source): source is GameSource => pluginOfSource(source as GameSource) !== null)
+    .concat(filters.platform !== null && pluginOfSource(filters.platform) !== null ? [filters.platform] : [])
+    .filter((source, index, all) => all.indexOf(source) === index)
+    .sort((a, b) => platformLabel(a, t).localeCompare(platformLabel(b, t)));
+  const platformsWithGames: GameSource[] = [...PLATFORM_ORDER, ...pluginLibraries].filter(
     (platform) =>
       counts.byPlatform[platform] > 0 || filters.platform === platform
   );
@@ -408,14 +414,14 @@ export function Sidebar({
       />
     );
   };
-  const platformRow = (platform: GamePlatform) => {
+  const platformRow = (platform: GameSource) => {
     const active = inLibrary && filters.platform === platform;
     return (
       <NavRow
         key={platform}
         id={`filter-platform-${platform}`}
         label={platformLabel(platform, t)}
-        count={counts.byPlatform[platform]}
+        count={counts.byPlatform[platform] ?? 0}
         active={active}
         onClick={() => onFiltersChange(withVisiblePool({ platform: active ? null : platform }))}
       />

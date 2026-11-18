@@ -1,0 +1,13 @@
+# Text is stored and checked out with LF on every system: the tests read the guides and the
+# example themes as they are in the repository.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.icns binary
+*.woff2 binary
+*.ttf binary
+*.otf binary

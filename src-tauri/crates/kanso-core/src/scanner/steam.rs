@@ -312,6 +312,22 @@ pub fn scan_steam_from_root(steam_root: &Path) -> SourceScanOutput {
         }
     }
 
+    // Whose each game is, from the licences the client holds for the account: more to the
+    // point than who last ran the installed copy. Where the licences say nothing (no cache,
+    // an app they do not cover) what the manifest said stands
+    if let Some(ownership) = super::steam_licenses::read_steam_ownership(steam_root) {
+        for game in &mut output.games {
+            let shared = game
+                .platform_app_id
+                .as_deref()
+                .and_then(|appid| appid.trim().parse::<u64>().ok())
+                .and_then(|appid| ownership.is_family_shared(appid));
+            if let Some(shared) = shared {
+                game.is_family_shared = shared;
+            }
+        }
+    }
+
     // Hours played and last session, straight from the Steam client's own records
     let play_stats = read_steam_play_stats(steam_root);
     for game in &mut output.games {
@@ -692,6 +708,50 @@ mod tests {
         assert_eq!(steam_id64_of(Path::new("/steam/userdata/123456/config")), Some(me));
         assert_eq!(steam_id64_of(Path::new("/steam/userdata/anonymous/config")), None);
         assert_eq!(steam_id64_of(Path::new("/steam/userdata/0/config")), None);
+    }
+
+    #[test]
+    fn the_scan_takes_whose_a_game_is_from_the_clients_licences() {
+        use crate::scanner::steam_licenses::tests::license_cache;
+        use crate::scanner::steam_packages::tests::PackageFile;
+
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let steamapps = root.join("steamapps");
+        let me = 222u32;
+        let my_id64 = STEAM_ID64_BASE + u64::from(me);
+        let sister_id64 = STEAM_ID64_BASE + 333;
+        let manifest = |appid: &str, owner: u64| {
+            format!("\"AppState\"\n{{\n\t\"appid\"\t\"{appid}\"\n\t\"name\"\t\"Game {appid}\"\n\t\"installdir\"\t\"Game{appid}\"\n\t\"LastOwner\"\t\"{owner}\"\n}}\n")
+        };
+        for (appid, owner) in [("10", sister_id64), ("20", my_id64), ("30", sister_id64), ("40", my_id64)] {
+            fs::create_dir_all(steamapps.join("common").join(format!("Game{appid}"))).unwrap();
+            fs::write(steamapps.join(format!("appmanifest_{appid}.acf")), manifest(appid, owner)).unwrap();
+        }
+        let config = root.join("userdata").join(me.to_string()).join("config");
+        fs::create_dir_all(&config).unwrap();
+        fs::write(config.join("localconfig.vdf"), LOCAL_CONFIG).unwrap();
+        let shared = |scan: &SourceScanOutput, appid: &str| {
+            scan.games.iter().find(|g| g.id == format!("steam:{appid}")).unwrap().is_family_shared
+        };
+
+        // Without the licences: who the manifest names as the owner of the installed copy
+        let by_manifest = scan_steam_from_root(root);
+        assert_eq!(["10", "20", "30", "40"].map(|appid| shared(&by_manifest, appid)), [true, false, true, false]);
+
+        // With them: app 10 is mine although my sister installed it, app 20 is hers although
+        // I ran it last; app 30 and 40 are in no licence, and the manifest stands
+        fs::create_dir_all(root.join("appcache")).unwrap();
+        let packages = PackageFile::new(true).package(1, 1, &[], &[10]).package(2, 1, &[], &[20]);
+        fs::write(root.join("appcache").join("packageinfo.vdf"), packages.finish()).unwrap();
+        fs::write(config.join("licensecache"), license_cache(me, &[(1, me), (2, 333)])).unwrap();
+        let by_licences = scan_steam_from_root(root);
+        assert_eq!(["10", "20", "30", "40"].map(|appid| shared(&by_licences, appid)), [false, true, true, false]);
+
+        // A licence cache that does not decode is as good as none
+        fs::write(config.join("licensecache"), b"not a licence cache at all").unwrap();
+        let again = scan_steam_from_root(root);
+        assert_eq!(["10", "20", "30", "40"].map(|appid| shared(&again, appid)), [true, false, true, false]);
     }
 
     #[test]

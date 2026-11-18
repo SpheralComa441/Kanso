@@ -147,6 +147,10 @@ fn save_settings(
     }
     // A plugin may have been switched on, or its settings changed
     state.plugins.wake_background_fill();
+    if saved.plugins != before.plugins {
+        // One that brings a library: its games join, change or leave with it
+        plugins::sync_libraries_in_background(&app, &state);
+    }
     Ok(saved)
 }
 
@@ -235,6 +239,11 @@ async fn sync_library_metadata(
         let client = MetadataClient::new().with_language(lang);
         let api_key = has_api_key.then_some(config.steamgriddb_api_key.as_str());
 
+        // The games the plugins' libraries bring join first, so that what follows looks for
+        // their covers and details as for any other game. A plugin that fails is a line for
+        // the user and takes nothing away
+        let plugin_warnings = plugins::sync_libraries(&app_handle, &db, &plugin_host, &config, retry_now);
+
         let candidates: Vec<DetectedGame> = lock_db(&db)
             .load_games()?
             .into_iter()
@@ -271,6 +280,11 @@ async fn sync_library_metadata(
             let play_stats = kanso_core::scanner::steam::read_steam_play_stats(&steam_root);
             let owned_apps = kanso_core::scanner::steam_packages::read_owned_steam_apps(&steam_root);
             kanso_core::owned::sync_steam_library(&db, &client, &play_stats, &owned_apps, now);
+            // Which of them are the family's: the client's own list of licences says whose
+            // each one is, for the games that are not installed as for those that are
+            if let Some(ownership) = kanso_core::scanner::steam_licenses::read_steam_ownership(&steam_root) {
+                kanso_core::owned::apply_steam_ownership(&db, &ownership);
+            }
         }
         // The clients of Epic, GOG Galaxy and Ubisoft Connect name the account's games in
         // their own local records: those join too, with no sign-in and no request
@@ -291,7 +305,9 @@ async fn sync_library_metadata(
         let final_store = LibraryStore::load(&lock_db(&db))?;
         // The library is settled: plugins that label the game cards can catch up quietly
         plugin_host.wake_background_fill();
-        Ok(final_store.to_report())
+        let mut report = final_store.to_report();
+        report.warnings = plugin_warnings;
+        Ok(report)
     })
     .await
     .map_err(|e| format!("{}: {e}", T::SyncFailed.s()))?
@@ -638,6 +654,10 @@ fn launch_game(
     if game.platform == GamePlatform::Emulator {
         emulators::launch_emulated_game(&app, &state, &game)?;
     } else {
+        if game.platform == GamePlatform::Plugin {
+            // The address came from a plugin: opened only while its plugin still vouches for it
+            plugins::check_library_game(&state.plugins, &load_config(&app), &game)?;
+        }
         launch_game_inner(&app, &game)?;
     }
 
@@ -667,6 +687,10 @@ fn install_game(app: AppHandle, state: State<'_, AppState>, game_id: String) -> 
     let uri = game
         .install_uri()
         .ok_or_else(|| T::NoInstallTarget.s().to_string())?;
+    if game.platform == GamePlatform::Plugin {
+        // The address came from a plugin: opened only while its plugin still vouches for it
+        plugins::check_library_game(&state.plugins, &load_config(&app), &game)?;
+    }
     app.opener()
         .open_url(&uri, None::<&str>)
         .map_err(|e| format!("{} \"{}\": {e}", T::LaunchFailed.s(), game.title))

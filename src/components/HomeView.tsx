@@ -4,7 +4,7 @@ import { useI18n } from "../i18n";
 import type { Ambience } from "../lib/ambience";
 import { MAX_UP_NEXT, resolveCoverUrl } from "../lib/backend";
 import { isRecentlyPlayed } from "../lib/library";
-import { platformLabel } from "../lib/platforms";
+import { platformLabel, sourceOf } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { HomePluginPartData } from "../lib/useHomePlugins";
 import type { BadgeEntry, CardInfoItem, DetectedGame, HomeConfig, HomeSection, ThemeHome } from "../types/game";
@@ -449,7 +449,7 @@ export function HomeView({
                   key={game.id}
                   game={game}
                   rank={index + 1}
-                  note={game.playtimeMinutes ? timeNote(game) : platformLabel(game.platform, t)}
+                  note={game.playtimeMinutes ? timeNote(game) : platformLabel(sourceOf(game), t)}
                   isLaunching={launchingId === game.id}
                   onOpen={onOpenGame}
                   onLaunch={onLaunch}

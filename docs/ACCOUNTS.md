@@ -82,6 +82,14 @@ giochi: l'elenco di Steam, il catalogo di Epic, il database di GOG Galaxy e la c
 Ubisoft Connect. Sono letture locali: **nessuna richiesta di rete, nessuna credenziale, nulla
 viene scritto o modificato** in quei file.
 
+**I giochi della famiglia di Steam.** Per sapere quali giochi di Steam sono tuoi e quali ti
+arrivano dalla condivisione familiare, anche quando non sono installati, Kanso legge l'elenco
+delle licenze che il client di Steam tiene in `userdata\<numero>\config\licensecache`. Ogni
+licenza dice a quale account appartiene: quelle di un altro account sono della famiglia. Il
+file è offuscato dal client con il numero del tuo account (il nome di quella cartella); Kanso
+lo decodifica in memoria, ne tiene solo «questo gioco è tuo / è della famiglia» e non salva né
+invia altro. Se il file manca o non si lascia leggere, vale ciò che dice il gioco installato.
+
 **La cache di Ubisoft Connect merita due righe in più**, perché è l'unico posto in cui si trova
 l'elenco completo dei giochi che puoi installare su questo PC, compresi quelli che ti arrivano
 da Ubisoft+ o da Xbox Game Pass (l'elenco dell'account su internet non li contiene).
@@ -305,6 +313,14 @@ Besides the accounts, Kanso reads from disk what the stores' clients already kno
 games: Steam's list, Epic's catalog, GOG Galaxy's database and Ubisoft Connect's cache. These
 are local reads: **no network request, no credentials, nothing is written or changed** in
 those files.
+
+**The games of your Steam family.** To tell which Steam games are yours and which reach you
+through family sharing, also when they are not installed, Kanso reads the list of licences
+the Steam client keeps in `userdata\<number>\config\licensecache`. Each licence says which
+account it belongs to: those of another account are the family's. The client obfuscates the
+file with your account's number (the name of that folder); Kanso decodes it in memory, keeps
+only "this game is yours / is the family's" and saves or sends nothing else. If the file is
+missing or cannot be read, what the installed game says stands.
 
 **Ubisoft Connect's cache deserves a few more lines**, because it is the only place that holds
 the full list of the games you can install on this PC, including the ones Ubisoft+ or Xbox

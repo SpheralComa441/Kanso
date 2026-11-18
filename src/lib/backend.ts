@@ -51,6 +51,7 @@ import {
   PREVIEW_MOCK_EMULATED_GAMES,
   PREVIEW_MOCK_EMULATORS,
   PREVIEW_MOCK_GAMES,
+  PREVIEW_PLUGIN_LIBRARY_GAMES,
 } from "./previewData";
 import {
   previewAchievements,
@@ -240,7 +241,30 @@ export async function scanGames(thorough = false): Promise<ScanReport> {
     return invoke<ScanReport>("scan_games", { thorough });
   }
 
+  syncPreviewPluginLibraries(await getSettings());
   return { games: [...previewGamesState], warnings: [] };
+}
+
+/**
+ * The browser preview's stand-in for what the desktop app does with the libraries of the
+ * plugins: the sample games of the one that brings a library are in the sample library
+ * while it is switched on, and leave when it is switched off.
+ */
+function syncPreviewPluginLibraries(config: AppConfig): void {
+  const bringing = new Set(
+    previewPlugins(config.plugins)
+      .filter((plugin) => plugin.enabled && plugin.library)
+      .map((plugin) => plugin.id)
+  );
+  const kept = previewGamesState.filter(
+    (game) => game.platform !== "plugin" || bringing.has(game.platformAppId ?? "")
+  );
+  const missing = PREVIEW_PLUGIN_LIBRARY_GAMES.filter(
+    (game) => bringing.has(game.platformAppId ?? "") && !kept.some((known) => known.id === game.id)
+  );
+  previewGamesState = [...kept, ...missing].sort((a, b) =>
+    a.title.toLowerCase().localeCompare(b.title.toLowerCase())
+  );
 }
 
 /**

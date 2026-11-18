@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Eye, EyeOff, FolderOpen, Globe, Home, Plus, ShieldCheck, Trash2, WifiOff } from "lucide-react";
+import { Eye, EyeOff, FolderOpen, Globe, Home, Library, Plus, ShieldCheck, Trash2, WifiOff } from "lucide-react";
 import { useI18n } from "../i18n";
 import {
   installPlugin,
@@ -33,6 +33,26 @@ interface PluginsSettingsProps {
 function stateOf(plugin: PluginInfo, states: Record<string, PluginState>): PluginState {
   return (
     states[plugin.id] ?? { enabled: plugin.enabled, showBadge: plugin.showBadge, settings: {} }
+  );
+}
+
+/**
+ * What a plugin that brings a library adds, and what its games can make Kanso open: said
+ * next to the sites it contacts, before it is switched on or installed.
+ */
+function LibraryNote({ plugin, className }: { plugin: PluginInfo; className: string }) {
+  const { t } = useI18n();
+  if (!plugin.library) return null;
+  const opens = [...plugin.library.opens, t("plugins.libraryWebPages")].join(", ");
+  return (
+    <p data-plugin-library={plugin.id} className={`flex items-start gap-1.5 text-2xs ${className}`}>
+      <Library className="mt-px h-3 w-3 shrink-0" />
+      <span>
+        {t("plugins.addsLibrary", { name: plugin.library.name })}
+        {". "}
+        {t("plugins.libraryOpens", { what: opens })}
+      </span>
+    </p>
   );
 }
 
@@ -222,6 +242,7 @@ export function PluginsSettings({
                       <span>{t("plugins.addsHome")}</span>
                     </p>
                   )}
+                  {plugin.library && <LibraryNote plugin={plugin} className="mt-1 text-zinc-500" />}
                   <p className="mt-0.5 text-3xs text-zinc-600">
                     {t("plugins.byAuthor", {
                       version: plugin.version,
@@ -357,6 +378,7 @@ export function PluginsSettings({
               {t("plugins.addsHome")}
             </p>
           )}
+          {pending.preview.plugin.library && <LibraryNote plugin={pending.preview.plugin} className="text-zinc-300" />}
           <p className="flex items-start gap-1.5 text-2xs leading-relaxed text-zinc-400">
             <ShieldCheck className="mt-px h-3 w-3 shrink-0" />
             <span>{t("plugins.confirmSees")}</span>

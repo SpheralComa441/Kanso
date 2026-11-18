@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from "react";
 import { Download, PanelRightOpen, Play } from "lucide-react";
 import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
-import { canInstall, platformLabel } from "../lib/platforms";
+import { canInstall, platformLabel, sourceOf } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame, PluginView } from "../types/game";
 import { Cover } from "./Cover";
@@ -111,7 +111,7 @@ export function PluginPicks({
                   {game.title}
                 </p>
                 <p className="truncate text-2xs text-zinc-500">
-                  {note ?? platformLabel(game.platform, t)}
+                  {note ?? platformLabel(sourceOf(game), t)}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -183,7 +183,7 @@ export function PluginPicks({
                       <div className="space-y-0.5">
                         <h3 className="line-clamp-2 text-sm font-semibold leading-snug">{game.title}</h3>
                         <p className="line-clamp-2 text-2xs text-white/75">
-                          {note ?? platformLabel(game.platform, t)}
+                          {note ?? platformLabel(sourceOf(game), t)}
                         </p>
                       </div>
                       <div className="pointer-events-auto flex items-stretch gap-1.5">

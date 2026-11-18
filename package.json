@@ -2,7 +2,8 @@
   "name": "kanso",
   "private": true,
   "version": "0.1.0",
-  "description": "Minimalist Windows Game Launcher",
+  "description": "A clean, light game launcher for Windows: every store in one library, themes and plugins, no account needed",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",

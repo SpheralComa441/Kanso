@@ -1,8 +1,8 @@
 //! The official plugins, run in the real sandbox against canned answers of their services.
 //!
 //! The Steam answers are copies of live responses. HowLongToBeat follows the flow of the
-//! maintained open-source clients; PCGamingWiki and IsThereAnyDeal follow their public API
-//! documentation. None of the three could be reached from the build environment.
+//! maintained open-source clients; PCGamingWiki, IsThereAnyDeal and itch.io follow their public
+//! API documentation. None of the four could be reached from the build environment.
 
 use super::http::{HttpRequest, HttpResponse};
 use super::output::{Block, GamesStyle, PluginGameData, PluginView};
@@ -965,4 +965,125 @@ fn nexus_mods_says_so_when_neither_the_list_nor_the_api_answers() {
     assert!(answer.data.is_none(), "an error, not an empty section");
     let error = answer.error.expect("an error");
     assert!(error.contains("HTTP 503") && error.contains("list of games") && error.contains("API"), "it says what failed: {error}");
+}
+
+/// A page of the account's keys as itch.io answers, per the route's public description and the
+/// open-source clients that read it. It could not be reached from the build environment.
+fn itch_page(page: u32) -> serde_json::Value {
+    let key = |id: u64, title: &str, classification: &str, author: &str| {
+        json!({
+            "id": id * 10, "game_id": id, "created_at": "2024-03-01T10:00:00.000000000Z", "downloads": 2,
+            "game": {
+                "id": id, "title": title, "classification": classification, "type": "default",
+                "url": format!("https://{author}.itch.io/{}", title.to_lowercase().replace(' ', "-")),
+                "short_text": format!("{title}, in one line."),
+                "cover_url": format!("https://img.itch.zone/aW1nLzEyMzQ1Lw==/315x250%23c/{id}.png"),
+                "published_at": "2023-01-01T00:00:00.000000000Z", "min_price": 500, "can_be_bought": true,
+                "user": {"id": 1, "username": author, "url": format!("https://{author}.itch.io"), "cover_url": "https://img.itch.zone/avatar.png"}
+            }
+        })
+    };
+    match page {
+        1 => json!({"page": 1, "per_page": 50, "owned_keys": [
+            key(101, "Night Shift", "game", "lamplight"),
+            key(102, "Paper Boats", "game", "tidewater"),
+            key(103, "Night Shift Original Soundtrack", "soundtrack", "lamplight"),
+            key(104, "Tileset Pack", "assets", "tidewater"),
+        ]}),
+        2 => {
+            let mut odd = key(105, "Odd One", "game", "tidewater");
+            // A cover served from somewhere else, and a page that is not a web page
+            odd["game"]["cover_url"] = json!("https://cdn.example.org/odd.png");
+            odd["game"]["url"] = json!("javascript:alert(1)");
+            let mut untitled = key(106, "", "game", "tidewater");
+            untitled["game"]["title"] = json!(null);
+            json!({"page": 2, "per_page": 50, "owned_keys": [
+                odd,
+                key(101, "Night Shift", "game", "lamplight"),
+                untitled,
+                {"id": 7, "game_id": 107},
+            ]})
+        }
+        // The end of the list, as itch.io writes an empty one
+        _ => json!({"page": page, "per_page": 50, "owned_keys": {}}),
+    }
+}
+
+#[test]
+fn itch_library_lists_the_accounts_games_with_the_users_key_and_nothing_else() {
+    let bench = Bench::new(|request| {
+        let url = request.url.as_str();
+        assert!(url.starts_with("https://api.itch.io/profile/owned-keys?page="), "{url}");
+        assert_eq!(request.method, "GET");
+        assert!(!url.contains("good-key"), "the key is not written in the address: {url}");
+        let key = request.headers.iter().find(|(name, _)| name.eq_ignore_ascii_case("authorization")).map(|(_, value)| value.as_str());
+        match key {
+            Some("Bearer good-key") => {}
+            Some("Bearer down") => return status(503, "Service Unavailable"),
+            Some("Bearer soft-refusal") => return ok_json(json!({"errors": ["invalid key"]})),
+            _ => return status(403, r#"{"errors":["invalid api key"]}"#),
+        }
+        let page: u32 = url.rsplit('=').next().and_then(|page| page.parse().ok()).expect("a page number");
+        ok_json(itch_page(page))
+    });
+    let plugin = plugin("itch-library");
+    assert_eq!(plugin.manifest.hosts, ["api.itch.io", "img.itch.zone"]);
+    assert!(!is_enabled(&plugin, &AppConfig::default()), "it contacts a new site and brings games: the user turns it on");
+    let library = plugin.manifest.library.clone().expect("it brings a library");
+    assert_eq!(library.opens, ["itch"]);
+    assert_eq!(library_name(&plugin, Lang::It).as_deref(), Some("itch.io"));
+    assert!(!plugin.manifest.game_details && !plugin.manifest.home && plugin.manifest.commands.is_empty());
+
+    // Without a key: it says what to do, in the user's language, and asks nobody
+    let no_key = bench.engine.library_data(&bench.db, &plugin, &config_with("itch-library", &[]), Lang::It, true, 1_000);
+    assert!(no_key.data.is_none(), "an error, not an empty library: the games already there must stay");
+    assert!(no_key.error.as_deref().unwrap().contains("chiave API di itch.io"), "{:?}", no_key.error);
+    assert!(bench.transport.urls().is_empty());
+
+    // With the key: the games, page after page until an empty one
+    let config = config_with("itch-library", &[("apiKey", "  good-key ")]);
+    let answer = bench.engine.library_data(&bench.db, &plugin, &config, Lang::It, true, 2_000);
+    assert_eq!(answer.error, None, "logs: {:?}", answer.logs);
+    assert_eq!(answer.library_name, "itch.io");
+    let data = answer.data.expect("a library");
+    assert_eq!(
+        bench.transport.urls(),
+        [1, 2, 3].map(|page| format!("https://api.itch.io/profile/owned-keys?page={page}"))
+    );
+    let titles: Vec<&str> = data.games.iter().map(|game| game.title.as_str()).collect();
+    assert_eq!(titles, ["Night Shift", "Paper Boats", "Odd One"], "games only, each once");
+    assert_eq!(data.refused, 0, "it hands Kanso nothing Kanso has to refuse");
+    let night = &data.games[0];
+    assert_eq!(night.id, "101");
+    assert_eq!(night.launch.as_deref(), Some("itch://games/101"), "Play hands the game to the itch app");
+    assert!(night.installed, "a plugin cannot see the disk: the itch app starts the game or offers to install it");
+    assert_eq!(night.description.as_deref(), Some("Night Shift, in one line."));
+    assert_eq!(night.cover.as_deref(), Some("https://img.itch.zone/aW1nLzEyMzQ1Lw==/315x250%23c/101.png"));
+    assert_eq!(data.games[2].cover, None, "a cover from another host is not passed on");
+
+    // The user prefers the browser: the game's own page, where it is a web page
+    let in_browser = config_with("itch-library", &[("apiKey", "good-key"), ("open", "web")]);
+    let data = bench.engine.library_data(&bench.db, &plugin, &in_browser, Lang::En, true, 3_000).data.expect("a library");
+    assert_eq!(data.games[0].launch.as_deref(), Some("https://lamplight.itch.io/night-shift"));
+    assert_eq!(data.games[2].launch.as_deref(), Some("itch://games/105"), "not a web page: the itch app");
+    assert_eq!(data.refused, 0);
+
+    // The games join the library under the plugin's platform
+    let change = library::reconcile(&bench.db, "itch-library", &data.games, 4_000);
+    assert_eq!(change.stored.len(), 3);
+    let stored = lock(&bench.db).get_game("plugin:itch-library:101").unwrap().expect("in the library");
+    assert_eq!((stored.platform, stored.platform_app_id.as_deref(), stored.is_installed), (GamePlatform::Plugin, Some("itch-library"), true));
+
+    // A key itch.io does not accept, said either way: an error that says so, never an
+    // empty library; and a site that is down is told apart
+    for (key, lang, expected) in [
+        ("wrong", Lang::En, "did not accept the API key"),
+        ("soft-refusal", Lang::Es, "no aceptó la clave API"),
+        ("down", Lang::En, "HTTP 503"),
+    ] {
+        let config = config_with("itch-library", &[("apiKey", key)]);
+        let answer = bench.engine.library_data(&bench.db, &plugin, &config, lang, true, 5_000);
+        assert!(answer.data.is_none(), "{key}");
+        assert!(answer.error.as_deref().unwrap().contains(expected), "{key}: {:?}", answer.error);
+    }
 }

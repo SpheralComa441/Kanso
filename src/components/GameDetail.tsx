@@ -16,7 +16,7 @@ import {
 import { useI18n, type I18n } from "../i18n";
 import { getPlaySessions, resolveCoverUrl } from "../lib/backend";
 import { GAME_STATUSES, genreKey } from "../lib/library";
-import { PLATFORM_META, canInstall, platformLabel, uninstallMode } from "../lib/platforms";
+import { PLATFORM_META, canInstall, platformLabel, uninstallMode, sourceOf } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame, GameStatus, PlaySession, PluginInfo, ThemeDetail } from "../types/game";
 import { Cover } from "./Cover";
@@ -69,11 +69,26 @@ interface GameDetailProps {
 /** Describes how the game will be started, shown as a small technical footnote. */
 function launchTarget(game: DetectedGame, t: I18n["t"]): string {
   if (game.launchUri) {
+    // What a plugin's game opens is said as it is: the address its plugin gave
+    if (game.platform === "plugin") return game.launchUri;
     if (game.platform === "steam") return t("detail.viaSteam");
     if (game.platform === "epic") return t("detail.viaEpic");
     return t("detail.viaClient");
   }
   return game.executablePath ?? t("detail.noExe");
+}
+
+/**
+ * Where the hours of a game come from: its client's counter (Steam), Kanso's own clock, or,
+ * for a game a plugin's library brought, what the library says. A plugin's game given an
+ * executable by hand is timed by Kanso like any other.
+ */
+function playtimeOrigin(game: DetectedGame, t: I18n["t"]): string {
+  if (game.platform === "steam") return t("detail.playtimeSteam");
+  if (game.platform === "plugin" && !game.executablePath) {
+    return t("detail.playtimeFromLibrary", { name: platformLabel(sourceOf(game), t) });
+  }
+  return t("detail.playtimeMeasured");
 }
 
 /* ------------------------------------------------- pieces both layouts share */
@@ -96,9 +111,10 @@ function Badges({
     <div className="flex flex-wrap items-center gap-2">
       <span
         className={`inline-block rounded-md border px-2 py-0.5 text-3xs font-medium ${PLATFORM_META[game.platform].badgeClass}`}
+        data-platform={sourceOf(game)}
       >
         {/* An emulated game says which emulator runs it, where a store game names its store */}
-        {(game.platform === "emulator" && emulatorName) || platformLabel(game.platform, t)}
+        {(game.platform === "emulator" && emulatorName) || platformLabel(sourceOf(game), t)}
       </span>
       {/* What is installed: the game's version, or the version of the emulator that runs it */}
       {game.isInstalled && game.version && (
@@ -346,7 +362,7 @@ function Actions({
       : game.platform === "xbox"
         ? "detail.uninstallInWindows"
         : "detail.uninstallInClient",
-    { client: platformLabel(game.platform, t) }
+    { client: platformLabel(sourceOf(game), t) }
   );
   const secondary =
     "inline-flex items-center justify-center gap-1.5 rounded-lg border px-3.5 py-2 text-xs font-medium transition-colors";
@@ -447,19 +463,22 @@ function Actions({
 /** Where the game is and how it starts (or how to install it): a technical footnote. */
 function TechnicalNotes({ game, withPlayFacts }: { game: DetectedGame; withPlayFacts: boolean }) {
   const { t, plural, relativePast, duration } = useI18n();
-  const client = platformLabel(game.platform, t);
+  const client = platformLabel(sourceOf(game), t);
   const row = "flex gap-3";
   const term = "w-24 shrink-0 text-zinc-500";
   return (
     <dl className="space-y-2 text-2xs">
       {game.isInstalled ? (
         <>
-          <div className={row}>
-            <dt className={term}>{t("detail.folder")}</dt>
-            <dd className="min-w-0 select-text truncate font-mono text-zinc-400" title={game.installDir}>
-              {game.installDir}
-            </dd>
-          </div>
+          {/* A plugin's game has no folder Kanso knows of */}
+          {game.installDir && (
+            <div className={row}>
+              <dt className={term}>{t("detail.folder")}</dt>
+              <dd className="min-w-0 select-text truncate font-mono text-zinc-400" title={game.installDir}>
+                {game.installDir}
+              </dd>
+            </div>
+          )}
           <div className={row}>
             <dt className={term}>{t(game.platform === "emulator" ? "detail.gameFile" : "detail.launch")}</dt>
             <dd className="min-w-0 select-text truncate font-mono text-zinc-400" title={launchTarget(game, t)}>
@@ -485,7 +504,7 @@ function TechnicalNotes({ game, withPlayFacts }: { game: DetectedGame; withPlayF
           <dd
             id="detail-playtime"
             className="min-w-0 truncate text-zinc-400"
-            title={t(game.platform === "steam" ? "detail.playtimeSteam" : "detail.playtimeMeasured")}
+            title={playtimeOrigin(game, t)}
           >
             {game.playtimeMinutes > 0 ? duration(game.playtimeMinutes) : t("detail.neverPlayed")}
           </dd>
@@ -660,7 +679,7 @@ function PlaytimeTile({ game, activity }: { game: DetectedGame; activity: Activi
       ? t("detail.playtimeUnknown")
       : minutes === 0
         ? t("detail.neverPlayed")
-        : t(game.platform === "steam" ? "detail.playtimeSteam" : "detail.playtimeMeasured");
+        : playtimeOrigin(game, t);
   const recent = activity === null ? null : activity.reduce((sum, day) => sum + day.minutes, 0);
   const playedThisMonth =
     game.lastPlayedAt !== null && game.lastPlayedAt >= Date.now() - ACTIVITY_DAYS * DAY_MS;

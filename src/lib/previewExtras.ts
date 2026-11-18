@@ -17,8 +17,9 @@ import type {
 
 const DAY = 24 * 60 * 60 * 1000;
 
-type PluginSeed = Omit<PluginInfo, "enabled" | "showBadge" | "bundled"> & {
+type PluginSeed = Omit<PluginInfo, "enabled" | "showBadge" | "bundled" | "library"> & {
   enabledByDefault: boolean;
+  library?: PluginInfo["library"];
 };
 
 const PLUGINS: PluginSeed[] = [
@@ -195,11 +196,50 @@ const PLUGINS: PluginSeed[] = [
     settings: [],
     enabledByDefault: false,
   },
+  {
+    id: "itch-library",
+    name: "Libreria di itch.io",
+    version: "1.0.0",
+    author: "Kanso",
+    description:
+      "Aggiunge alla libreria i giochi che hai comprato o riscattato su itch.io, sotto una piattaforma tutta loro, letti con la chiave API del tuo account. Avvia apre il gioco nell'app di itch, oppure la sua pagina nel browser.",
+    homepage: "https://itch.io",
+    hosts: ["api.itch.io", "img.itch.zone"],
+    gameDetails: false,
+    home: false,
+    library: { name: "itch.io", opens: ["itch"] },
+    badge: false,
+    background: false,
+    commands: [],
+    settings: [
+      {
+        key: "apiKey",
+        kind: "secret",
+        label: "Chiave API di itch.io",
+        help: "Si crea su itch.io, in Settings → API keys. Resta nelle impostazioni di Kanso su questo PC e viene inviata solo ad api.itch.io.",
+        default: "",
+        options: [],
+      },
+      {
+        key: "open",
+        kind: "select",
+        label: "Avvia apre",
+        help: "",
+        default: "app",
+        options: [
+          { value: "app", label: "Il gioco nell'app di itch" },
+          { value: "web", label: "La pagina del gioco nel browser" },
+        ],
+      },
+    ],
+    enabledByDefault: false,
+  },
 ];
 
 export function previewPlugins(states: Record<string, PluginState>): PluginInfo[] {
   return PLUGINS.map(({ enabledByDefault, ...plugin }) => ({
     ...plugin,
+    library: plugin.library ?? null,
     bundled: true,
     enabled: states[plugin.id]?.enabled ?? enabledByDefault,
     showBadge: plugin.badge && (states[plugin.id]?.showBadge ?? true),

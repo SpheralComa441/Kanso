@@ -1,11 +1,13 @@
 # Plugin di Kanso / Kanso plugins
 
 Un plugin è una cartella con due file, `plugin.json` e `main.js`. Aggiunge informazioni alla scheda
-di un gioco (e una piccola etichetta sulle card), una parte alla **Home**, oppure comandi al menu
-**Plugin**.
+di un gioco (e una piccola etichetta sulle card), una parte alla **Home**, comandi al menu
+**Plugin**, oppure una **libreria di giochi** tutta sua (i giochi di un altro store o servizio,
+sotto una piattaforma propria).
 *A plugin is a folder with two files, `plugin.json` and `main.js`. It adds information to a game's
-sheet (and a short label on the cards), a part to the **Home** page, or commands to the **Plugins**
-menu.*
+sheet (and a short label on the cards), a part to the **Home** page, commands to the **Plugins**
+menu, or a **library of games** of its own (the games of another store or service, under a
+platform of their own).*
 
 I plugin ufficiali stanno in [`plugins/`](../plugins/) e sono il miglior punto di partenza:
 [`play-tonight`](../plugins/play-tonight/) (un comando, niente rete),
@@ -14,9 +16,12 @@ aggiungere qualcosa alla Home),
 [`steam-news`](../plugins/steam-news/) (una richiesta, un elenco),
 [`steam-reviews`](../plugins/steam-reviews/) (etichetta sulle card),
 [`howlongtobeat`](../plugins/howlongtobeat/) (più richieste, `kanso.storage`),
-[`price-history`](../plugins/price-history/) (impostazioni con chiave API).
+[`price-history`](../plugins/price-history/) (impostazioni con chiave API),
+[`itch-library`](../plugins/itch-library/) (una libreria di giochi: quelli dell'account di
+itch.io, letti con la chiave API dell'utente).
 *The official plugins in [`plugins/`](../plugins/) are the best starting point;
-[`daily-pick`](../plugins/daily-pick/) is the one to copy for a part of Home.*
+[`daily-pick`](../plugins/daily-pick/) is the one to copy for a part of Home,
+[`itch-library`](../plugins/itch-library/) for a library of games.*
 
 > The rest of this guide is in English: it is the reference for plugin authors.
 
@@ -85,6 +90,9 @@ changed settings invalidate the plugin's cached answers automatically.
 | `provides.badge` | `gameDetails` may return a `badge` for the game cards. |
 | `provides.background` | Kanso may call `gameDetails` quietly for the whole library (one game every few seconds), so the badges are there before each sheet is opened. Leave it off unless you return a badge. |
 | `provides.home` | The plugin implements `home(context)`: a part of the Home page. Only `true` switches it on. |
+| `provides.library` | The plugin implements `library(context)`: games that join the library under a platform of their own. Only `true` switches it on. See [A library of games](#a-library-of-games). |
+| `library.name` | What the platform is called in the side panel, on the cards and in the statistics (40 characters; a string or one per language). Default: the plugin's name. |
+| `library.opens` | The game clients the library's games may be handed to, by name: `itch`, `amazon`, `heroic` (see the addresses accepted for each under [A library of games](#a-library-of-games)). Omit it when the games open web pages only, which need no entry. |
 | `cacheHours` | How long an answer of `gameDetails` is reused (1–2160, default 168). An answer of `home` is reused for the same time, but for 24 hours at most. |
 | `commands` | Up to 8 entries for the Plugins menu; each `id` is a function under `commands` in `main.js`. |
 | `settings` | Up to 12 values the user edits in *Settings → Plugins*. Types: `text`, `secret` (masked), `toggle` (`"true"`/`"false"`), `select`. |
@@ -173,7 +181,7 @@ Folders, executables and anything else about the PC are deliberately not include
 
 | | |
 |---|---|
-| `kanso.plugin(hooks)` | Registers `gameDetails`, `home` and/or `commands`. |
+| `kanso.plugin(hooks)` | Registers `gameDetails`, `home`, `library` and/or `commands`. |
 | `kanso.http.get(url, options)` / `post(url, options)` / `request(options)` | Returns `{ status, ok, headers, body, json() }`. Options: `headers`, `body` (string) or `json` (sent as JSON), and for `request` also `method` and `url`. A 4xx/5xx is a normal answer (`ok` is `false`); a refused or failed request throws. Redirects are **not** followed: you get the 3xx and its `location` header and may follow it yourself, if that host is declared. |
 | `kanso.http.getJson(url, options)` | `get` + `json()`, throws on a non-2xx status. |
 | `kanso.storage.get(key, fallback)` / `set(key, value)` / `remove(key)` | Small persistent notes of the plugin (tokens, ids already looked up). JSON values, at most 64 keys and 512 kB in total; saved when the call ends successfully. |
@@ -263,6 +271,100 @@ with the blocks above, and its `games`, each with *Open sheet* and, where it app
   there, in the order of the plugins in Settings. A plugin cannot choose its place, its size or
   its colors.
 
+### A library of games
+
+With `"provides": { "library": true }` the plugin brings games of its own into the library: the
+games of a store Kanso does not read by itself, of a cloud service, of a page of links. They are
+filed under a platform of their own (named by `library.name`), next to Steam, Epic and the
+others, and from there on they are games like any other: status, favourites, genres, covers,
+statistics, the Home shelves, the sheets other plugins fill in. The official
+[`itch-library`](../plugins/itch-library/) is the example to copy.
+
+```json
+"provides": { "library": true },
+"library": { "name": "My store", "opens": ["itch"] }
+```
+
+```js
+kanso.plugin({
+  library(context) {
+    const owned = kanso.http.getJson("https://api.example.org/owned?key=" + kanso.settings.apiKey);
+    return {
+      games: owned.map((game) => ({
+        id: game.id,                                   // required
+        title: game.name,                              // required
+        launch: "https://play.example.org/" + game.id, // what Play opens
+        installed: true,
+        genres: game.genres,
+        description: game.summary,
+        playtimeMinutes: game.minutes,
+        lastPlayedAt: game.lastPlayed,                 // ms
+        cover: game.coverUrl,
+        steamAppId: game.steamId,
+      })),
+    };
+  },
+});
+```
+
+- **What it gets.** `library(context)` is called with `context.now` (ms) and nothing else: a
+  library is read from its service, not from the user's games.
+- **What it returns.** `{ games: [...] }`, or the list alone; at most **3000 games**, which is
+  also the most one plugin can have in the library at a time.
+
+  | Field | |
+  |---|---|
+  | `id` | Required. The game's id inside the plugin: 1–64 letters, digits, `.`, `_`, `-` (a number is fine). It must stay the same from one call to the next: it is what the user's status and favourites are attached to. |
+  | `title` | Required (200 characters). |
+  | `launch` | The one address the game can open: what *Play* opens when the game is `installed`, and what *Install* opens when it is not (the page or the client where it is got). See below for what is allowed. Without it the game is listed and cannot be started from Kanso. |
+  | `installed` | Whether the game can be started right now. Default `true`. A plugin cannot see the disk: for a game started through a client that also installs it, say `true` and let the client do the rest. |
+  | `genres` | Up to 8 short names. Used when the game has none yet. |
+  | `description` | A few lines of plain text (600 characters). Used when the game has none yet. |
+  | `playtimeMinutes`, `lastPlayedAt` | What the service knows; Kanso keeps the larger figure and the later date. A date in the future is ignored. |
+  | `cover` | A picture of the cover: a web address as described below, on one of the plugin's declared `hosts`. It fills an empty place and follows what the plugin says from then on; a cover Kanso found or the user chose is never replaced. |
+  | `steamAppId` | The game's id on the Steam store, when the service knows it: the plugins that read Steam (reviews, news) then work for it. |
+
+- **What a game can open.** Only two kinds of address, checked by Kanso every time before
+  opening one:
+  - a web page: `https://` followed by a named public host (no IP address, no `localhost`),
+    on the usual port, with no credentials in it;
+  - an address of a game client named in `library.opens`, in one of the forms accepted for
+    that client. A client's protocol can do much more than start a game, so a client is not
+    let through by how its addresses begin, but form by form:
+
+    | Client | Accepted |
+    |---|---|
+    | `itch` | `itch://games/<number>` (the game's page in the itch app), `itch://install?game_id=<number>` (the app asks whether to install it) |
+    | `amazon` | `amazon-games://play/<id>` |
+    | `heroic` | `heroic://launch/<store>/<id>` with `<store>` one of `legendary`, `gog`, `nile`, `sideload` |
+
+    `<number>` is up to 12 digits; `<id>` is one word of letters, digits, `.`, `_` and `-`.
+    Nothing may follow it: no further path, no `?` and no parameters.
+
+  Nothing else is opened, ever: no file, no program, no other protocol of the system. Only the
+  characters of an address are accepted (no spaces, quotes or anything else). An address that
+  is not allowed is dropped and its game is still listed, without *Play*. The stores Kanso
+  reads by itself (Steam, Epic, GOG, …) are not in the list on purpose. If your store's client
+  or the form you need is missing, open an issue: it is added in `plugins/library.rs` after
+  reading what the client does with such an address.
+- **When it runs.** At every scan of the library (at startup, and when the user presses
+  *Scan*), and at once when the plugin is switched on or its settings change. The answer is
+  reused for `cacheHours`, **capped at 24 hours**; a scan the user asked for always asks again.
+- **When something goes wrong, throw.** An `Error` keeps the games already in the library as
+  they are and shows the user a line with your message. Returning an empty list (or `null`)
+  says the account has no games, and the ones in the library leave: never answer that way for
+  a missing key or a service that is down.
+- **What stays the user's.** A game no longer listed leaves the library, and so do all the
+  games of a plugin that is switched off or removed, unless the user gave the game something
+  (a status, a favourite, genres, an edit, a launch from Kanso): then it stays, as not
+  installed, with nothing to open and without the cover the plugin gave, and comes back as it
+  was if the plugin lists it again. A title edited by hand is kept. The hours and the last
+  session a plugin reports do not make a game stay: they are the plugin's word, not the
+  user's.
+- **What the user sees first.** *Settings → Plugins* says, next to the sites the plugin
+  contacts, that it brings a library, what it is called and what its games can open. In a
+  game's sheet, *Files and launch* shows the address *Play* opens, as it is.
+
 ## Caching and errors
 
 - An answer of `gameDetails` is stored per game and reused for `cacheHours`. It is asked again when
@@ -282,6 +384,9 @@ with the blocks above, and its `games`, each with *Open sheet* and, where it app
   row is left alone until the next pass.
 - Return `null` when a game simply has no data: that answer is cached too, so the service is not
   asked again at every opening.
+- An answer of `library` is stored once per plugin and reused for `cacheHours`, capped at 24
+  hours. When the call fails the last good list is used, so a service that is down takes no
+  game away, and the error is shown as a warning above the library.
 
 ## Being a good guest
 
@@ -296,8 +401,11 @@ with the blocks above, and its `games`, each with *Open sheet* and, where it app
 
 The implementation is in `src-tauri/crates/kanso-core/src/plugins/`: `manifest.rs` (validation),
 `http.rs` (the request gate), `runtime.rs` + `prelude.js` (the sandbox and the `kanso` object),
-`output.rs` (the block types), `registry.rs` (shipped and user plugins) and `mod.rs` (caching,
-for the game sheets and for Home).
+`output.rs` (the block types), `library.rs` (the games a plugin's library brings: what is let
+through, the closed list of game clients, how the games join the library), `registry.rs`
+(shipped and user plugins) and `mod.rs` (caching, for the game sheets, for Home and for the
+libraries). The app's side is `src-tauri/src/plugins.rs`: `sync_libraries` brings the libraries
+up to date, and `check_library_game` is asked again before any address a plugin gave is opened.
 `bundled_tests.rs` runs every official plugin in the real sandbox against canned answers of its
 service: add a test there when you add or change one. The manifest and the `main.js` example of this
 guide are read by the tests too (`the_manifest_in_the_plugin_guide_is_valid`,

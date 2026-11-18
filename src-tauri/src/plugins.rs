@@ -1,8 +1,13 @@
 //! Plugins as the desktop app runs them: listing, installing, running on demand (for a game's
-//! sheet, for the Home page, for a command) and filling in the game-card labels in the
-//! background.
+//! sheet, for the Home page, for a command), bringing their libraries of games up to date and
+//! filling in the game-card labels in the background.
 
-use crate::{game_not_found, load_config, lock_db, resolve_config_path, AppState, SharedDb};
+use crate::{
+    game_not_found, load_config, lock_db, resolve_config_path, AppState, SharedDb, GAMES_REMOVED_EVENT,
+    GAMES_UPDATED_EVENT,
+};
+use kanso_core::models::DetectedGame;
+use kanso_core::plugins::library::{self, is_allowed_address, LibraryChange};
 use kanso_core::plugins::output::{is_safe_link, PluginView};
 use kanso_core::plugins::registry::{self, load_plugins, Plugin};
 use kanso_core::plugins::{
@@ -161,6 +166,8 @@ pub(crate) fn install_plugin(
     // Answers of the version it replaces are not this version's
     let _ = lock_db(&state.db).clear_plugin_data(&id, false);
     host.wake_background_fill();
+    // If it brings a library, its games join now rather than at the next scan
+    sync_libraries_in_background(&app, &state);
     Ok(saved)
 }
 
@@ -173,6 +180,9 @@ pub(crate) fn remove_plugin(
 ) -> Result<AppConfig, String> {
     registry::remove_plugin(&state.plugins.dir, &id)?;
     let _ = lock_db(&state.db).clear_plugin_data(&id, true);
+    // The games its library brought go with it (those the user gave something stay, as not
+    // installed)
+    announce(&app, &library::reconcile(&state.db, &id, &[], now_timestamp_ms()));
 
     let config_path = resolve_config_path(&app)?;
     let mut config = AppConfig::load_from_file(&config_path)?;
@@ -273,6 +283,104 @@ pub(crate) async fn plugin_home_data(
     })
     .await
     .map_err(|e| format!("{}: {e}", T::OperationFailed.s()))?
+}
+
+/// Tells the interface what bringing a plugin's library up to date changed.
+fn announce(app: &AppHandle, change: &LibraryChange) {
+    if !change.removed.is_empty() {
+        let _ = app.emit(GAMES_REMOVED_EVENT, &change.removed);
+    }
+    if !change.stored.is_empty() {
+        let _ = app.emit(GAMES_UPDATED_EVENT, &change.stored);
+    }
+}
+
+/// Brings the libraries of the plugins up to date: every plugin that is switched on and
+/// brings one is asked for its games (from its cache while that is fresh, anew with `force`),
+/// and they join the library; the games of a plugin that was switched off, removed, or no
+/// longer brings a library leave it. A plugin that fails takes nothing away: the games it
+/// listed before stay, and the failure is returned as a line for the user. What changes
+/// reaches the interface as it is stored.
+pub(crate) fn sync_libraries(
+    app: &AppHandle,
+    db: &SharedDb,
+    host: &PluginHost,
+    config: &AppConfig,
+    force: bool,
+) -> Vec<String> {
+    let lang = current_language();
+    let (plugins, _) = load_plugins(&host.dir);
+    let mut warnings = Vec::new();
+    let mut bringing: Vec<&str> = Vec::new();
+
+    for plugin in &plugins {
+        if plugin.manifest.library.is_none() || !is_enabled(plugin, config) {
+            continue;
+        }
+        let id = plugin.manifest.id.as_str();
+        bringing.push(id);
+        let lock = host.lock_for(id);
+        let _running = lock.lock().unwrap_or_else(|p| p.into_inner());
+        let now = now_timestamp_ms();
+        let answer = host.engine.library_data(db, plugin, config, lang, force, now);
+        if let Some(error) = &answer.error {
+            warnings.push(format!("{}: {error}", answer.library_name));
+        }
+        if let Some(data) = &answer.data {
+            announce(app, &library::reconcile(db, id, &data.games, now));
+        }
+    }
+
+    // What an earlier pass brought from a plugin that brings nothing now
+    let orphaned = library::plugins_with_games(&lock_db(db).load_games().unwrap_or_default());
+    for id in orphaned.iter().filter(|id| !bringing.contains(&id.as_str())) {
+        announce(app, &library::reconcile(db, id, &[], now_timestamp_ms()));
+    }
+    warnings
+}
+
+/// [`sync_libraries`] on a thread of its own, for the moments the user changed something
+/// about the plugins: their games follow at once instead of at the next scan.
+pub(crate) fn sync_libraries_in_background(app: &AppHandle, state: &AppState) {
+    let (app, db, host) = (app.clone(), Arc::clone(&state.db), Arc::clone(&state.plugins));
+    let spawned = std::thread::Builder::new()
+        .name("kanso-plugin-libraries".to_string())
+        .spawn(move || {
+            let config = load_config(&app);
+            for warning in sync_libraries(&app, &db, &host, &config, false) {
+                eprintln!("Kanso: {warning}");
+            }
+        });
+    if let Err(err) = spawned {
+        eprintln!("Kanso: the plugins' libraries will be read at the next scan: {err}");
+    }
+}
+
+/// Whether the address of a game a plugin's library brought may be opened now. The address
+/// was checked when the plugin gave it; since then the plugin may have been switched off or
+/// removed, or its manifest changed: it is opened only if the plugin is there, is on, still
+/// brings a library and still declares what the address needs.
+pub(crate) fn check_library_game(
+    host: &PluginHost,
+    config: &AppConfig,
+    game: &DetectedGame,
+) -> Result<(), String> {
+    let Some(address) = game.launch_uri.as_deref().filter(|uri| !uri.trim().is_empty()) else {
+        // Nothing of the plugin's would be opened
+        return Ok(());
+    };
+    let plugin_id = game.platform_app_id.as_deref().unwrap_or_default();
+    let plugin = host.find_enabled(plugin_id, config)?;
+    let allowed = plugin
+        .manifest
+        .library
+        .as_ref()
+        .is_some_and(|library| is_allowed_address(address, &library.opens));
+    if allowed {
+        Ok(())
+    } else {
+        Err(format!("{}: {address}", T::UrlNotAllowed.s()))
+    }
 }
 
 /// The labels plugins have for the game cards, by game id.
