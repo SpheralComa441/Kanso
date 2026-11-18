@@ -90,8 +90,16 @@ Signing is on its way: see the [code signing policy](#code-signing-policy).
   library of an itch.io account). Those that contact a site other than Steam are off until
   you switch them on. To write your own: [docs/PLUGINS.md](docs/PLUGINS.md).
 
+![The same Home page under eight themes: five built in, three imported from a theme file](docs/screenshots/themes-demo.webp)
+
 Themes and plugins talk to Kanso only through the formats described in those guides. They are
 your own work: publish them wherever you like, under the licence you choose.
+
+**Made by others.** Nobody approves or hosts them here: each lives in its author's own
+repository, listed on GitHub under the topics
+[`kanso-theme`](https://github.com/topics/kanso-theme) and
+[`kanso-plugin`](https://github.com/topics/kanso-plugin). Add the topic to yours and it is
+listed too. Questions, ideas and show-and-tell go in the [Discussions](https://github.com/SpheralComa441/Kanso/discussions).
 
 ## Privacy and security
 

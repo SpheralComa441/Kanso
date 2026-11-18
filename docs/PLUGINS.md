@@ -55,6 +55,28 @@ waiting for a new version of Kanso.
 While developing, install once, then edit the installed copy in place: a changed `main.js` or
 changed settings invalidate the plugin's cached answers automatically.
 
+## Sharing a plugin
+
+A plugin needs nobody's approval and is not hosted here: it is your own work, published where
+you like under the licence you choose.
+
+1. Put the folder (`plugin.json` and `main.js`) in a repository of your own. In its README say
+   what the plugin shows, which hosts it contacts and why, and whether it needs a key from the
+   user. People read that before installing; Kanso shows them the hosts again when they do.
+2. Add the topic **`kanso-plugin`** to the repository: it is then listed at
+   <https://github.com/topics/kanso-plugin>, where people look for plugins.
+3. Tell them how to install it: download the two files (on GitHub, *Code → Download ZIP*),
+   then *Settings → Plugins → Install plugin…* and pick `plugin.json`.
+4. Raise `version` in `plugin.json` when you change something, so people can tell which copy
+   they have. Installing a newer copy over an older one replaces it and keeps its settings.
+
+Show it in the [Discussions](https://github.com/SpheralComa441/Kanso/discussions) if you like.
+
+If you are the one installing: a plugin is code somebody else wrote. The sandbox keeps it away
+from your files and from Kanso's settings, but it can send what Kanso shows it about your
+games to the hosts it declares. `main.js` is short and readable; read it, or install from
+people you have reason to trust.
+
 ## `plugin.json`
 
 ```json

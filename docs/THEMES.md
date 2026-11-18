@@ -70,6 +70,30 @@ predefinita di Kanso, come Arcade, Aurora e i sei temi inclusi nati dal logo.
 
 I temi installati stanno in `%LOCALAPPDATA%\com.kanso.launcher\themes\`.
 
+## Condividere un tema / Sharing a theme
+
+Un tema è un file solo e nessuno deve approvarlo: pubblicalo dove vuoi, con la licenza che
+scegli.
+
+1. *Impostazioni → Tema → Esporta...*: il file `<nome>.kanso-theme.json` contiene tutto, anche
+   i font incorporati.
+2. Mettilo in un repository GitHub tuo (o in un gist), con una schermata e una riga su come si
+   installa: *Impostazioni → Tema → Importa...*.
+3. Aggiungi al repository il topic **`kanso-theme`**: comparirà in
+   <https://github.com/topics/kanso-theme>, l'elenco dove chi usa Kanso cerca i temi degli
+   altri. Non c'è niente da chiedere a nessuno.
+4. Se ti va, mostralo nelle [Discussions](https://github.com/SpheralComa441/Kanso/discussions).
+
+Usa solo font che si possono ridistribuire: il file li porta con sé. Chi importa un tema non
+corre rischi, vedi [Sicurezza](#sicurezza--safety).
+
+*A theme is one file and needs nobody's approval. Export it (Settings → Theme → Export...),
+put it in a repository or gist of your own with a screenshot, and add the topic
+**`kanso-theme`** to the repository: it is then listed at
+<https://github.com/topics/kanso-theme>, where people look for themes. Show it in the
+[Discussions](https://github.com/SpheralComa441/Kanso/discussions) if you like. The file carries its fonts, so use only fonts that may be
+redistributed.*
+
 ## Formato / Format
 
 Solo `name` e `colors` sono obbligatori. Tutto ciò che manca prende il valore predefinito di Kanso;
