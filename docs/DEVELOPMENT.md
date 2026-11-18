@@ -127,7 +127,8 @@ good reason.
 1. Set the new version in `package.json`, `src-tauri/Cargo.toml`,
    `src-tauri/crates/kanso-core/Cargo.toml` and `src-tauri/tauri.conf.json`, and add its
    section to `CHANGELOG.md`.
-2. Once that is on `main`, run the **Release** workflow from the Actions tab (or push the tag
-   `v<version>`). It runs the tests, builds the installers and creates a **draft** release
-   with them attached, together with their SHA-256 sums.
-3. Read the draft, try the installer, press *Publish*.
+2. Once that is on `main`, run the **Release** workflow from the Actions tab, on `main`. It
+   runs the tests, builds the installers and creates a **draft** release with them attached,
+   together with their SHA-256 sums.
+3. Read the draft, try the installer, press *Publish*. Publishing is what creates the tag
+   `v<version>`; do not push it by hand.
