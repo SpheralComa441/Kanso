@@ -10,7 +10,10 @@ changes are the ones that get in fastest.
   nobody has seen working yet is in [docs/MANUAL-TESTS.md](docs/MANUAL-TESTS.md).
 - **Make a theme or a plugin.** Neither needs a change to Kanso, and neither needs our
   approval: see [docs/THEMES.md](docs/THEMES.md) and [docs/PLUGINS.md](docs/PLUGINS.md). They
-  are your own work, under the licence you choose.
+  are your own work, under the licence you choose. Publish it in a repository of your own
+  with the topic `kanso-theme` or `kanso-plugin` and it is listed with the others.
+- **Ask, suggest, show.** Questions and ideas go in the [Discussions](https://github.com/SpheralComa441/Kanso/discussions); issues are
+  for things that do not work.
 - **Fix something or add something.** Open an issue first for anything larger than a fix, so
   that nobody builds what will not be merged.
 

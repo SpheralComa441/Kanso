@@ -88,8 +88,16 @@ sia quello costruito qui. La firma è in arrivo: vedi la
   oggi, la libreria di un account itch.io). Quelli che contattano un sito diverso da Steam
   sono spenti finché non li accendi. Per scriverne uno: [docs/PLUGINS.md](docs/PLUGINS.md).
 
+![La stessa Home con otto temi: cinque inclusi, tre importati da un file di tema](docs/screenshots/themes-demo.webp)
+
 Temi e plugin parlano con Kanso solo attraverso i formati descritti in quelle guide. Sono
 lavoro tuo: pubblicali dove vuoi, con la licenza che scegli.
+
+**Fatti da altri.** Qui nessuno li approva né li ospita: ognuno sta nel repository del suo
+autore, elencato su GitHub sotto i topic
+[`kanso-theme`](https://github.com/topics/kanso-theme) e
+[`kanso-plugin`](https://github.com/topics/kanso-plugin). Aggiungi il topic al tuo e compare
+nell'elenco. Domande, idee e «guardate che cosa ho fatto» vanno nelle [Discussions](https://github.com/SpheralComa441/Kanso/discussions).
 
 ## Riservatezza e sicurezza
 

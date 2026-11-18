@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Ask a question, suggest an idea, show a theme or a plugin
+    url: https://github.com/SpheralComa441/Kanso/discussions
+    about: Issues are for things that do not work; everything else goes in the Discussions.
   - name: Report a security problem privately
     url: https://github.com/SpheralComa441/Kanso/security/advisories/new
     about: For anything that could put users at risk. See SECURITY.md.
