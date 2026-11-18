@@ -29,7 +29,7 @@ vulnerability, and we want to hear about it.
   straight to the services Kanso reads (the stores and their public catalogues, SteamGridDB
   with your own key, the deal and news sources you keep switched on, a weather service if you
   turn the weather on, NVIDIA's repository if you turn DLSS downloads on, the hosts a plugin
-  declares), and nowhere else.
+  declares), and nowhere else. The full list, request by request: [PRIVACY.md](PRIVACY.md).
 - **Themes are data.** A theme file is validated value by value against closed lists: it
   cannot carry CSS, scripts, paths or addresses of remote resources. Importing a stranger's
   theme can make Kanso ugly, not unsafe. See [docs/THEMES.md](docs/THEMES.md).

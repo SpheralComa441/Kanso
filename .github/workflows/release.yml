@@ -2,12 +2,12 @@ name: Release
 
 # Builds the installers of the version written in src-tauri/tauri.conf.json and opens a DRAFT
 # release with them attached. Nothing is public until someone reads the draft and presses
-# Publish. Run it by hand from the Actions tab, or by pushing the tag v<version>.
+# Publish. Run it by hand from the Actions tab, on main.
+#
+# It does not run on tags: publishing the draft is what creates the tag v<version>, and a run
+# started by that tag would find the release already published and have nothing to do.
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*.*.*"
 
 permissions:
   contents: write
@@ -46,12 +46,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          tag="v$version"
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
-            echo "::error::The tag $GITHUB_REF_NAME does not match the version in tauri.conf.json ($version)."
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases are built from main; this run was started on $GITHUB_REF_NAME."
             exit 1
           fi
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          tag="v$version"
           state=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null || echo none)
           if [ "$state" = "false" ]; then
             echo "::error::Kanso $version is already published. Set a new version first (docs/DEVELOPMENT.md, Releasing)."

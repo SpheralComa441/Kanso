@@ -78,6 +78,7 @@ Get the installer from the [Releases page](https://github.com/SpheralComa441/Kan
 The installer is **not signed with a publisher certificate yet**, so Windows SmartScreen says
 it does not recognise the app: choose *More info*, then *Run anyway*. Each release lists the
 SHA-256 sums of its files, to check that what you downloaded is what was built here.
+Signing is on its way: see the [code signing policy](#code-signing-policy).
 
 ## Themes and plugins
 
@@ -95,7 +96,8 @@ your own work: publish them wherever you like, under the licence you choose.
 ## Privacy and security
 
 - **No server, no telemetry.** Requests go from your PC straight to the stores and services
-  Kanso reads, and to nothing of ours.
+  Kanso reads, and to nothing of ours. Every request, to whom, when and what it carries:
+  [PRIVACY.md](PRIVACY.md).
 - **Your password never passes through Kanso.** Signing in to a store is optional and always
   happens on the store's own page (your browser, or a separate window showing the store's
   page): Kanso does not read, save or send your password or your two-factor codes. Only the
@@ -133,6 +135,26 @@ npx tauri build
 `npm run dev` opens a browser preview with a sample library on any system. The layout of the
 code, the checks to run and how a release is made: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 To contribute: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Code signing policy
+
+The installers are not signed yet. Kanso is applying for the free code signing that the
+SignPath Foundation offers to open source projects; this is the policy its signed releases
+will keep.
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).
+
+- **What is signed**: only the program and the installers built from the source in this
+  repository by the [Release workflow](.github/workflows/release.yml), on GitHub's own
+  runners. Nothing built on somebody's PC is signed.
+- **Committers and reviewers**: [SpheralComa441](https://github.com/SpheralComa441)
+- **Approvers**: [SpheralComa441](https://github.com/SpheralComa441)
+- Kanso has one maintainer, who holds every role. Changes from anyone else arrive as pull
+  requests and are read by the maintainer before they are merged, and each release is
+  approved by hand.
+- **Privacy policy**: [PRIVACY.md](PRIVACY.md). Kanso has no server of its own to send
+  anything to; what it asks other services for, and when, is listed there.
 
 ## Licence
 

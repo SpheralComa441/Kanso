@@ -75,7 +75,8 @@ L'installer è nella [pagina delle Release](https://github.com/SpheralComa441/Ka
 L'installer **non è ancora firmato con un certificato di editore**, quindi Windows SmartScreen
 dice di non riconoscere l'app: scegli *Ulteriori informazioni*, poi *Esegui comunque*. Ogni
 release elenca le somme SHA-256 dei suoi file, per controllare che quello che hai scaricato
-sia quello costruito qui.
+sia quello costruito qui. La firma è in arrivo: vedi la
+[politica di firma del codice](#politica-di-firma-del-codice).
 
 ## Temi e plugin
 
@@ -93,7 +94,8 @@ lavoro tuo: pubblicali dove vuoi, con la licenza che scegli.
 ## Riservatezza e sicurezza
 
 - **Nessun server, nessuna telemetria.** Le richieste partono dal tuo PC e vanno direttamente
-  agli store e ai servizi che Kanso legge, e a niente di nostro.
+  agli store e ai servizi che Kanso legge, e a niente di nostro. Ogni richiesta, a chi va,
+  quando e che cosa porta con sé: [PRIVACY.md](PRIVACY.md) (in inglese).
 - **La tua password non passa mai da Kanso.** Accedere a uno store è facoltativo e avviene
   sempre sulla pagina dello store (nel tuo browser, o in una finestra separata che mostra la
   pagina dello store): Kanso non legge, non salva e non invia la password né i codici a due
@@ -133,6 +135,27 @@ npx tauri build
 Com'è fatto il codice, i controlli da eseguire e come si fa una release:
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) (in inglese). Per contribuire:
 [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Politica di firma del codice
+
+Gli installer non sono ancora firmati. Kanso sta chiedendo la firma gratuita che la SignPath
+Foundation offre ai progetti open source; questa è la politica che le release firmate
+seguiranno.
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by
+[SignPath Foundation](https://signpath.org/).
+
+- **Che cosa viene firmato**: solo il programma e gli installer costruiti dai sorgenti di
+  questo repository dal [workflow Release](.github/workflows/release.yml), sulle macchine di
+  GitHub. Niente di costruito sul PC di qualcuno viene firmato.
+- **Chi può modificare il codice e chi lo rivede** (*Committers and reviewers*):
+  [SpheralComa441](https://github.com/SpheralComa441)
+- **Chi approva una firma** (*Approvers*): [SpheralComa441](https://github.com/SpheralComa441)
+- Kanso ha un solo manutentore, che ricopre ogni ruolo. Le modifiche di chiunque altro
+  arrivano come pull request e sono lette dal manutentore prima di essere unite, e ogni
+  release è approvata a mano.
+- **Privacy**: [PRIVACY.md](PRIVACY.md). Kanso non ha un server suo a cui mandare qualcosa;
+  che cosa chiede agli altri servizi, e quando, è elencato lì.
 
 ## Licenza
 
