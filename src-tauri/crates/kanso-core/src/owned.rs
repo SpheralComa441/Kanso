@@ -135,6 +135,35 @@ pub fn merge_owned_games(
     changed
 }
 
+/// Marks the Steam games of the library, installed or not, as the account's own or as
+/// played through family sharing, as the licences the Steam client holds say (see
+/// [`crate::scanner::steam_licenses`]). A game the licences say nothing about is left as it
+/// is. Returns the games whose mark changed, as stored.
+pub fn apply_steam_ownership(
+    db: &Mutex<LibraryDb>,
+    ownership: &crate::scanner::steam_licenses::SteamOwnership,
+) -> Vec<DetectedGame> {
+    let mut db = lock(db);
+    let changed: Vec<DetectedGame> = db
+        .load_games()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|game| game.platform == GamePlatform::Steam)
+        .filter_map(|mut game| {
+            let appid: u64 = game.platform_app_id.as_deref()?.trim().parse().ok()?;
+            let shared = ownership.is_family_shared(appid)?;
+            (game.is_family_shared != shared).then(|| {
+                game.is_family_shared = shared;
+                game
+            })
+        })
+        .collect();
+    if db.upsert_games(&changed).is_err() {
+        return Vec::new();
+    }
+    changed
+}
+
 /// Takes out of the library the games listed under `ids` that are not installed: entries a
 /// store's list was wrongly read into (a game the account has on a console only). An
 /// installed game is never touched, whatever a store says. Returns the ids removed.
@@ -929,6 +958,51 @@ mod tests {
             None,
             Some(format!("https://cdn.example/{id}.jpg")),
         )
+    }
+
+    #[test]
+    fn the_clients_licences_mark_the_familys_games_installed_or_not() {
+        use crate::scanner::steam_licenses::{SteamLicense, SteamOwnership};
+        use crate::scanner::steam_packages::SteamPackage;
+
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let me = 222u32;
+        let package = |id: u32, app: u32| SteamPackage { id, app_ids: vec![app], license_type: 1, free_weekend: false, counts_as_unowned: false };
+        let ownership = SteamOwnership::from_licenses(
+            &[
+                SteamLicense { package_id: 1, owner_id: me },
+                SteamLicense { package_id: 2, owner_id: 333 },
+                SteamLicense { package_id: 3, owner_id: 333 },
+                SteamLicense { package_id: 4, owner_id: me },
+            ],
+            &[package(1, 10), package(2, 20), package(3, 30), package(4, 40)],
+            me,
+        );
+        {
+            let mut db = db.lock().unwrap();
+            let mut mine = owned(GamePlatform::Steam, "steam:10", "Mine, not installed").game;
+            // Marked by an older reading that got it wrong
+            mine.is_family_shared = true;
+            let borrowed = owned(GamePlatform::Steam, "steam:20", "The family's, not installed").game;
+            let mut borrowed_installed = owned(GamePlatform::Steam, "steam:30", "The family's, installed").game;
+            borrowed_installed.is_installed = true;
+            let mut unknown = owned(GamePlatform::Steam, "steam:50", "In no licence").game;
+            unknown.is_family_shared = true;
+            // The same number in another store is another game
+            let elsewhere = owned(GamePlatform::Gog, "gog:20", "A game of another store").game;
+            db.upsert_games(&[mine, borrowed, borrowed_installed, unknown, elsewhere]).unwrap();
+        }
+
+        let changed = apply_steam_ownership(&db, &ownership);
+        let mut ids: Vec<&str> = changed.iter().map(|game| game.id.as_str()).collect();
+        ids.sort_unstable();
+        assert_eq!(ids, ["steam:10", "steam:20", "steam:30"]);
+        let shared = |id: &str| db.lock().unwrap().get_game(id).unwrap().unwrap().is_family_shared;
+        assert!(!shared("steam:10"), "a licence of my own");
+        assert!(shared("steam:20") && shared("steam:30"), "only the family holds a licence");
+        assert!(shared("steam:50"), "nothing known: left as it was");
+        assert!(!shared("gog:20"));
+        assert!(apply_steam_ownership(&db, &ownership).is_empty(), "nothing more to change");
     }
 
     #[test]

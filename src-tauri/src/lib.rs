@@ -280,6 +280,11 @@ async fn sync_library_metadata(
             let play_stats = kanso_core::scanner::steam::read_steam_play_stats(&steam_root);
             let owned_apps = kanso_core::scanner::steam_packages::read_owned_steam_apps(&steam_root);
             kanso_core::owned::sync_steam_library(&db, &client, &play_stats, &owned_apps, now);
+            // Which of them are the family's: the client's own list of licences says whose
+            // each one is, for the games that are not installed as for those that are
+            if let Some(ownership) = kanso_core::scanner::steam_licenses::read_steam_ownership(&steam_root) {
+                kanso_core::owned::apply_steam_ownership(&db, &ownership);
+            }
         }
         // The clients of Epic, GOG Galaxy and Ubisoft Connect name the account's games in
         // their own local records: those join too, with no sign-in and no request

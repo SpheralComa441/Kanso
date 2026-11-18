@@ -8,6 +8,7 @@ pub mod gog_galaxy;
 pub mod registry;
 pub mod standalone;
 pub mod steam;
+pub mod steam_licenses;
 pub mod steam_packages;
 pub mod ubisoft;
 pub mod ubisoft_cache;

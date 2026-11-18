@@ -76,9 +76,9 @@ What no automated test covers is in [MANUAL-TESTS.md](MANUAL-TESTS.md).
   - `scanner/` — one module per store (Steam, Epic Games, GOG, Ubisoft Connect, EA app,
     Battle.net, Xbox app) plus custom folders. Registry-based scanners receive entries
     already read, so their logic is tested on mocked data. A game reported by several stores
-    is listed once. `epic_catalog.rs`, `gog_galaxy.rs`, `ubisoft_cache.rs` and
-    `steam_packages.rs` read what the clients keep on disk about the account's games, with no
-    sign-in.
+    is listed once. `epic_catalog.rs`, `gog_galaxy.rs`, `ubisoft_cache.rs`,
+    `steam_packages.rs` and `steam_licenses.rs` read what the clients keep on disk about the
+    account's games (and, for Steam, whose each one is), with no sign-in.
   - `emulators/` — recognising emulators, reading their own settings for the games folders,
     building the command line that starts a game.
   - `metadata.rs`, `owned.rs` — covers, descriptions, genres and tags (SteamGridDB and the

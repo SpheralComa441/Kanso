@@ -46,7 +46,8 @@
 
 - **Library**: a grid of covers or a compact list, instant search, and filters that combine:
   favourites, recently played, not installed, platform, status, genres and Steam tags.
-  *Installed only* leaves everything else out at once.
+  *Installed only* leaves everything else out at once. Games that reach you through Steam
+  family sharing are marked, installed or not.
 - **Covers and details** from [SteamGridDB](https://www.steamgriddb.com) (with your own free
   key) and the Steam store, in your language. Steam games get covers without a key.
 - **Play time and status**: Steam's counters are read from its local files; games from other

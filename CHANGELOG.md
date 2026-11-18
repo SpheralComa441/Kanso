@@ -12,7 +12,8 @@ The first public release.
 - **The games you own but have not installed**, read from what the store clients keep on the
   PC (Steam, Epic, GOG Galaxy, Ubisoft Connect) with no sign-in, and, if you choose to sign
   in, from the accounts of Epic, GOG, Ubisoft, EA, Battle.net and Xbox. The Game Pass catalog
-  for PC is an option of its own. *Install* hands a game to its store's client.
+  for PC is an option of its own. *Install* hands a game to its store's client. The games
+  that reach you through Steam family sharing are marked, installed or not.
 - **Covers, descriptions, genres and tags** from SteamGridDB (with your own free key) and the
   Steam store, in the language of the interface.
 - **Play time, last session, status and statistics.** Steam's own counters are read from its

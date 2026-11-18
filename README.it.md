@@ -42,7 +42,8 @@ Le schermate sono in inglese; l'interfaccia è anche in italiano, spagnolo e rus
 
 - **Libreria**: griglia di copertine o elenco compatto, ricerca immediata e filtri che si
   combinano: preferiti, giocati di recente, non installati, piattaforma, stato, generi e tag
-  di Steam. *Solo installati* lascia fuori tutto il resto in un colpo.
+  di Steam. *Solo installati* lascia fuori tutto il resto in un colpo. I giochi che ti arrivano
+  dalla condivisione familiare di Steam sono contrassegnati, installati o no.
 - **Copertine e dettagli** da [SteamGridDB](https://www.steamgriddb.com) (con la tua chiave
   gratuita) e dallo store di Steam, nella tua lingua. I giochi di Steam hanno la copertina
   anche senza chiave.
