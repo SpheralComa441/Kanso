@@ -1,0 +1,16 @@
+name: Idea or request
+description: Something Kanso could do, or do better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you would like
+      description: What it is for, more than how it should be built.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: How you manage today
+      description: A theme or a plugin may already do it; see docs/THEMES.md and docs/PLUGINS.md.

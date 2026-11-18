@@ -1,0 +1,48 @@
+name: Bug report
+description: Something in Kanso does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time. Please leave out anything personal: account names,
+        e-mail addresses, API keys, and the name of your Windows user in folder paths.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Kanso version
+      description: The version of the installer you used (for example 0.1.0).
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where
+      options:
+        - Library and scan (a game is missing, listed twice, has the wrong name)
+        - Starting or installing a game
+        - Covers, descriptions, genres and tags
+        - Store accounts
+        - Home, Store or News page
+        - Themes
+        - Plugins
+        - Emulators
+        - DLSS
+        - Something else
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: A screenshot, the theme or plugin involved, the store the game is from.

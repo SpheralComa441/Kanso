@@ -41,6 +41,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Utility",
+    "shortDescription": "A clean, light game launcher: every store in one library",
+    "copyright": "Copyright (C) 2026 The Kanso authors. Free software under the GNU GPL, version 3 or later.",
+    "license": "GPL-3.0-or-later",
+    "homepage": "https://github.com/SpheralComa441/Kanso",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

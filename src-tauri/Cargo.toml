@@ -9,6 +9,7 @@ version = "0.1.0"
 description = "Kanso — Minimalist Windows Game Launcher"
 authors = ["Kanso Contributors"]
 edition = "2021"
+license = "GPL-3.0-or-later"
 
 [lib]
 name = "kanso_lib"
