@@ -6,20 +6,22 @@
 //! address that starts it or shows where to get it. That address is the only thing a plugin's
 //! game can make Kanso open, so it is checked here, against closed lists:
 //!
-//! - a web page, plain `https` (the same rule as the links a plugin shows);
+//! - a web page: plain `https`, on a named host of the public kind and its usual port;
 //! - an address of one of the game clients in [`CLIENTS`], and only of those the plugin's
 //!   manifest names under `library.opens`, which the user sees before switching the plugin on.
+//!   A client is not let through by how its addresses begin, but form by form: a client's
+//!   protocol can do far more than start a game (run a program of the caller's choosing, sign
+//!   an account in), and only the forms that open or start one game by its id are accepted.
 //!
 //! Nothing else is ever opened: no file, no program, no other protocol of the system. The
 //! check is made when the answer is read, again when it comes back from the cache, and once
 //! more by whoever opens the address (the manifest may have changed in between).
 
-use super::manifest::PluginManifest;
+use super::manifest::{is_valid_host, PluginManifest};
 use super::output::is_safe_link;
 use crate::cleaner::clean_game_title;
 use crate::db::LibraryDb;
 use crate::models::{DetectedGame, GamePlatform};
-use crate::store::has_user_data;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -27,28 +29,45 @@ use std::sync::Mutex;
 use url::Url;
 
 /// A game client a plugin's games may be handed to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub struct Client {
     /// The name a manifest uses under `library.opens`.
     pub name: &'static str,
     /// The client's own name, as the interface shows it.
     pub label: &'static str,
-    /// How the addresses the client answers to begin.
-    pub prefixes: &'static [&'static str],
+    /// The forms of address accepted, as the guide prints them.
+    pub forms: &'static [&'static str],
+    accepts: fn(&str) -> bool,
 }
 
-/// The clients a plugin may name. A closed list on purpose: every protocol registered on a PC
-/// is a program that can be made to do something, and only the ones known to be game clients
-/// are let through. The stores Kanso reads by itself (Steam, Epic, GOG, ...) are not here: a
-/// plugin has no business opening them. A new client is one more line, after a look at what
-/// its addresses can do.
+/// The clients a plugin may name, and the addresses of each that are let through. A closed
+/// list on purpose: every protocol registered on a PC is a program that can be made to do
+/// something, and only the forms known to open or start one game are accepted. The stores
+/// Kanso reads by itself (Steam, Epic, GOG, ...) are not here: a plugin has no business
+/// opening them. A new client, or a new form, is added after reading what the client does
+/// with it.
 pub const CLIENTS: [Client; 3] = [
-    Client { name: "itch", label: "itch", prefixes: &["itch://"] },
-    Client { name: "amazon", label: "Amazon Games", prefixes: &["amazon-games://"] },
-    Client { name: "heroic", label: "Heroic Games Launcher", prefixes: &["heroic://"] },
+    Client {
+        name: "itch",
+        label: "itch",
+        forms: &["itch://games/<number>", "itch://install?game_id=<number>"],
+        accepts: itch_address,
+    },
+    Client {
+        name: "amazon",
+        label: "Amazon Games",
+        forms: &["amazon-games://play/<id>"],
+        accepts: amazon_address,
+    },
+    Client {
+        name: "heroic",
+        label: "Heroic Games Launcher",
+        forms: &["heroic://launch/<legendary|gog|nile|sideload>/<id>"],
+        accepts: heroic_address,
+    },
 ];
 
-/// Most games one plugin can list.
+/// Most games one plugin can list, and most it can have in the library at once.
 pub const MAX_LIBRARY_GAMES: usize = 3000;
 const ID_CHARS: usize = 64;
 const TITLE_CHARS: usize = 200;
@@ -59,6 +78,39 @@ const ADDRESS_CHARS: usize = 600;
 /// More hours than anyone has played anything: a figure above it is a mistake.
 const MAX_PLAYTIME_MINUTES: f64 = 10.0 * 365.0 * 24.0 * 60.0;
 
+/// A number as a store gives its games.
+fn is_number(raw: &str) -> bool {
+    (1..=12).contains(&raw.len()) && raw.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// A game's id as a client knows it: one plain word. No separator of an address can be in
+/// it, so nothing can follow the id: no further path, no query.
+fn is_plain_id(raw: &str) -> bool {
+    (1..=80).contains(&raw.len())
+        && raw.bytes().all(|b| b.is_ascii_alphanumeric() || b"._-".contains(&b))
+        && raw.as_bytes()[0].is_ascii_alphanumeric()
+}
+
+/// itch: a game's page in the app, or the app's own question whether to install it.
+fn itch_address(address: &str) -> bool {
+    address.strip_prefix("itch://games/").is_some_and(is_number)
+        || address.strip_prefix("itch://install?game_id=").is_some_and(is_number)
+}
+
+/// Amazon Games: start a game by its product id.
+fn amazon_address(address: &str) -> bool {
+    address.strip_prefix("amazon-games://play/").is_some_and(is_plain_id)
+}
+
+/// Heroic: start a game of one of its stores by id, in the form that takes nothing else.
+/// The other form (`heroic://launch?...`) also takes a program to run and its arguments.
+fn heroic_address(address: &str) -> bool {
+    address
+        .strip_prefix("heroic://launch/")
+        .and_then(|rest| rest.split_once('/'))
+        .is_some_and(|(store, id)| ["legendary", "gog", "nile", "sideload"].contains(&store) && is_plain_id(id))
+}
+
 /// The labels of the clients named in `opens`, for the interface.
 pub fn client_labels(opens: &[String]) -> Vec<String> {
     CLIENTS
@@ -68,32 +120,46 @@ pub fn client_labels(opens: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Whether a plugin whose manifest names `opens` may have Kanso open `address`: a plain
-/// `https` page, or an address of one of those clients. Only the characters of an address
-/// are accepted, so that nothing in it can be read as anything else by what receives it.
-pub fn is_allowed_address(address: &str, opens: &[String]) -> bool {
-    let plain = !address.is_empty()
+/// Only the characters of an address, and not too many of them: nothing in it can be read as
+/// anything else by what receives it.
+fn is_plain_address(address: &str) -> bool {
+    !address.is_empty()
         && address.len() <= ADDRESS_CHARS
         && address
             .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&()*+,;=%".contains(&b));
-    if !plain {
+            .all(|b| b.is_ascii_alphanumeric() || b"-._~:/?#[]@!$&()*+,;=%".contains(&b))
+}
+
+/// A page on the web as a plugin may point at one: plain `https` written as such, a named
+/// host of the public kind (no IP address, no `localhost`, nothing a PC or a home network
+/// answers to) and the usual port.
+fn is_web_address(address: &str) -> bool {
+    address.starts_with("https://")
+        && is_safe_link(address)
+        && Url::parse(address)
+            .is_ok_and(|url| url.port().is_none() && url.host_str().is_some_and(is_valid_host))
+}
+
+/// Whether a plugin whose manifest names `opens` may have Kanso open `address`: a web page,
+/// or one of the accepted addresses of one of those clients.
+pub fn is_allowed_address(address: &str, opens: &[String]) -> bool {
+    if !is_plain_address(address) {
         return false;
     }
     if address.starts_with("https://") {
-        return is_safe_link(address);
+        return is_web_address(address);
     }
     CLIENTS
         .iter()
         .filter(|client| opens.iter().any(|name| name == client.name))
-        .flat_map(|client| client.prefixes.iter())
-        .any(|prefix| address.len() > prefix.len() && address.starts_with(prefix))
+        .any(|client| (client.accepts)(address))
 }
 
-/// Whether `cover` is a picture the plugin may point at: a plain `https` address on one of
-/// the hosts its manifest declares, the only ones the user agreed it contacts.
+/// Whether `cover` is a picture the plugin may point at: a web address like the ones above,
+/// on one of the hosts its manifest declares, the only ones the user agreed it contacts.
 fn is_allowed_cover(cover: &str, hosts: &[String]) -> bool {
-    is_safe_link(cover)
+    is_plain_address(cover)
+        && is_web_address(cover)
         && Url::parse(cover)
             .ok()
             .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
@@ -275,6 +341,17 @@ fn is_remote(path: &str) -> bool {
     path.starts_with("https://") || path.starts_with("http://")
 }
 
+/// Whether the user gave a plugin's game something of theirs. Hours and last session do not
+/// count here, unlike for the games of a store: a plugin reports them itself, and a game must
+/// not be made to stay by what its own plugin says about it.
+fn is_kept_for_user(game: &DetectedGame) -> bool {
+    game.is_favorite
+        || game.status.is_some()
+        || !game.custom_genres.is_empty()
+        || game.custom_override
+        || game.play_count > 0
+}
+
 /// Makes the library hold the games of plugin `plugin_id` as `listed` has them now; an empty
 /// list is what a plugin that is switched off, or gone, lists.
 ///
@@ -282,8 +359,12 @@ fn is_remote(path: &str) -> bool {
 /// - A game it has keeps everything the user gave it (status, favourite, genres, a title or
 ///   a cover chosen by hand) and what Kanso found for it; the address, whether it can be
 ///   started, and hours and last session when the plugin knows of more, follow the plugin.
-/// - A game no longer listed leaves, unless the user gave it something: then it stays as
-///   not installed, with no address to open, like a game of a store that was uninstalled.
+/// - A game no longer listed leaves, unless the user gave it something (a status, a
+///   favourite, genres, an edit, a launch from Kanso): then it stays as not installed, with
+///   no address to open and without the cover its plugin gave, like a game of a store that
+///   was uninstalled.
+/// - A plugin never has more than [`MAX_LIBRARY_GAMES`] games in the library: past that, new
+///   ones wait until others have left.
 ///
 /// `now_ms` stamps what changes; a "last played" beyond it is ignored.
 pub fn reconcile(
@@ -302,8 +383,20 @@ pub fn reconcile(
 
     let mut change = LibraryChange::default();
     let mut still_listed: HashSet<String> = HashSet::new();
+    // What will be the plugin's in the library: what is there and stays, then what joins
+    let wanted: HashSet<String> = listed.iter().map(|game| library_id(plugin_id, &game.id)).collect();
+    let mut held = existing
+        .iter()
+        .filter(|(id, game)| wanted.contains(**id) || is_kept_for_user(game))
+        .count();
     for game in listed {
         let id = library_id(plugin_id, &game.id);
+        if !still_listed.contains(&id) && !existing.contains_key(id.as_str()) {
+            if held >= MAX_LIBRARY_GAMES {
+                continue;
+            }
+            held += 1;
+        }
         if !still_listed.insert(id.clone()) {
             continue;
         }
@@ -331,12 +424,11 @@ pub fn reconcile(
                 if next.steam_store_appid.is_none() {
                     next.steam_store_appid = steam_page;
                 }
-                // The plugin's cover fills an empty place, or replaces its own earlier one:
-                // a cover on disk (found by Kanso, or chosen by the user) is never touched
-                if let Some(cover) = &game.cover {
-                    if current.cover_path.as_deref().is_none_or(is_remote) {
-                        next.cover_path = Some(cover.clone());
-                    }
+                // A cover that is an address is the one the plugin gave before (those Kanso
+                // finds and the user chooses are files on disk): it follows the plugin, and
+                // goes when the plugin gives none. A cover on disk is never touched
+                if current.cover_path.as_deref().is_none_or(is_remote) {
+                    next.cover_path = game.cover.clone();
                 }
                 if next == **current {
                     continue;
@@ -372,12 +464,20 @@ pub fn reconcile(
         if still_listed.contains(*id) {
             continue;
         }
-        if !has_user_data(game) {
+        if !is_kept_for_user(game) {
             change.removed.push((*id).to_string());
-        } else if game.is_installed || game.launch_uri.is_some() {
+            continue;
+        }
+        // Nothing of the plugin's stays with the game: no address to open, and no cover on
+        // the plugin's host for the interface to ask for
+        let plugins_cover = game.cover_path.as_deref().is_some_and(is_remote);
+        if game.is_installed || game.launch_uri.is_some() || plugins_cover {
             let mut kept = (*game).clone();
             kept.is_installed = false;
             kept.launch_uri = None;
+            if plugins_cover {
+                kept.cover_path = None;
+            }
             kept.updated_at = now_ms;
             change.stored.push(kept);
         }
@@ -426,8 +526,10 @@ mod tests {
         }
         // A client the manifest does not name
         assert!(!is_allowed_address("amazon-games://play/abc", &itch));
-        assert!(is_allowed_address("amazon-games://play/abc", &opens(&["itch", "amazon"])));
-        assert!(is_allowed_address("heroic://launch/gog/123", &opens(&["heroic"])));
+        assert!(is_allowed_address("amazon-games://play/amzn1.adg.product.0a1b-2c3d", &opens(&["itch", "amazon"])));
+        for store in ["legendary", "gog", "nile", "sideload"] {
+            assert!(is_allowed_address(&format!("heroic://launch/{store}/Quail_1.2-x"), &opens(&["heroic"])), "{store}");
+        }
         // With nothing declared, web pages only
         assert!(is_allowed_address("https://example.org/", &[]));
         assert!(!is_allowed_address("itch://games/123", &[]));
@@ -462,6 +564,44 @@ mod tests {
             "https://example.org/^x",
             "https://example.org/`x`",
             "https://example.org/caffè",
+            "HTTPS://example.org/",
+            "https:example.org/",
+            // Not a named host of the public kind, or not the usual port
+            "https://localhost./",
+            "https://127.0.0.1/",
+            "https://127.0.0.1:8443/admin",
+            "https://192.168.1.1/",
+            "https://0x7f.1/",
+            "https://2130706433/",
+            "https://[::1]/",
+            "https://example.org:8443/",
+            "https://example.org./",
+            // A client's protocol does more than start a game: only the forms that open or
+            // start one game by its id are let through
+            "itch://oauth-callback?code=abc&state=def",
+            "itch://install?game_id=7&launch",
+            "itch://install?game_id=7&upload_id=9",
+            "itch://games/12a",
+            "itch://games/",
+            "itch://games/1/2",
+            "itch://games/1?x=y",
+            "itch://games/1234567890123",
+            "itch://library",
+            "itch://preferences",
+            "heroic://launch?appName=Quail&runner=legendary&altExe=C:/Windows/System32/cmd.exe&arg=/c&arg=calc.exe",
+            "heroic://launch?appName=Quail&altExe=//evil.example/share/payload.exe",
+            "heroic://launch/legendary/Quail?altExe=cmd.exe",
+            "heroic://launch/legendary/Quail&arg=x",
+            "heroic://launch/legendary/Quail/extra",
+            "heroic://launch/legendary/",
+            "heroic://launch/legendary/..",
+            "heroic://launch/other/Quail",
+            "heroic://launch/Quail",
+            "heroic://ping",
+            "amazon-games://play/a/b",
+            "amazon-games://play/a?b=c",
+            "amazon-games://play/",
+            "amazon-games://library",
         ] {
             assert!(!is_allowed_address(refused, &opens(&["itch", "amazon", "heroic"])), "{refused:?}");
         }
@@ -475,6 +615,15 @@ mod tests {
         assert_eq!(library.opens, ["itch", "amazon"]);
         assert_eq!(library.name.get(crate::i18n::Lang::It), "Lo scaffale");
         assert_eq!(client_labels(&library.opens), ["itch", "Amazon Games"]);
+        // Every form the guide prints for a client is one the client's check accepts
+        for client in &CLIENTS {
+            for form in client.forms {
+                let address = form.replace("<number>", "42").replace("<id>", "Quail_1").replace("<legendary|gog|nile|sideload>", "gog");
+                assert!(is_allowed_address(&address, &opens(&[client.name])), "{address}");
+            }
+        }
+        // A plugin cannot be called by the one name every object of the interface answers to
+        assert!(PluginManifest::parse(r#"{"kansoPlugin": 1, "id": "constructor", "name": "X", "version": "1", "provides": {"library": true}}"#).is_err());
 
         // Declared under "provides" alone: web pages only, and the plugin's own name
         let plain = PluginManifest::parse(
@@ -553,6 +702,19 @@ mod tests {
         assert_eq!((odd.playtime_minutes, odd.last_played_at, odd.installed, odd.launch.as_deref()), (None, None, true, None));
 
         // The list alone, nothing at all, and too many games
+        // A cover is an address like any other: written plainly, on the declared host, usual port
+        for cover in [
+            "https://img.example.org:8443/x.png",
+            "HTTPS://img.example.org/x.png",
+            "https:img.example.org/x.png",
+            "https://img.example.org/a b.png",
+            "https://img.example.org/a\"b.png",
+            "https://IMG.example.org.evil.example/x.png",
+            "http://img.example.org/x.png",
+        ] {
+            let read = parse_library(&json!([{"id": "a", "title": "A", "cover": cover}]), &shelf);
+            assert_eq!((read.games[0].cover.as_deref(), read.refused), (None, 1), "{cover}");
+        }
         assert_eq!(parse_library(&json!([{"id": "a", "title": "A"}]), &shelf).games.len(), 1);
         assert!(parse_library(&Value::Null, &shelf).games.is_empty());
         assert!(parse_library(&json!({"games": "all of them"}), &shelf).games.is_empty());
@@ -704,6 +866,61 @@ mod tests {
         let ids: Vec<String> = games(&db).into_iter().map(|game| game.id).collect();
         assert!(ids.contains(&"steam:10".to_string()) && ids.contains(&"plugin:other:a".to_string()), "{ids:?}");
         assert_eq!(plugins_with_games(&games(&db)), HashSet::from(["shelf".to_string(), "other".to_string()]));
+    }
+
+    #[test]
+    fn a_plugin_cannot_make_its_games_stay_nor_fill_the_library() {
+        let dir = tempdir().unwrap();
+        let db = Mutex::new(LibraryDb::open(&dir.path().join("library.db")).unwrap());
+        let count = |db: &Mutex<LibraryDb>| db.lock().unwrap().load_games().unwrap().len();
+
+        // Hours and a last session are what the plugin says: they do not make a game stay
+        let played = |run: u32, n: usize| {
+            let mut game = listed(&format!("run{run}-{n}"), &format!("Game {run}-{n}"));
+            game.playtime_minutes = Some(1);
+            game.last_played_at = Some(10);
+            game.cover = Some(format!("https://img.example.org/{run}-{n}.png"));
+            game
+        };
+        for run in 0..3 {
+            let games: Vec<LibraryGame> = (0..200).map(|n| played(run, n)).collect();
+            reconcile(&db, "shelf", &games, 1_000 + u64::from(run));
+            assert_eq!(count(&db), 200, "fresh ids at every run replace the earlier ones");
+        }
+        let change = reconcile(&db, "shelf", &[], 2_000);
+        assert_eq!((change.removed.len(), change.stored.len(), count(&db)), (200, 0, 0), "switched off: all of them leave");
+
+        // A game the user made theirs stays, without anything of the plugin's: no address,
+        // and no cover on the plugin's host for the interface to ask for
+        reconcile(&db, "shelf", &[played(9, 1), played(9, 2)], 3_000);
+        {
+            let db = db.lock().unwrap();
+            let mut mine = db.get_game("plugin:shelf:run9-1").unwrap().unwrap();
+            mine.is_favorite = true;
+            db.upsert_game(&mine).unwrap();
+        }
+        reconcile(&db, "shelf", &[], 4_000);
+        let kept = db.lock().unwrap().get_game("plugin:shelf:run9-1").unwrap().expect("kept for the user");
+        assert_eq!((kept.cover_path, kept.launch_uri, kept.is_installed), (None, None, false));
+        assert_eq!(count(&db), 1);
+        // Listed again without a cover: the place stays empty for Kanso to fill
+        let mut bare = played(9, 1);
+        bare.cover = None;
+        reconcile(&db, "shelf", &[bare.clone()], 5_000);
+        assert_eq!(db.lock().unwrap().get_game("plugin:shelf:run9-1").unwrap().unwrap().cover_path, None);
+        // With a cover, then without: the plugin's cover goes when the plugin gives none
+        reconcile(&db, "shelf", &[played(9, 1)], 6_000);
+        assert!(db.lock().unwrap().get_game("plugin:shelf:run9-1").unwrap().unwrap().cover_path.is_some());
+        reconcile(&db, "shelf", &[bare], 7_000);
+        assert_eq!(db.lock().unwrap().get_game("plugin:shelf:run9-1").unwrap().unwrap().cover_path, None);
+
+        // Never more than the most a plugin may have, whatever it lists over time: the one
+        // kept for the user counts, and what is over waits
+        let many: Vec<LibraryGame> = (0..MAX_LIBRARY_GAMES + 40).map(|n| listed(&format!("m{n}"), &format!("Many {n}"))).collect();
+        reconcile(&db, "shelf", &many, 8_000);
+        assert_eq!(count(&db), MAX_LIBRARY_GAMES);
+        assert!(db.lock().unwrap().get_game("plugin:shelf:run9-1").unwrap().is_some());
+        assert_eq!(reconcile(&db, "shelf", &many, 9_000), LibraryChange::default(), "and the next look changes nothing");
     }
 
     #[test]

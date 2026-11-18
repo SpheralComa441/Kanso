@@ -84,13 +84,15 @@ export function platformOfSource(source: GameSource): GamePlatform {
 }
 
 /**
- * What the libraries of the plugins are called, by plugin id. Kept here, not passed around:
+ * What the libraries of the plugins are called, by plugin id (a map, not a plain object: an
+ * id is any word, and a plain object answers to a few words of its own). Kept here, not
+ * passed around:
  * the name of a platform is asked for in every corner of the interface. The app sets it
  * while it renders, whenever the list of plugins changes, before anything below it draws.
  */
-let pluginLibraryNames: Readonly<Record<string, string>> = {};
+let pluginLibraryNames: ReadonlyMap<string, string> = new Map();
 
-export function setPluginLibraryNames(names: Readonly<Record<string, string>>): void {
+export function setPluginLibraryNames(names: ReadonlyMap<string, string>): void {
   pluginLibraryNames = names;
 }
 
@@ -102,7 +104,7 @@ export function platformLabel(
   const plugin = pluginOfSource(source);
   // A library whose plugin is gone (its games stay if the user gave them something) goes by
   // the plugin's id: better than a name that says nothing
-  if (plugin !== null) return pluginLibraryNames[plugin] ?? plugin;
+  if (plugin !== null) return pluginLibraryNames.get(plugin) ?? plugin;
   return source === "standalone"
     ? t("platform.local")
     : source === "emulator"

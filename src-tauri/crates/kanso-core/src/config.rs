@@ -368,6 +368,9 @@ pub fn is_valid_plugin_id(id: &str) -> bool {
     (2..=40).contains(&id.len())
         && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
         && !id.starts_with('-')
+        // The one word of this shape that every object of the interface already answers to:
+        // a plugin by this name could be mistaken for something that is not a plugin
+        && id != "constructor"
 }
 
 /// User configuration persisted locally inside the OS AppData directory (`config.json`).

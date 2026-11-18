@@ -92,7 +92,7 @@ changed settings invalidate the plugin's cached answers automatically.
 | `provides.home` | The plugin implements `home(context)`: a part of the Home page. Only `true` switches it on. |
 | `provides.library` | The plugin implements `library(context)`: games that join the library under a platform of their own. Only `true` switches it on. See [A library of games](#a-library-of-games). |
 | `library.name` | What the platform is called in the side panel, on the cards and in the statistics (40 characters; a string or one per language). Default: the plugin's name. |
-| `library.opens` | The game clients the library's games may be handed to, by name: `itch`, `amazon`, `heroic`. Omit it when the games open web pages only, which need no entry. |
+| `library.opens` | The game clients the library's games may be handed to, by name: `itch`, `amazon`, `heroic` (see the addresses accepted for each under [A library of games](#a-library-of-games)). Omit it when the games open web pages only, which need no entry. |
 | `cacheHours` | How long an answer of `gameDetails` is reused (1–2160, default 168). An answer of `home` is reused for the same time, but for 24 hours at most. |
 | `commands` | Up to 8 entries for the Plugins menu; each `id` is a function under `commands` in `main.js`. |
 | `settings` | Up to 12 values the user edits in *Settings → Plugins*. Types: `text`, `secret` (masked), `toggle` (`"true"`/`"false"`), `select`. |
@@ -309,7 +309,8 @@ kanso.plugin({
 
 - **What it gets.** `library(context)` is called with `context.now` (ms) and nothing else: a
   library is read from its service, not from the user's games.
-- **What it returns.** `{ games: [...] }`, or the list alone; at most **3000 games**.
+- **What it returns.** `{ games: [...] }`, or the list alone; at most **3000 games**, which is
+  also the most one plugin can have in the library at a time.
 
   | Field | |
   |---|---|
@@ -320,22 +321,32 @@ kanso.plugin({
   | `genres` | Up to 8 short names. Used when the game has none yet. |
   | `description` | A few lines of plain text (600 characters). Used when the game has none yet. |
   | `playtimeMinutes`, `lastPlayedAt` | What the service knows; Kanso keeps the larger figure and the later date. A date in the future is ignored. |
-  | `cover` | A picture of the cover: plain `https`, on one of the plugin's declared `hosts`. It fills an empty place; a cover Kanso found or the user chose is never replaced. |
+  | `cover` | A picture of the cover: a web address as described below, on one of the plugin's declared `hosts`. It fills an empty place and follows what the plugin says from then on; a cover Kanso found or the user chose is never replaced. |
   | `steamAppId` | The game's id on the Steam store, when the service knows it: the plugins that read Steam (reviews, news) then work for it. |
 
 - **What a game can open.** Only two kinds of address, checked by Kanso every time before
   opening one:
-  - a web page: plain `https`, a real host, no credentials in it (the same rule as the links a
-    plugin shows);
-  - an address of a game client named in `library.opens`. The clients are a closed list:
-    `itch` (`itch://…`), `amazon` (`amazon-games://…`), `heroic` (`heroic://…`).
+  - a web page: `https://` followed by a named public host (no IP address, no `localhost`),
+    on the usual port, with no credentials in it;
+  - an address of a game client named in `library.opens`, in one of the forms accepted for
+    that client. A client's protocol can do much more than start a game, so a client is not
+    let through by how its addresses begin, but form by form:
+
+    | Client | Accepted |
+    |---|---|
+    | `itch` | `itch://games/<number>` (the game's page in the itch app), `itch://install?game_id=<number>` (the app asks whether to install it) |
+    | `amazon` | `amazon-games://play/<id>` |
+    | `heroic` | `heroic://launch/<store>/<id>` with `<store>` one of `legendary`, `gog`, `nile`, `sideload` |
+
+    `<number>` is up to 12 digits; `<id>` is one word of letters, digits, `.`, `_` and `-`.
+    Nothing may follow it: no further path, no `?` and no parameters.
 
   Nothing else is opened, ever: no file, no program, no other protocol of the system. Only the
   characters of an address are accepted (no spaces, quotes or anything else). An address that
   is not allowed is dropped and its game is still listed, without *Play*. The stores Kanso
   reads by itself (Steam, Epic, GOG, …) are not in the list on purpose. If your store's client
-  is missing, open an issue: adding one is a line in `plugins/library.rs`, after a look at what
-  its addresses can do.
+  or the form you need is missing, open an issue: it is added in `plugins/library.rs` after
+  reading what the client does with such an address.
 - **When it runs.** At every scan of the library (at startup, and when the user presses
   *Scan*), and at once when the plugin is switched on or its settings change. The answer is
   reused for `cacheHours`, **capped at 24 hours**; a scan the user asked for always asks again.
@@ -345,8 +356,11 @@ kanso.plugin({
   a missing key or a service that is down.
 - **What stays the user's.** A game no longer listed leaves the library, and so do all the
   games of a plugin that is switched off or removed, unless the user gave the game something
-  (a status, a favourite, genres, hours): then it stays, as not installed and with nothing to
-  open, and comes back as it was if the plugin lists it again. A title edited by hand is kept.
+  (a status, a favourite, genres, an edit, a launch from Kanso): then it stays, as not
+  installed, with nothing to open and without the cover the plugin gave, and comes back as it
+  was if the plugin lists it again. A title edited by hand is kept. The hours and the last
+  session a plugin reports do not make a game stay: they are the plugin's word, not the
+  user's.
 - **What the user sees first.** *Settings → Plugins* says, next to the sites the plugin
   contacts, that it brings a library, what it is called and what its games can open. In a
   game's sheet, *Files and launch* shows the address *Play* opens, as it is.

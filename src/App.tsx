@@ -314,8 +314,10 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   // reads it, so it is set here, while rendering, before anything below draws
   const libraryNames = useMemo(
     () =>
-      Object.fromEntries(
-        plugins.flatMap((plugin) => (plugin.library ? [[plugin.id, plugin.library.name]] : []))
+      new Map(
+        plugins.flatMap((plugin): [string, string][] =>
+          plugin.library ? [[plugin.id, plugin.library.name]] : []
+        )
       ),
     [plugins]
   );

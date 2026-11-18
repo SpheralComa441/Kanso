@@ -22,7 +22,7 @@ pub struct LibraryStore {
 const MAX_CUSTOM_GENRES: usize = 24;
 const MAX_GENRE_CHARS: usize = 40;
 
-pub(crate) fn has_user_data(game: &DetectedGame) -> bool {
+fn has_user_data(game: &DetectedGame) -> bool {
     game.is_favorite
         || game.status.is_some()
         || !game.custom_genres.is_empty()
