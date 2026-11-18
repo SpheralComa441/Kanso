@@ -30,7 +30,8 @@ export function DlssTile({ game, tile = false }: { game: DetectedGame; tile?: bo
     setLibraries([]);
     setChoosing(false);
     setMessage(null);
-    if (game.isInstalled && game.platform !== "emulator") {
+    // Nothing to look at for a game with no folder on this PC: an emulated one, a plugin's
+    if (game.isInstalled && game.platform !== "emulator" && game.platform !== "plugin") {
       gameDlss(game)
         .then((found) => current && setLibraries(found))
         // Not being able to read them is the same as not having them

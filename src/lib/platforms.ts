@@ -1,4 +1,4 @@
-import type { DetectedGame, GamePlatform } from "../types/game";
+import type { DetectedGame, GamePlatform, GameSource } from "../types/game";
 
 /** Display order of the supported game sources across the UI. */
 export const PLATFORM_ORDER: GamePlatform[] = [
@@ -57,18 +57,59 @@ export const PLATFORM_META: Record<
     label: "Emulatore",
     badgeClass: "border-amber-500/30 bg-amber-500/15 text-amber-300",
   },
+  // The library of a plugin: its games go by the library's own name (see `platformLabel`)
+  plugin: {
+    label: "Plugin",
+    badgeClass: "border-violet-400/35 bg-violet-400/15 text-violet-300",
+  },
 };
 
-/** Display name of a platform in the current language. */
+const PLUGIN_SOURCE = "plugin:";
+
+/** Where a game is filed among the platforms: its store, or the library of its plugin. */
+export function sourceOf(game: DetectedGame): GameSource {
+  return game.platform === "plugin" && game.platformAppId
+    ? `${PLUGIN_SOURCE}${game.platformAppId}`
+    : game.platform;
+}
+
+/** The plugin whose library a source is, or `null` for a store. */
+export function pluginOfSource(source: GameSource): string | null {
+  return source.startsWith(PLUGIN_SOURCE) ? source.slice(PLUGIN_SOURCE.length) : null;
+}
+
+/** The platform a source belongs to: itself, or `plugin` for any plugin's library. */
+export function platformOfSource(source: GameSource): GamePlatform {
+  return pluginOfSource(source) === null ? (source as GamePlatform) : "plugin";
+}
+
+/**
+ * What the libraries of the plugins are called, by plugin id. Kept here, not passed around:
+ * the name of a platform is asked for in every corner of the interface. The app sets it
+ * while it renders, whenever the list of plugins changes, before anything below it draws.
+ */
+let pluginLibraryNames: Readonly<Record<string, string>> = {};
+
+export function setPluginLibraryNames(names: Readonly<Record<string, string>>): void {
+  pluginLibraryNames = names;
+}
+
+/** Display name of a platform, or of a plugin's library, in the current language. */
 export function platformLabel(
-  platform: GamePlatform,
-  t: (key: "platform.local" | "platform.emulator") => string
+  source: GameSource,
+  t: (key: "platform.local" | "platform.emulator" | "platform.plugin") => string
 ): string {
-  return platform === "standalone"
+  const plugin = pluginOfSource(source);
+  // A library whose plugin is gone (its games stay if the user gave them something) goes by
+  // the plugin's id: better than a name that says nothing
+  if (plugin !== null) return pluginLibraryNames[plugin] ?? plugin;
+  return source === "standalone"
     ? t("platform.local")
-    : platform === "emulator"
+    : source === "emulator"
       ? t("platform.emulator")
-      : PLATFORM_META[platform].label;
+      : source === "plugin"
+        ? t("platform.plugin")
+        : PLATFORM_META[source as GamePlatform].label;
 }
 
 /** A game file run by an emulator: it lives in the Emulators section, not in the library. */
@@ -125,6 +166,9 @@ export function canInstall(game: DetectedGame): boolean {
         launchUri.startsWith("msxbox://game/?productId=") ||
         launchUri.startsWith("ms-windows-store://pdp/?PFN=")
       );
+    // The one address its plugin gave: where the game is got is where it is started
+    case "plugin":
+      return launchUri.trim() !== "";
     default:
       return false;
   }

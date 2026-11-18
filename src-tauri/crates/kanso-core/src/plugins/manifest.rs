@@ -1,5 +1,6 @@
 //! `plugin.json`: what a plugin is, which hosts it may contact and what it adds to Kanso.
 
+use super::library::CLIENTS;
 use crate::config::is_valid_plugin_id;
 use crate::i18n::Lang;
 use serde_json::{Map, Value};
@@ -98,6 +99,16 @@ pub struct PluginSetting {
     pub options: Vec<(String, LocalizedText)>,
 }
 
+/// What a plugin that brings a library of games declares about it (`library` in the manifest).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PluginLibrary {
+    /// What the library is called among the platforms; empty when the plugin's own name is.
+    pub name: LocalizedText,
+    /// The game clients its games may be handed to, by their names in
+    /// [`super::library::CLIENTS`]. Web pages can always be opened.
+    pub opens: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PluginManifest {
     pub id: String,
@@ -117,7 +128,11 @@ pub struct PluginManifest {
     pub background: bool,
     /// Implements `home(context)`: a part of the Home page.
     pub home: bool,
-    /// Hours an answer of `gameDetails` is reused (and of `home`, where a day is the most).
+    /// Implements `library(context)`: games that join the library under a platform of their
+    /// own. `None` when the plugin brings no library.
+    pub library: Option<PluginLibrary>,
+    /// Hours an answer of `gameDetails` is reused (and of `home` and `library`, where a day
+    /// is the most).
     pub cache_hours: u64,
     pub commands: Vec<PluginCommand>,
     pub settings: Vec<PluginSetting>,
@@ -268,9 +283,39 @@ impl PluginManifest {
             });
         }
 
-        if !game_details && !home && commands.is_empty() {
+        let library = if provided("library") {
+            let declared = match root.get("library") {
+                None | Some(Value::Null) => None,
+                Some(Value::Object(declared)) => Some(declared),
+                Some(_) => return Err("plugin.json: \"library\" must be an object".to_string()),
+            };
+            let mut opens = Vec::new();
+            if let Some(declared) = declared {
+                for item in list_field(declared, "opens", CLIENTS.len())? {
+                    let name = item.as_str().unwrap_or_default().trim().to_ascii_lowercase();
+                    if !CLIENTS.iter().any(|client| client.name == name) {
+                        let known: Vec<&str> = CLIENTS.iter().map(|client| client.name).collect();
+                        return Err(format!(
+                            "plugin.json: \"{name}\" under \"library.opens\" is not a game client Kanso knows ({}); web pages need no entry",
+                            known.join(", ")
+                        ));
+                    }
+                    if !opens.contains(&name) {
+                        opens.push(name);
+                    }
+                }
+            }
+            Some(PluginLibrary {
+                name: LocalizedText::parse(declared.and_then(|declared| declared.get("name")), 40),
+                opens,
+            })
+        } else {
+            None
+        };
+
+        if !game_details && !home && library.is_none() && commands.is_empty() {
             return Err(
-                "plugin.json: the plugin adds nothing: set \"gameDetails\" or \"home\" to true under \"provides\", or declare \"commands\""
+                "plugin.json: the plugin adds nothing: set \"gameDetails\", \"home\" or \"library\" to true under \"provides\", or declare \"commands\""
                     .to_string(),
             );
         }
@@ -287,6 +332,7 @@ impl PluginManifest {
             badge: game_details && provided("badge"),
             background: game_details && provided("background"),
             home,
+            library,
             cache_hours: root
                 .get("cacheHours")
                 .and_then(Value::as_u64)

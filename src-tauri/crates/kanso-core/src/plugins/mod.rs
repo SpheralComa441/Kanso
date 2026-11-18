@@ -12,6 +12,7 @@
 //! page, caches the answer in the database and hands the interface what to show.
 
 pub mod http;
+pub mod library;
 pub mod manifest;
 pub mod output;
 pub mod registry;
@@ -22,6 +23,7 @@ use crate::db::{LibraryDb, PluginCacheEntry};
 use crate::i18n::{Lang, T};
 use crate::models::DetectedGame;
 use http::{HttpTransport, UreqTransport};
+use library::{parse_library, PluginLibraryData};
 use manifest::SettingKind;
 use output::{parse_game_data, parse_home_view, parse_view, PluginGameData, PluginView};
 use registry::{Plugin, PluginSource};
@@ -40,8 +42,14 @@ const ERROR_LOG_LINES: usize = 12;
 /// about today.
 pub const HOME_MAX_CACHE_HOURS: u64 = 24;
 /// Where a plugin's answer for the Home page is kept, in the same cache as its answers per
-/// game. Every game id starts with its platform and a colon, so this is never one of them.
+/// game. Every game id starts with its platform and a colon, so a key that starts with `@` is
+/// never one of them.
 const HOME_CACHE_KEY: &str = "@home";
+/// The longest an answer of `library` is reused, whatever the manifest says: a game bought
+/// today should not take a week to show.
+pub const LIBRARY_MAX_CACHE_HOURS: u64 = 24;
+/// Where a plugin's library is kept, in the same cache.
+const LIBRARY_CACHE_KEY: &str = "@library";
 
 /// Whether the user (or, for a shipped plugin never touched, its own default) has it on.
 pub fn is_enabled(plugin: &Plugin, config: &AppConfig) -> bool {
@@ -109,6 +117,24 @@ pub struct PluginSettingInfo {
     pub options: Vec<PluginOptionInfo>,
 }
 
+/// The library a plugin brings, as the interface names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginLibraryInfo {
+    /// What its games are filed under among the platforms.
+    pub name: String,
+    /// The game clients its games may be handed to, by their own names. Web pages can
+    /// always be opened.
+    pub opens: Vec<String>,
+}
+
+/// The name of the library `plugin` brings, in `lang`: its own, or the plugin's.
+pub fn library_name(plugin: &Plugin, lang: Lang) -> Option<String> {
+    let library = plugin.manifest.library.as_ref()?;
+    let name = if library.name.is_empty() { &plugin.manifest.name } else { &library.name };
+    Some(name.get(lang).to_string())
+}
+
 /// A plugin as the interface lists it, texts already in the interface language.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,6 +155,8 @@ pub struct PluginInfo {
     pub background: bool,
     /// Adds a part to the Home page.
     pub home: bool,
+    /// The library of games it brings, when it brings one.
+    pub library: Option<PluginLibraryInfo>,
     pub commands: Vec<PluginCommandInfo>,
     pub settings: Vec<PluginSettingInfo>,
 }
@@ -150,6 +178,10 @@ pub fn describe(plugin: &Plugin, config: &AppConfig, lang: Lang) -> PluginInfo {
         badge: manifest.badge,
         background: manifest.background,
         home: manifest.home,
+        library: manifest.library.as_ref().map(|library| PluginLibraryInfo {
+            name: library_name(plugin, lang).unwrap_or_default(),
+            opens: library::client_labels(&library.opens),
+        }),
         commands: manifest
             .commands
             .iter()
@@ -253,9 +285,26 @@ pub struct HomeDataAnswer {
     pub fetched_at: u64,
 }
 
+/// The library a plugin brings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryAnswer {
+    pub plugin_id: String,
+    /// The name of the library, as its games are filed.
+    pub library_name: String,
+    /// `None` when the plugin failed and nothing older is known: the games the library
+    /// already has from it are then left as they are.
+    pub data: Option<PluginLibraryData>,
+    /// Why the last attempt failed, with the plugin's last log lines for its author.
+    pub error: Option<String>,
+    pub logs: Vec<String>,
+    /// When `data` was obtained (ms).
+    pub fetched_at: u64,
+}
+
 /// One call of a hook whose answer is kept in the plugin's cache.
 struct CachedCall<'a> {
-    /// What the answer is filed under: a game id, or [`HOME_CACHE_KEY`].
+    /// What the answer is filed under: a game id, [`HOME_CACHE_KEY`] or [`LIBRARY_CACHE_KEY`].
     key: &'a str,
     hook: &'a str,
     /// The longest the answer is reused; the answer itself may ask for less.
@@ -548,6 +597,52 @@ impl PluginEngine {
         }
     }
 
+    /// The games `plugin` lists as its library. Cached like [`Self::game_data`], but for a
+    /// day at most ([`LIBRARY_MAX_CACHE_HOURS`]). The plugin is told the time and nothing
+    /// about the user's games: a library is read from its service, not from Kanso. When the
+    /// call fails the last good list comes back with the error, so that a service that is
+    /// down takes no game away.
+    pub fn library_data(
+        &self,
+        db: &Mutex<LibraryDb>,
+        plugin: &Plugin,
+        config: &AppConfig,
+        lang: Lang,
+        force: bool,
+        now_ms: u64,
+    ) -> LibraryAnswer {
+        let manifest = &plugin.manifest;
+        let call = CachedCall {
+            key: LIBRARY_CACHE_KEY,
+            hook: "library",
+            max_hours: manifest.cache_hours.min(LIBRARY_MAX_CACHE_HOURS),
+            force,
+            now_ms,
+        };
+        let answer = self.cached(
+            db,
+            plugin,
+            config,
+            lang,
+            &call,
+            || json!({ "now": now_ms }),
+            |value| parse_library(value, manifest),
+        );
+        LibraryAnswer {
+            plugin_id: manifest.id.clone(),
+            library_name: library_name(plugin, lang).unwrap_or_else(|| manifest.name.get(lang).to_string()),
+            // The cache holds what the manifest of then allowed: only what today's allows
+            // goes on
+            data: answer.data.map(|mut data| {
+                library::recheck(&mut data, manifest);
+                data
+            }),
+            error: answer.error,
+            logs: answer.logs,
+            fetched_at: answer.fetched_at,
+        }
+    }
+
     /// `true` when [`Self::game_data`] would have to run the plugin for this game.
     pub fn needs_game_data(
         &self,
@@ -581,8 +676,9 @@ impl PluginEngine {
             }
             let signature = Self::signature(plugin, &effective_settings(plugin, config), lang);
             for (game_id, entry) in db.list_plugin_cache(&plugin.manifest.id).unwrap_or_default() {
-                // The answer for the Home page shares the cache and is not about a game
-                if !entry.ok || entry.signature != signature || game_id == HOME_CACHE_KEY {
+                // The answers for the Home page and for the library share the cache and are
+                // not about a game
+                if !entry.ok || entry.signature != signature || game_id.starts_with('@') {
                     continue;
                 }
                 let badge = serde_json::from_str::<PluginGameData>(&entry.data)
@@ -1087,6 +1183,172 @@ mod tests {
         let missing = engine.home_data(&other_db, &hookless, &config, Lang::En, &games, false, 0);
         assert!(missing.data.is_none());
         assert!(missing.error.as_deref().unwrap().contains("does not implement home"), "{:?}", missing.error);
+    }
+
+    fn library_plugin(code: &str) -> Plugin {
+        Plugin {
+            manifest: manifest::PluginManifest::parse(
+                r#"{
+                  "kansoPlugin": 1, "id": "demo", "name": {"en": "Shelf plugin", "it": "Plugin scaffale"},
+                  "version": "1.0.0", "hosts": ["api.example.org"], "cacheHours": 72,
+                  "provides": {"library": true},
+                  "library": {"name": {"en": "The Shelf", "it": "Lo scaffale"}, "opens": ["itch"]},
+                  "settings": [{"key": "apiKey", "type": "secret"}]
+                }"#,
+            )
+            .unwrap(),
+            code: code.to_string(),
+            source: PluginSource::User,
+        }
+    }
+
+    #[test]
+    fn a_library_is_read_from_its_service_kept_for_a_day_and_survives_a_failure() {
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let online = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let transport = {
+            let online = Arc::clone(&online);
+            FakeTransport::new(move |_| {
+                if online.load(std::sync::atomic::Ordering::SeqCst) {
+                    ok_json(json!({"owned": [
+                        {"id": 7, "name": "Night Shift", "installed": true},
+                        {"id": 8, "name": "Day Off", "installed": false},
+                    ]}))
+                } else {
+                    Err("dns error".to_string())
+                }
+            })
+        };
+        let engine = PluginEngine::with_transport(transport.clone(), "0.1.0");
+        let plugin = library_plugin(
+            r#"kanso.plugin({
+                 library(context) {
+                   // A library is told the time and nothing about the user's games
+                   kanso.log("context: " + Object.keys(context).join(","));
+                   const owned = kanso.http.getJson("https://api.example.org/owned?key=" + kanso.settings.apiKey).owned;
+                   return {
+                     games: owned.map((game) => ({
+                       id: game.id,
+                       title: game.name,
+                       installed: game.installed,
+                       launch: game.id === 7 ? "itch://games/7" : "file:///C:/Windows/System32/calc.exe",
+                     })),
+                   };
+                 },
+               });"#,
+        );
+        let config = enabled(&[("apiKey", "k1")]);
+        let hour = 3_600_000;
+
+        let first = engine.library_data(&db, &plugin, &config, Lang::It, false, 0);
+        assert_eq!((first.plugin_id.as_str(), first.library_name.as_str()), ("demo", "Lo scaffale"));
+        assert_eq!(first.error, None);
+        let data = first.data.clone().expect("a library");
+        assert_eq!(data.games.len(), 2);
+        assert_eq!(data.games[0].launch.as_deref(), Some("itch://games/7"));
+        assert_eq!(data.games[1].launch, None, "an address that may not be opened is dropped, its game stays");
+        assert_eq!(data.refused, 1);
+        assert!(!data.games[1].installed);
+        assert_eq!(transport.urls(), ["https://api.example.org/owned?key=k1"]);
+
+        // Kept for a day at most, whatever the manifest says (72 hours here)
+        let cached = engine.library_data(&db, &plugin, &config, Lang::It, false, 23 * hour);
+        assert_eq!(cached.data, first.data);
+        assert_eq!(transport.urls().len(), 1);
+        engine.library_data(&db, &plugin, &config, Lang::It, false, 25 * hour);
+        assert_eq!(transport.urls().len(), 2, "asked again after a day");
+        // The user asking, or changing the plugin's settings, does not wait
+        engine.library_data(&db, &plugin, &config, Lang::It, true, 26 * hour);
+        assert_eq!(transport.urls().len(), 3);
+        engine.library_data(&db, &plugin, &enabled(&[("apiKey", "k2")]), Lang::It, false, 26 * hour);
+        assert_eq!(transport.urls().last().map(String::as_str), Some("https://api.example.org/owned?key=k2"));
+        // (what is kept is the answer for the settings of now: back to the first ones)
+        engine.library_data(&db, &plugin, &config, Lang::It, false, 27 * hour);
+
+        // The service is down: the list of before comes back with the error, so that no game
+        // is taken away
+        online.store(false, std::sync::atomic::Ordering::SeqCst);
+        let stale = engine.library_data(&db, &plugin, &config, Lang::It, true, 30 * hour);
+        assert_eq!(stale.data, first.data);
+        assert!(stale.error.as_deref().unwrap().contains("dns error"), "{:?}", stale.error);
+        assert!(stale.logs.iter().any(|line| line == "context: now"), "{:?}", stale.logs);
+        // With nothing known (settings never used before), there is no list at all
+        let unknown = engine.library_data(&db, &plugin, &enabled(&[("apiKey", "k3")]), Lang::It, false, 30 * hour);
+        assert!(unknown.data.is_none() && unknown.error.is_some());
+
+        // The list shares the cache with the answers about games: it labels no card
+        assert!(lock(&db).get_plugin_cache("demo", LIBRARY_CACHE_KEY).unwrap().is_some());
+        let mut labelling = plugin.clone();
+        labelling.manifest.badge = true;
+        assert!(engine.badges(&lock(&db), &[labelling], &config, Lang::It).is_empty());
+
+        // An answer in the cache is checked against the manifest of now: with the client no
+        // longer declared, its address is not handed on
+        online.store(true, std::sync::atomic::Ordering::SeqCst);
+        let fresh = engine.library_data(&db, &plugin, &config, Lang::It, true, 40 * hour);
+        assert_eq!(fresh.data.as_ref().unwrap().games[0].launch.as_deref(), Some("itch://games/7"));
+        let mut narrowed = plugin.clone();
+        narrowed.manifest.library = Some(manifest::PluginLibrary::default());
+        let rechecked = engine.library_data(&db, &narrowed, &config, Lang::It, false, 41 * hour);
+        assert_eq!(rechecked.data.unwrap().games[0].launch, None);
+        assert_eq!(rechecked.library_name, "Plugin scaffale", "without a name of its own, the plugin's");
+
+        assert_eq!(describe(&plugin, &config, Lang::En).library, Some(PluginLibraryInfo { name: "The Shelf".into(), opens: vec!["itch".into()] }));
+        assert_eq!(describe(&test_plugin(DETAILS), &config, Lang::En).library, None);
+    }
+
+    #[test]
+    fn the_library_example_in_the_plugin_guide_runs_as_written() {
+        // On a Windows checkout the guide's lines may end in CR LF
+        let guide = include_str!("../../../../../docs/PLUGINS.md").replace("\r\n", "\n");
+        let section = &guide[guide.find("### A library of games").expect("the guide has the section")..];
+        let block = |fence: &str| {
+            let start = section.find(fence).expect("the section has an example") + fence.len();
+            &section[start..start + section[start..].find("\n```").expect("the example ends")]
+        };
+        // The lines the guide shows are the ones a manifest adds for a library
+        let manifest = format!(
+            r#"{{"kansoPlugin": 1, "id": "demo", "name": "Demo", "version": "1.0.0", "hosts": ["api.example.org"],
+                "settings": [{{"key": "apiKey", "type": "secret"}}], {}}}"#,
+            block("```json\n")
+        );
+        let plugin = Plugin {
+            manifest: manifest::PluginManifest::parse(&manifest).expect("the manifest lines in the guide must stay valid"),
+            code: block("```js\n").to_string(),
+            source: PluginSource::User,
+        };
+        let library = plugin.manifest.library.clone().expect("it brings a library");
+        assert_eq!(library.opens, ["itch"]);
+
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let transport = FakeTransport::new(|_| {
+            ok_json(json!([{
+                "id": 7, "name": "Night Shift", "genres": ["Puzzle"], "summary": "A short one.",
+                "minutes": 30, "lastPlayed": 500, "coverUrl": "https://api.example.org/7.png", "steamId": 1234
+            }]))
+        });
+        let engine = PluginEngine::with_transport(transport.clone(), "0.1.0");
+        let answer = engine.library_data(&db, &plugin, &enabled(&[("apiKey", "k")]), Lang::En, false, 1_000);
+        assert_eq!(answer.error, None, "logs: {:?}", answer.logs);
+        assert_eq!(answer.library_name, "My store");
+        assert_eq!(transport.urls(), ["https://api.example.org/owned?key=k"]);
+        let data = answer.data.expect("a library");
+        assert_eq!(data.refused, 0, "every address in the example is one Kanso lets through");
+        assert_eq!(
+            data.games,
+            [library::LibraryGame {
+                id: "7".into(),
+                title: "Night Shift".into(),
+                launch: Some("https://play.example.org/7".into()),
+                installed: true,
+                genres: vec!["Puzzle".into()],
+                description: Some("A short one.".into()),
+                playtime_minutes: Some(30),
+                last_played_at: Some(500),
+                cover: Some("https://api.example.org/7.png".into()),
+                steam_app_id: Some("1234".into()),
+            }]
+        );
     }
 
     #[test]

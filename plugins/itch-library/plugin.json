@@ -1,0 +1,76 @@
+{
+  "kansoPlugin": 1,
+  "id": "itch-library",
+  "name": {
+    "en": "itch.io library",
+    "it": "Libreria di itch.io",
+    "es": "Biblioteca de itch.io",
+    "ru": "Библиотека itch.io"
+  },
+  "version": "1.0.0",
+  "author": "Kanso",
+  "description": {
+    "en": "Adds the games you bought or claimed on itch.io to the library, under a platform of their own, read with your account's API key. Play opens the game in the itch app, or its page in the browser.",
+    "it": "Aggiunge alla libreria i giochi che hai comprato o riscattato su itch.io, sotto una piattaforma tutta loro, letti con la chiave API del tuo account. Avvia apre il gioco nell'app di itch, oppure la sua pagina nel browser.",
+    "es": "Añade a la biblioteca los juegos que compraste o reclamaste en itch.io, en una plataforma propia, leídos con la clave API de tu cuenta. Jugar abre el juego en la app de itch, o su página en el navegador.",
+    "ru": "Добавляет в библиотеку игры, купленные или полученные на itch.io, отдельной платформой; они читаются с помощью ключа API вашего аккаунта. «Играть» открывает игру в приложении itch или её страницу в браузере."
+  },
+  "homepage": "https://itch.io",
+  "hosts": ["api.itch.io", "img.itch.zone"],
+  "provides": { "library": true },
+  "library": {
+    "name": "itch.io",
+    "opens": ["itch"]
+  },
+  "cacheHours": 12,
+  "enabledByDefault": false,
+  "settings": [
+    {
+      "key": "apiKey",
+      "type": "secret",
+      "label": {
+        "en": "itch.io API key",
+        "it": "Chiave API di itch.io",
+        "es": "Clave API de itch.io",
+        "ru": "Ключ API itch.io"
+      },
+      "help": {
+        "en": "Create one on itch.io, under Settings → API keys. It is kept in Kanso's settings on this PC and sent to api.itch.io only.",
+        "it": "Si crea su itch.io, in Settings → API keys. Resta nelle impostazioni di Kanso su questo PC e viene inviata solo ad api.itch.io.",
+        "es": "Se crea en itch.io, en Settings → API keys. Se guarda en los ajustes de Kanso en este PC y solo se envía a api.itch.io.",
+        "ru": "Создаётся на itch.io, в разделе Settings → API keys. Хранится в настройках Kanso на этом ПК и отправляется только на api.itch.io."
+      }
+    },
+    {
+      "key": "open",
+      "type": "select",
+      "default": "app",
+      "label": {
+        "en": "Play opens",
+        "it": "Avvia apre",
+        "es": "Jugar abre",
+        "ru": "«Играть» открывает"
+      },
+      "options": [
+        {
+          "value": "app",
+          "label": {
+            "en": "The game in the itch app",
+            "it": "Il gioco nell'app di itch",
+            "es": "El juego en la app de itch",
+            "ru": "Игру в приложении itch"
+          }
+        },
+        {
+          "value": "web",
+          "label": {
+            "en": "The game's page in the browser",
+            "it": "La pagina del gioco nel browser",
+            "es": "La página del juego en el navegador",
+            "ru": "Страницу игры в браузере"
+          }
+        }
+      ]
+    }
+  ]
+}

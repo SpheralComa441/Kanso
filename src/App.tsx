@@ -77,7 +77,7 @@ import {
   type LibraryCollection,
   type LibraryFilters,
 } from "./lib/library";
-import { isEmulated, platformLabel, uninstallMode } from "./lib/platforms";
+import { isEmulated, platformLabel, uninstallMode, sourceOf, setPluginLibraryNames } from "./lib/platforms";
 import { CARD_INFO_DEFAULT } from "./lib/cardInfo";
 import { gamesToUpdate, loadDlssStatus, useDlssStatus } from "./lib/dlss";
 import {
@@ -310,6 +310,17 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     config.animations,
   ]);
 
+  // What the libraries the plugins bring are called: every name of a platform drawn below
+  // reads it, so it is set here, while rendering, before anything below draws
+  const libraryNames = useMemo(
+    () =>
+      Object.fromEntries(
+        plugins.flatMap((plugin) => (plugin.library ? [[plugin.id, plugin.library.name]] : []))
+      ),
+    [plugins]
+  );
+  setPluginLibraryNames(libraryNames);
+
   // What the side panel offers besides the library: the pages and groups the theme lists,
   // less what the user hid in Settings. Entries and links are drawn from this alone
   const hiddenSections = config.hiddenSections;
@@ -473,7 +484,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     setIsSyncingMetadata(true);
     try {
       const syncedReport = await syncLibraryMetadata(retryNow);
-      setReport((prev) => ({ ...syncedReport, warnings: prev.warnings }));
+      // The scan's warnings stay; the sync adds its own (a plugin's library that failed)
+      setReport((prev) => ({
+        ...syncedReport,
+        warnings: [...prev.warnings, ...syncedReport.warnings.filter((line) => !prev.warnings.includes(line))],
+      }));
     } catch {
       // Individual errors do not block library browsing
     } finally {
@@ -567,6 +582,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     onConfigChange(saved);
     // Plugins may have been switched on or off, or their labels hidden
     void reloadPlugins();
+    // The desktop app says by itself which games a plugin's library brought or took away;
+    // the browser preview is asked
+    if (!isRunningInTauri() && JSON.stringify(saved.plugins) !== JSON.stringify(config.plugins)) {
+      void scanGames().then((res) => setReport((prev) => ({ ...prev, games: res.games })));
+    }
 
     if (foldersChanged) {
       await performScan(true);
@@ -1291,7 +1311,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
             .then(() =>
               setStatusMessage(
                 t(uninstallMode(game) === "uninstall" ? "app.uninstallSent" : "app.uninstallOpened", {
-                  client: game.platform === "xbox" ? "Windows" : platformLabel(game.platform, t),
+                  client: game.platform === "xbox" ? "Windows" : platformLabel(sourceOf(game), t),
                 })
               )
             )

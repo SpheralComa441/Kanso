@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
-import { PLATFORM_META, canInstall, platformLabel } from "../lib/platforms";
+import { PLATFORM_META, canInstall, platformLabel, sourceOf } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import { useWindowedItems } from "../lib/useWindowedItems";
 import type { BadgeEntry, CardInfoItem, DetectedGame } from "../types/game";
@@ -150,7 +150,7 @@ export function GameList({
           {games.slice(windowed.start, windowed.end).map((game, offset) => {
             const index = windowed.start + offset;
             const isLaunching = launchingId === game.id;
-            const label = platformLabel(game.platform, t);
+            const label = platformLabel(sourceOf(game), t);
             const coverUrl = usableCover(
               resolveCoverUrl(game.coverPath, game.updatedAt)
             );
@@ -316,7 +316,7 @@ export function GameList({
           >
             {games.slice(windowed.start, windowed.end).map((game) => {
               const platformMeta = PLATFORM_META[game.platform];
-              const label = platformLabel(game.platform, t);
+              const label = platformLabel(sourceOf(game), t);
               const isLaunching = launchingId === game.id;
               const coverUrl = usableCover(
                 resolveCoverUrl(game.coverPath, game.updatedAt)
@@ -352,7 +352,7 @@ export function GameList({
                         <span
                           className={`shrink-0 rounded-md border px-2 py-0.5 text-3xs font-medium ${platformMeta.badgeClass}`}
                         >
-                          {platformLabel(game.platform, t)}
+                          {platformLabel(sourceOf(game), t)}
                         </span>
                         {game.isFamilyShared && (
                           <span

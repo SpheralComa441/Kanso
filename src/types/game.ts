@@ -8,7 +8,15 @@ export type GamePlatform =
   | "Battle.net"
   | "standalone"
   /** A game file run by one of the user's emulators, named by `platformAppId`. */
-  | "emulator";
+  | "emulator"
+  /** A game the library of a plugin brought; the plugin is named by `platformAppId`. */
+  | "plugin";
+
+/**
+ * Where a game is filed among the platforms: its store, or the library of the plugin that
+ * brought it (`plugin:<plugin id>`), each plugin's games apart from the others'.
+ */
+export type GameSource = GamePlatform | `plugin:${string}`;
 
 /** Where the user stands with a game; set by hand in the game's sheet. */
 export type GameStatus = "backlog" | "playing" | "finished" | "abandoned";
@@ -331,6 +339,11 @@ export interface PluginInfo {
   gameDetails: boolean;
   /** Adds a part to the Home page. */
   home: boolean;
+  /**
+   * The library of games it brings, when it brings one: the name its games are filed under,
+   * and the game clients they may be handed to (web pages can always be opened).
+   */
+  library: { name: string; opens: string[] } | null;
   badge: boolean;
   background: boolean;
   commands: { id: string; title: string; description: string }[];

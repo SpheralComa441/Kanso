@@ -39,7 +39,7 @@ macro_rules! bundled {
 }
 
 /// The official plugins, from the repository's `plugins/` folder, in the order they are listed.
-const BUNDLED: [(&str, &str); 8] = [
+const BUNDLED: [(&str, &str); 9] = [
     bundled!("howlongtobeat"),
     bundled!("steam-reviews"),
     bundled!("steam-news"),
@@ -48,6 +48,7 @@ const BUNDLED: [(&str, &str); 8] = [
     bundled!("price-history"),
     bundled!("play-tonight"),
     bundled!("daily-pick"),
+    bundled!("itch-library"),
 ];
 
 /// The plugins shipped with Kanso.
@@ -217,7 +218,8 @@ mod tests {
                 "nexus-mods",
                 "price-history",
                 "play-tonight",
-                "daily-pick"
+                "daily-pick",
+                "itch-library"
             ]
         );
         for plugin in &plugins {
@@ -237,6 +239,14 @@ mod tests {
                 "{} is on by default but contacts {:?}",
                 plugin.manifest.id,
                 plugin.manifest.hosts
+            );
+        }
+        // Nobody's library gains games from a plugin unless they switch it on
+        for plugin in &plugins {
+            assert!(
+                !(plugin.manifest.library.is_some() && plugin.manifest.enabled_by_default),
+                "{} brings a library and is on by default",
+                plugin.manifest.id
             );
         }
         // Nobody's Home page gains a part unless they switch its plugin on

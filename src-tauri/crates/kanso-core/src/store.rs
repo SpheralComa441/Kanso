@@ -22,7 +22,7 @@ pub struct LibraryStore {
 const MAX_CUSTOM_GENRES: usize = 24;
 const MAX_GENRE_CHARS: usize = 40;
 
-fn has_user_data(game: &DetectedGame) -> bool {
+pub(crate) fn has_user_data(game: &DetectedGame) -> bool {
     game.is_favorite
         || game.status.is_some()
         || !game.custom_genres.is_empty()
@@ -145,9 +145,13 @@ impl LibraryStore {
             })
             .cloned()
             .map(|mut game| {
-                game.is_installed = false;
-                // Nothing on disk says a version any more
-                game.version = None;
+                // A plugin's game was never looked for on disk: whether it can be started
+                // is what its plugin says, and the scan leaves it as it is
+                if game.platform != GamePlatform::Plugin {
+                    game.is_installed = false;
+                    // Nothing on disk says a version any more
+                    game.version = None;
+                }
                 game
             })
             .collect();

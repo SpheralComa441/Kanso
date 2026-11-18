@@ -74,6 +74,29 @@ function seed(game: PreviewSeed): DetectedGame {
   };
 }
 
+/**
+ * What the sample plugin that brings a library lists while it is switched on: invented
+ * games, filed under the plugin's own platform and started through its client.
+ */
+export const PREVIEW_PLUGIN_LIBRARY_GAMES: DetectedGame[] = [
+  { id: "4101", title: "Lanterne", genres: ["Avventura", "Indie"], colors: ["#b45309", "#451a03"], playtimeMinutes: 190, lastPlayedAt: Date.now() - 4 * 86_400_000 },
+  { id: "4102", title: "Paper Boats", genres: ["Puzzle", "Indie"], colors: ["#0e7490", "#083344"] },
+  { id: "4103", title: "Moss and Gears", genres: ["Platform"], colors: ["#3f6212", "#1a2e05"], playtimeMinutes: 45 },
+  { id: "4104", title: "Tiny Harbor", genres: ["Gestionale", "Indie"], colors: ["#7e22ce", "#3b0764"] },
+].map(({ id, colors, ...game }) =>
+  seed({
+    ...game,
+    id: `plugin:itch-library:${id}`,
+    platform: "plugin",
+    platformAppId: "itch-library",
+    installDir: "",
+    launchUri: `itch://games/${id}`,
+    shortDescription: null,
+    appType: "game",
+    colors: colors as [string, string],
+  })
+);
+
 export const PREVIEW_MOCK_GAMES: DetectedGame[] = [
   // In the library but not on disk: one finished long ago, one never installed here
   seed({

@@ -20,7 +20,7 @@ import {
   updateGameDetails,
 } from "../lib/backend";
 import { useI18n } from "../i18n";
-import { platformLabel } from "../lib/platforms";
+import { platformLabel, sourceOf } from "../lib/platforms";
 import type { DetectedGame, SgdbGameMatch } from "../types/game";
 
 interface EditGameModalProps {
@@ -221,7 +221,7 @@ export function EditGameModal({
             <p className="mt-0.5 text-xs text-zinc-400">
               {t("edit.platform")}:{" "}
               <strong className="text-zinc-300">
-                {platformLabel(game.platform, t)}
+                {platformLabel(sourceOf(game), t)}
               </strong>
               {game.platformAppId ? ` · ID: ${game.platformAppId}` : ""}
             </p>

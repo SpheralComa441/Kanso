@@ -1,6 +1,6 @@
-import type { DetectedGame, GamePlatform, GameStatus, PlaySession } from "../types/game";
+import type { DetectedGame, GameSource, GameStatus, PlaySession } from "../types/game";
 import { GAME_STATUSES, genreKey } from "./library";
-import { PLATFORM_ORDER } from "./platforms";
+import { PLATFORM_ORDER, pluginOfSource, sourceOf } from "./platforms";
 
 /** Local midnight of the Monday that starts the week containing `timestampMs`. */
 export function weekStart(timestampMs: number): number {
@@ -58,7 +58,8 @@ export interface LibraryStats {
   /** Games with every achievement unlocked. */
   perfectGames: number;
   mostPlayed: { game: DetectedGame; minutes: number }[];
-  byPlatform: { platform: GamePlatform; minutes: number }[];
+  /** By store, and by plugin library, most played first. */
+  byPlatform: { platform: GameSource; minutes: number }[];
   /** A game counts towards each of its genres. */
   byGenre: { key: string; label: string; minutes: number }[];
   byStatus: Record<GameStatus, number>;
@@ -68,7 +69,7 @@ export interface LibraryStats {
 /** Totals and rankings over the visible library (hidden entries are soundtracks, tools...). */
 export function summarizeLibrary(games: DetectedGame[], top = 8): LibraryStats {
   const visible = games.filter((game) => !game.isHidden);
-  const platformMinutes = new Map<GamePlatform, number>();
+  const platformMinutes = new Map<GameSource, number>();
   const genreMinutes = new Map<string, { key: string; label: string; minutes: number }>();
   const byStatus = Object.fromEntries(GAME_STATUSES.map((status) => [status, 0])) as Record<
     GameStatus,
@@ -104,7 +105,8 @@ export function summarizeLibrary(games: DetectedGame[], top = 8): LibraryStats {
     }
 
     if (minutes <= 0) continue;
-    platformMinutes.set(game.platform, (platformMinutes.get(game.platform) ?? 0) + minutes);
+    const source = sourceOf(game);
+    platformMinutes.set(source, (platformMinutes.get(source) ?? 0) + minutes);
     const seen = new Set<string>();
     for (const genre of game.genres) {
       const key = genreKey(genre);
@@ -121,7 +123,13 @@ export function summarizeLibrary(games: DetectedGame[], top = 8): LibraryStats {
     .map((game) => ({ game, minutes: game.playtimeMinutes as number }))
     .sort((a, b) => b.minutes - a.minutes || a.game.title.localeCompare(b.game.title))
     .slice(0, top);
-  stats.byPlatform = PLATFORM_ORDER.filter((platform) => platformMinutes.has(platform))
+  // The stores in their usual order, then the plugins' libraries; the sort keeps that order
+  // among equals
+  const sources: GameSource[] = [
+    ...PLATFORM_ORDER.filter((platform) => platformMinutes.has(platform)),
+    ...[...platformMinutes.keys()].filter((source) => pluginOfSource(source) !== null).sort(),
+  ];
+  stats.byPlatform = sources
     .map((platform) => ({ platform, minutes: platformMinutes.get(platform) as number }))
     .sort((a, b) => b.minutes - a.minutes);
   stats.byGenre = [...genreMinutes.values()]

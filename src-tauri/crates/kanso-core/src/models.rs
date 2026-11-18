@@ -29,6 +29,11 @@ pub enum GamePlatform {
     /// is named by `platform_app_id` (see [`crate::emulators`]).
     #[serde(rename = "emulator", alias = "Emulator")]
     Emulator,
+    /// A game a plugin's library lists (see [`crate::plugins::library`]). The plugin is named
+    /// by `platform_app_id`, and the game is started by opening an address the plugin gave,
+    /// checked against what its manifest declares.
+    #[serde(rename = "plugin", alias = "Plugin")]
+    Plugin,
 }
 
 impl GamePlatform {
@@ -43,6 +48,7 @@ impl GamePlatform {
             GamePlatform::BattleNet => "Battle.net",
             GamePlatform::Standalone => "standalone",
             GamePlatform::Emulator => "emulator",
+            GamePlatform::Plugin => "plugin",
         }
     }
 
@@ -58,6 +64,7 @@ impl GamePlatform {
             GamePlatform::BattleNet,
             GamePlatform::Standalone,
             GamePlatform::Emulator,
+            GamePlatform::Plugin,
         ]
         .into_iter()
         .find(|platform| platform.as_str().eq_ignore_ascii_case(raw.trim()))
@@ -136,7 +143,7 @@ pub struct DetectedGame {
     /// Normalized title stripped of edition suffixes and trademark symbols for metadata APIs.
     pub clean_title: String,
     /// Platform source (`steam`, `epic`, `gog`, `ea`, `ubisoft`, `xbox`, `Battle.net`,
-    /// `standalone`, or `emulator`).
+    /// `standalone`, `emulator`, or `plugin`).
     pub platform: GamePlatform,
     /// Platform-specific identifier (`appid` for Steam, `AppName` for Epic, registry key for Battle.net).
     pub platform_app_id: Option<String>,
@@ -312,7 +319,7 @@ impl DetectedGame {
             GamePlatform::Ea => Some("origin2://library/open".to_string()),
             GamePlatform::BattleNet => Some("battlenet://".to_string()),
             GamePlatform::Xbox => Some("ms-settings:appsfeatures".to_string()),
-            GamePlatform::Standalone | GamePlatform::Emulator => None,
+            GamePlatform::Standalone | GamePlatform::Emulator | GamePlatform::Plugin => None,
         }
     }
 
@@ -355,6 +362,10 @@ impl DetectedGame {
                 .launch_uri
                 .clone()
                 .filter(|uri| uri.starts_with("msxbox://game/?productId=") || uri.starts_with("ms-windows-store://pdp/?PFN=")),
+            // The one address its plugin gave: where the game is started once installed is
+            // where it is got before. Whoever opens it checks it against the plugin's
+            // manifest first ([`crate::plugins::library::is_allowed_address`])
+            GamePlatform::Plugin => self.launch_uri.clone().filter(|uri| !uri.trim().is_empty()),
             GamePlatform::Ea | GamePlatform::Standalone | GamePlatform::Emulator => None,
         }
     }

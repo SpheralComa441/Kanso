@@ -1,5 +1,5 @@
 import { useI18n } from "../i18n";
-import { platformLabel } from "../lib/platforms";
+import { platformLabel, sourceOf } from "../lib/platforms";
 import type { BadgeEntry, CardInfoItem, DetectedGame } from "../types/game";
 import { STATUS_LABEL_KEYS } from "./StatusIcon";
 
@@ -118,7 +118,7 @@ export function CardInfoPanel({ game, cardInfo, facts, showTitle = true }: CardI
       )}
       {cardInfo.includes("genres") && (
         <p data-card-info="genres" className="truncate text-2xs text-white/75">
-          {game.genres.length > 0 ? game.genres.slice(0, 3).join(" · ") : platformLabel(game.platform, t)}
+          {game.genres.length > 0 ? game.genres.slice(0, 3).join(" · ") : platformLabel(sourceOf(game), t)}
         </p>
       )}
       {cardInfo.includes("tags") && game.tags.length > 0 && (
