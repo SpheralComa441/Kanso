@@ -169,6 +169,35 @@ export function summarizeTags(
 }
 
 /**
+ * The genres or tags of `summary` counted again on `games` alone (one platform's, already in
+ * the scope being browsed). Keys and labels stay those of the whole list, so that a tile opens
+ * the same filter as the side panel and a tag that repeats a genre stays left out; what none
+ * of `games` has is dropped. Most common first, as the whole list.
+ */
+export function recountCategories(
+  summary: GenreSummary[],
+  games: DetectedGame[],
+  kind: "genres" | "tags"
+): GenreSummary[] {
+  const counts = new Map<string, number>();
+  for (const game of games) {
+    const seenInGame = new Set<string>();
+    for (const raw of kind === "genres" ? game.genres : game.tags) {
+      const key = genreKey(raw);
+      if (!key || seenInGame.has(key)) continue;
+      seenInGame.add(key);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return summary
+    .flatMap((category) => {
+      const count = counts.get(category.key);
+      return count === undefined ? [] : [{ ...category, count }];
+    })
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "it"));
+}
+
+/**
  * `installedOnly` decides what the collections hold; `scope` what platforms and statuses are
  * counted on (it differs from the former while the `notInstalled` collection is open).
  */

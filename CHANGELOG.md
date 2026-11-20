@@ -2,6 +2,14 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
+## Unreleased
+
+- **Genres and tags by platform.** The tiles of genres and of tags have a row of platforms
+  above them: pick one and the tiles count that platform's games alone, and a tile opens the
+  library on that genre and that platform. While the tiles are open, the platforms of the side
+  panel do the same instead of leaving the page. A theme can take the row away
+  (`categories.platforms`).
+
 ## 0.1.0
 
 The first public release.

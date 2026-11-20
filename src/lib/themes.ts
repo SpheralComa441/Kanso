@@ -18,6 +18,7 @@ import type {
   ThemeIcons,
   ThemeLayout,
   ThemeMotion,
+  ThemeCategories,
   ThemeNav,
   ThemeNews,
   ThemeShapes,
@@ -93,6 +94,7 @@ export const DEFAULT_NAV: ThemeNav = {
   groups: ["library", "status", "platform", "genres", "tags"],
   pagesPosition: "top",
 };
+export const DEFAULT_CATEGORIES: ThemeCategories = { platforms: true };
 export const DEFAULT_STORE: ThemeStore = {
   tabs: ["all", "picks", "steam", "epic", "gog", "others", "liked"],
   layout: "grid",
@@ -119,6 +121,7 @@ export type ThemeInput = Pick<Theme, "name" | "colors"> & {
   motion?: Partial<Record<keyof ThemeMotion, unknown>>;
   home?: Partial<Record<keyof ThemeHome, unknown>>;
   nav?: Partial<Record<keyof ThemeNav, unknown>>;
+  categories?: Partial<Record<keyof ThemeCategories, unknown>>;
   store?: Partial<Record<keyof ThemeStore, unknown>>;
   news?: Partial<Record<keyof ThemeNews, unknown>>;
   fontFiles?: ThemeFontFile[];
@@ -158,6 +161,7 @@ export function withThemeDefaults(input: ThemeInput): Theme {
     motion: { ...DEFAULT_MOTION, ...input.motion } as ThemeMotion,
     home,
     nav,
+    categories: { ...DEFAULT_CATEGORIES, ...input.categories } as ThemeCategories,
     store,
     news: { ...DEFAULT_NEWS, ...input.news } as ThemeNews,
     fontFiles: input.fontFiles ?? [],

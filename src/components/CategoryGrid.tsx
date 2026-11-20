@@ -9,19 +9,36 @@ import {
 import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
 import { genreKey, type GenreSummary } from "../lib/library";
+import { platformLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
-import type { DetectedGame } from "../types/game";
+import type { DetectedGame, GameSource } from "../types/game";
+import { FilterChip } from "./FilterChip";
 
 /** What the tiles stand for: the store genres or the Steam community tags. */
 export type CategoryKind = "genres" | "tags";
 
+/** A platform the tiles can be counted on, with how many of the games browsed it has. */
+export interface TilePlatform {
+  source: GameSource;
+  count: number;
+}
+
 interface CategoryGridProps {
   kind: CategoryKind;
-  /** What to show a tile for, in the order of the side panel. */
+  /** What to show a tile for, in the order of the side panel (or of `platform`'s games). */
   categories: GenreSummary[];
-  /** The games the categories were counted on. */
+  /** The games the categories were counted on: those of `platform`, when one is chosen. */
   games: DetectedGame[];
   onOpen: (key: string) => void;
+  /** The platforms offered, as the side panel lists them. */
+  platforms: TilePlatform[];
+  /** How many games are browsed on every platform together: the count of "All". */
+  allCount: number;
+  /** The platform the tiles are counted on; `null` for all of them. */
+  platform: GameSource | null;
+  onPlatformChange: (platform: GameSource | null) => void;
+  /** The theme draws the row of platforms (`categories.platforms`). */
+  showPlatforms: boolean;
 }
 
 /** Covers a tile's strip is made of at most. */
@@ -197,12 +214,33 @@ export function CoverTile({
 /**
  * Genres (or tags) as a wall of tiles: each shows the covers of its games drifting by, in
  * their own colors, with the category's name and how many games it holds. A tile opens the
- * library on that genre.
+ * library on that genre. Above the tiles, the platforms: one chosen counts the tiles on its
+ * games alone, and the library a tile opens keeps it.
  */
-export function CategoryGrid({ kind, categories, games, onOpen }: CategoryGridProps) {
+export function CategoryGrid({
+  kind,
+  categories,
+  games,
+  onOpen,
+  platforms,
+  allCount,
+  platform,
+  onPlatformChange,
+  showPlatforms,
+}: CategoryGridProps) {
   const { t, plural } = useI18n();
   const { usableCover, markBroken } = useBrokenCovers();
   const covers = useMemo(() => pickCovers(kind, categories, games), [kind, categories, games]);
+  const platformName = platform === null ? null : platformLabel(platform, t);
+  // A choice between one platform and all of them would be no choice: the row needs two. One
+  // already chosen stays in sight, so that it can be undone
+  const offersRow = showPlatforms && (platforms.length > 1 || platform !== null);
+  const pill = (active: boolean) =>
+    `inline-flex items-center gap-2 rounded-lg border px-3.5 py-1.5 text-xs font-medium transition-colors ${
+      active
+        ? "border-accent bg-accent text-zinc-950"
+        : "border-oled-border bg-oled-surface/60 text-zinc-300 hover:bg-oled-elevated"
+    }`;
 
   return (
     <section aria-labelledby="category-grid-title" className="space-y-4">
@@ -218,12 +256,65 @@ export function CategoryGrid({ kind, categories, games, onOpen }: CategoryGridPr
             {plural("overview.count", categories.length)}
           </span>
         )}
+        {/* Without the row, a platform already chosen is still said, and undone in one click */}
+        {!showPlatforms && platform !== null && platformName !== null && (
+          <span className="self-center">
+            <FilterChip
+              id="category-platform-chosen"
+              label={platformName}
+              onRemove={() => onPlatformChange(null)}
+            />
+          </span>
+        )}
       </header>
+
+      {offersRow && (
+        <div
+          id="category-platforms"
+          role="group"
+          aria-label={t("sidebar.platform")}
+          className="flex flex-wrap gap-1.5"
+        >
+          <button
+            id="category-platform-all"
+            type="button"
+            aria-pressed={platform === null}
+            onClick={() => onPlatformChange(null)}
+            className={pill(platform === null)}
+          >
+            <span>{t("overview.allPlatforms")}</span>
+            <span className={`tabular-nums ${platform === null ? "opacity-75" : "text-zinc-500"}`}>
+              {allCount}
+            </span>
+          </button>
+          {platforms.map(({ source, count }) => {
+            const active = platform === source;
+            return (
+              <button
+                key={source}
+                id={`category-platform-${source}`}
+                type="button"
+                aria-pressed={active}
+                // A second click on the chosen one goes back to every platform, as in the panel
+                onClick={() => onPlatformChange(active ? null : source)}
+                className={pill(active)}
+              >
+                <span>{platformLabel(source, t)}</span>
+                <span className={`tabular-nums ${active ? "opacity-75" : "text-zinc-500"}`}>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {categories.length === 0 ? (
         <div className="rounded-xl border border-oled-border bg-oled-surface/40 px-6 py-12 text-center">
           <p className="text-sm text-zinc-400">
-            {t(kind === "genres" ? "sidebar.genresEmpty" : "overview.tagsEmpty")}
+            {platformName !== null
+              ? t(kind === "genres" ? "overview.genresEmptyOn" : "overview.tagsEmptyOn", {
+                  platform: platformName,
+                })
+              : t(kind === "genres" ? "sidebar.genresEmpty" : "overview.tagsEmpty")}
           </p>
         </div>
       ) : (

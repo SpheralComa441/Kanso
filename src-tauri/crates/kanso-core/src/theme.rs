@@ -477,6 +477,21 @@ pub enum StoreLayout {
     List,
 }
 
+/// The walls of tiles of the genres and of the tags: what is drawn above the tiles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ThemeCategories {
+    /// The row of platforms above the tiles, that counts them on one platform's games. Without
+    /// it a platform already chosen still shows, as a filter that can be removed.
+    pub platforms: bool,
+}
+
+impl Default for ThemeCategories {
+    fn default() -> Self {
+        Self { platforms: true }
+    }
+}
+
 /// The Store page: its tabs, how deals are drawn, and whether the figures are there. The
 /// stores the user hid in Settings stay hidden.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -681,6 +696,8 @@ pub struct Theme {
     pub home: ThemeHome,
     #[serde(default)]
     pub nav: ThemeNav,
+    #[serde(default)]
+    pub categories: ThemeCategories,
     #[serde(default)]
     pub store: ThemeStore,
     #[serde(default)]
@@ -1345,6 +1362,10 @@ impl Theme {
             pages_position: n.choice("pagesPosition", d.pages_position)?,
         };
 
+        let c = Fields::section(&root, "categories")?;
+        let d = ThemeCategories::default();
+        let categories = ThemeCategories { platforms: c.flag("platforms", d.platforms)? };
+
         let o = Fields::section(&root, "store")?;
         let d = ThemeStore::default();
         let store = ThemeStore {
@@ -1409,6 +1430,7 @@ impl Theme {
             motion,
             home,
             nav,
+            categories,
             store,
             news,
             font_files: parse_font_files(&root, fonts_dir)?,
@@ -1436,6 +1458,7 @@ impl Theme {
             "motion": self.motion,
             "home": self.home,
             "nav": self.nav,
+            "categories": self.categories,
             "store": self.store,
             "news": self.news,
             "fontFiles": self.font_files,
@@ -1964,6 +1987,35 @@ mod tests {
     }
 
     #[test]
+    fn a_theme_decides_whether_the_walls_of_genres_and_tags_offer_the_platforms() {
+        let plain = Theme::from_json(r##"{"kansoTheme":3,"name":"X","colors":{}}"##).unwrap();
+        assert_eq!(plain.categories, ThemeCategories::default());
+        assert!(plain.categories.platforms, "the row is there unless a theme takes it away");
+        // Files of the earlier formats knew nothing of it: they get the row
+        assert_eq!(Theme::from_json(NORD).unwrap().categories, ThemeCategories::default());
+
+        let own = Theme::from_json(
+            r##"{"kansoTheme":3,"name":"X","colors":{},"categories":{"platforms":false}}"##,
+        )
+        .unwrap();
+        assert!(!own.categories.platforms);
+        let exported = own.to_json();
+        assert!(exported.contains("\"categories\""), "an exported theme spells the section out");
+        assert_eq!(Theme::from_json(&exported).unwrap().categories, own.categories);
+        assert_eq!(own.validated().unwrap().categories, own.categories);
+
+        for (file, field) in [
+            (r##"{"name":"X","colors":{},"categories":{"platforms":"no"}}"##, "categories.platforms"),
+            (r##"{"name":"X","colors":{},"categories":{"platforms":0}}"##, "categories.platforms"),
+            (r##"{"name":"X","colors":{},"categories":{"platforms":["steam"]}}"##, "categories.platforms"),
+            (r##"{"name":"X","colors":{},"categories":"none"}"##, "categories"),
+        ] {
+            let error = Theme::from_json(file).unwrap_err();
+            assert!(error.contains(field), "{file}: {error}");
+        }
+    }
+
+    #[test]
     fn a_theme_arranges_the_store_page() {
         let plain = Theme::from_json(r#"{"name":"X","colors":{}}"#).unwrap();
         assert_eq!(plain.store, ThemeStore::default());
@@ -2301,6 +2353,7 @@ mod tests {
         // The guide says the values it shows are Kanso's: for what a theme arranges, they are
         assert_eq!(theme.home, ThemeHome::default());
         assert_eq!(theme.nav, ThemeNav::default());
+        assert_eq!(theme.categories, ThemeCategories::default());
         assert_eq!(theme.store, ThemeStore::default());
         assert_eq!(theme.news, ThemeNews::default());
         assert_eq!(theme.motion, ThemeMotion::default());

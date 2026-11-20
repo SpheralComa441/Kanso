@@ -99,12 +99,12 @@ redistributed.*
 Solo `name` e `colors` sono obbligatori. Tutto ciò che manca prende il valore predefinito di Kanso;
 i numeri fuori intervallo vengono riportati al limite più vicino; un valore del tipo sbagliato o un
 nome non previsto fanno rifiutare il file. I file con `"kansoTheme": 1` (colori, tre misure e un
-font) e `"kansoTheme": 2` restano validi: le sezioni che non conoscevano (`nav`, `store`, `news`)
-prendono i valori predefiniti, cioè l'aspetto che avevano prima. L'unica differenza tra le
+font) e `"kansoTheme": 2` restano validi: le sezioni che non conoscevano (`nav`, `categories`,
+`store`, `news`) prendono i valori predefiniti, cioè l'aspetto che avevano prima. L'unica differenza tra le
 versioni riguarda `home.sections` ed è spiegata [più sotto](#home--la-pagina-home).
 *Only `name` and `colors` are required. Missing values take Kanso's default, out-of-range numbers
 are clamped, wrong types and unknown names are rejected. Files marked 1 or 2 are still valid:
-the sections they did not know (`nav`, `store`, `news`) take their defaults, that is the look
+the sections they did not know (`nav`, `categories`, `store`, `news`) take their defaults, that is the look
 they had before. The one difference between versions is about `home.sections`, explained below.*
 
 ```json
@@ -185,6 +185,7 @@ they had before. The one difference between versions is about `home.sections`, e
     "groups": ["library", "status", "platform", "genres", "tags"],
     "pagesPosition": "top"
   },
+  "categories": { "platforms": true },
   "store": {
     "tabs": ["all", "picks", "steam", "epic", "gog", "others", "liked"],
     "layout": "grid",
@@ -447,6 +448,24 @@ Quali pagine e quali gruppi elenca il pannello laterale, in che ordine, e dove s
 - Un tema sceglie tra le pagine e i gruppi che esistono: non può aggiungerne, rinominarli o
   cambiarne l'icona. I colori delle voci si scelgono con `layout.navHeadings` e
   `layout.navPages`.
+
+### `categories` — Le schede di generi e tag
+
+Che cosa sta sopra le schede di generi e di tag, le pagine che si aprono dai titoli *Generi* e
+*Tag* del pannello laterale. *What is drawn above the tiles of genres and of tags, the pages the
+side panel's Genres and Tags titles open.*
+
+| Chiave / Key | Valori / Values | Significato / Meaning |
+| --- | --- | --- |
+| `platforms` | `true` / `false` | La riga delle piattaforme sopra le schede: *Tutte*, poi ogni store e ogni libreria portata da un plugin che ha giochi, ciascuno con quanti ne ha. Sceglierne uno conta le schede sui soli giochi di quella piattaforma, e la scelta resta aprendo una scheda nella libreria. Compare quando i giochi che si stanno guardando (con *Solo installati*, quelli sul disco) sono di almeno due piattaforme, o quando una è già scelta |
+
+- Anche senza la riga, la piattaforma si sceglie dal pannello laterale: con le schede aperte,
+  le voci di *Piattaforma* contano le schede invece di aprire la libreria. *Without the row the
+  platform is still chosen from the side panel: while the tiles are open, its Platform entries
+  count the tiles instead of opening the library.*
+- Una piattaforma già scelta resta in vista anche senza la riga: compare come un filtro da
+  togliere con un clic accanto al titolo. *A platform already chosen stays in sight without the
+  row, as a filter next to the title that one click removes.*
 
 ### `store` — La pagina Store
 

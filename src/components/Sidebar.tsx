@@ -26,7 +26,7 @@ import {
   type LibraryCounts,
   type LibraryFilters,
 } from "../lib/library";
-import { PLATFORM_ORDER, platformLabel, pluginOfSource } from "../lib/platforms";
+import { offeredPlatforms, platformLabel } from "../lib/platforms";
 import { offeredGroups } from "../lib/themes";
 import type {
   GameSource,
@@ -65,6 +65,8 @@ interface SidebarProps {
   filters: LibraryFilters;
   /** Changing a filter always shows the library. */
   onFiltersChange: (next: LibraryFilters) => void;
+  /** With the tiles of genres or tags open, a platform entry counts them on that platform. */
+  onTilesPlatformChange: (platform: GameSource | null) => void;
   /** The global switch: leave out everything that is not on disk. */
   installedOnly: boolean;
   onInstalledOnlyChange: (next: boolean) => void;
@@ -255,6 +257,7 @@ export function Sidebar({
   onOpenOverview,
   filters,
   onFiltersChange,
+  onTilesPlatformChange,
   installedOnly,
   onInstalledOnlyChange,
   counts,
@@ -275,6 +278,7 @@ export function Sidebar({
     tags: readUiPreference(SECTION_PREF_KEYS.tags, ["open", "closed"], "closed") === "open",
   }));
   const inLibrary = view === "library";
+  const onTiles = view === "genres" || view === "tags";
 
   const setSectionUnfolded = (kind: CategoryKind, open: boolean) => {
     setUnfolded((current) => ({ ...current, [kind]: open }));
@@ -328,15 +332,7 @@ export function Sidebar({
     filters.status !== null || GAME_STATUSES.some((status) => counts.byStatus[status] > 0);
 
   // The stores, then the libraries the plugins brought, each under its own name
-  const pluginLibraries = Object.keys(counts.byPlatform)
-    .filter((source): source is GameSource => pluginOfSource(source as GameSource) !== null)
-    .concat(filters.platform !== null && pluginOfSource(filters.platform) !== null ? [filters.platform] : [])
-    .filter((source, index, all) => all.indexOf(source) === index)
-    .sort((a, b) => platformLabel(a, t).localeCompare(platformLabel(b, t)));
-  const platformsWithGames: GameSource[] = [...PLATFORM_ORDER, ...pluginLibraries].filter(
-    (platform) =>
-      counts.byPlatform[platform] > 0 || filters.platform === platform
-  );
+  const platformsWithGames = offeredPlatforms(counts.byPlatform, filters.platform, t);
 
   // The pages, each with its entry; the theme picks among them and orders them
   const pageRows: Record<NavPage, ReactNode> = {
@@ -415,7 +411,8 @@ export function Sidebar({
     );
   };
   const platformRow = (platform: GameSource) => {
-    const active = inLibrary && filters.platform === platform;
+    // With the tiles of genres or tags open, a platform counts them: the page stays
+    const active = (inLibrary || onTiles) && filters.platform === platform;
     return (
       <NavRow
         key={platform}
@@ -423,7 +420,11 @@ export function Sidebar({
         label={platformLabel(platform, t)}
         count={counts.byPlatform[platform] ?? 0}
         active={active}
-        onClick={() => onFiltersChange(withVisiblePool({ platform: active ? null : platform }))}
+        onClick={() =>
+          onTiles
+            ? onTilesPlatformChange(active ? null : platform)
+            : onFiltersChange(withVisiblePool({ platform: active ? null : platform }))
+        }
       />
     );
   };

@@ -560,6 +560,12 @@ export interface ThemeNav {
   pagesPosition: "top" | "bottom";
 }
 
+/** The walls of tiles of the genres and of the tags, as a theme arranges them. */
+export interface ThemeCategories {
+  /** The row of platforms above the tiles, that counts them on one platform's games. */
+  platforms: boolean;
+}
+
 /** A tab of the Store page. */
 export type StoreTab = "all" | "picks" | "liked" | DealStore;
 
@@ -715,6 +721,7 @@ export interface Theme {
   motion: ThemeMotion;
   home: ThemeHome;
   nav: ThemeNav;
+  categories: ThemeCategories;
   store: ThemeStore;
   news: ThemeNews;
   fontFiles: ThemeFontFile[];
