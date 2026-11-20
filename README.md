@@ -75,6 +75,10 @@
 Get the installer from the [Releases page](https://github.com/SpheralComa441/Kanso/releases/latest)
 (`Kanso_…_x64-setup.exe`). Windows 10 or 11, 64-bit.
 
+Kanso draws its interface with Microsoft's WebView2, which Windows 11 and an up-to-date
+Windows 10 already have. Where it is missing the installer downloads it, so that first
+install needs a connection.
+
 The installer is **not signed with a publisher certificate yet**, so Windows SmartScreen says
 it does not recognise the app: choose *More info*, then *Run anyway*. Each release lists the
 SHA-256 sums of its files, to check that what you downloaded is what was built here.

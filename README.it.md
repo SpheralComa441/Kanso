@@ -72,6 +72,10 @@ Le schermate sono in inglese; l'interfaccia è anche in italiano, spagnolo e rus
 L'installer è nella [pagina delle Release](https://github.com/SpheralComa441/Kanso/releases/latest)
 (`Kanso_…_x64-setup.exe`). Windows 10 o 11, 64 bit.
 
+Kanso disegna la sua interfaccia con WebView2 di Microsoft, che Windows 11 e un Windows 10
+aggiornato hanno già. Dove manca lo scarica l'installer, quindi quella prima installazione
+richiede una connessione.
+
 L'installer **non è ancora firmato con un certificato di editore**, quindi Windows SmartScreen
 dice di non riconoscere l'app: scegli *Ulteriori informazioni*, poi *Esegui comunque*. Ogni
 release elenca le somme SHA-256 dei suoi file, per controllare che quello che hai scaricato
