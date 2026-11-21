@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CloudDownload, EyeOff, History, LayoutGrid, Star, X } from "lucide-react";
+import { CloudDownload, EyeOff, History, LayoutGrid, Star } from "lucide-react";
 import { ApiKeyBanner } from "./components/ApiKeyBanner";
 import { CategoryGrid, type CategoryKind } from "./components/CategoryGrid";
+import { FilterChip } from "./components/FilterChip";
 import { HomeView } from "./components/HomeView";
 import { ambienceFor, isSouthernTimeZone, type WeatherNow } from "./lib/ambience";
 import { useHomePlugins } from "./lib/useHomePlugins";
@@ -70,6 +71,7 @@ import {
   isInScope,
   libraryScope,
   readUiPreference,
+  recountCategories,
   sortGamesByTitle,
   summarizeGenres,
   summarizeTags,
@@ -77,7 +79,14 @@ import {
   type LibraryCollection,
   type LibraryFilters,
 } from "./lib/library";
-import { isEmulated, platformLabel, uninstallMode, sourceOf, setPluginLibraryNames } from "./lib/platforms";
+import {
+  isEmulated,
+  offeredPlatforms,
+  platformLabel,
+  uninstallMode,
+  sourceOf,
+  setPluginLibraryNames,
+} from "./lib/platforms";
 import { CARD_INFO_DEFAULT } from "./lib/cardInfo";
 import { gamesToUpdate, loadDlssStatus, useDlssStatus } from "./lib/dlss";
 import {
@@ -94,6 +103,7 @@ import type {
   BadgeEntry,
   DetectedGame,
   EmulatorInfo,
+  GameSource,
   GameStatus,
   PluginInfo,
   ScanReport,
@@ -136,28 +146,6 @@ const COLLECTION_KEYS: Record<LibraryCollection, MessageKey> = {
   notInstalled: "collection.notInstalled",
   hidden: "collection.hidden",
 };
-
-interface FilterChipProps {
-  label: string;
-  onRemove: () => void;
-  icon?: React.ReactNode;
-}
-
-function FilterChip({ label, onRemove, icon }: FilterChipProps) {
-  const { t } = useI18n();
-  return (
-    <button
-      type="button"
-      onClick={onRemove}
-      title={t("filters.remove", { label })}
-      className="group inline-flex items-center gap-1.5 rounded-full border border-oled-border bg-oled-surface py-0.5 pl-2.5 pr-1.5 text-2xs font-medium text-zinc-200 transition-colors hover:border-zinc-600"
-    >
-      {icon}
-      <span>{label}</span>
-      <X className="h-3 w-3 text-zinc-500 group-hover:text-zinc-200" />
-    </button>
-  );
-}
 
 /** Loads the settings, decides the interface language and hosts the translated shell. */
 export function App() {
@@ -676,10 +664,13 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
    * What the content area shows, as far as the side panel decides it: when this changes the
    * content is replaced (and animated in), while typing in the search box only narrows it.
    */
+  const onTiles = mainView === "genres" || mainView === "tags";
   const viewKey = [
     mainView,
     filters.collection,
-    filters.platform ?? "",
+    // On the tiles of genres and tags the platform recounts them in place, like a tab: the
+    // page (and the row the user just clicked in) is not replaced
+    onTiles ? "" : (filters.platform ?? ""),
     filters.genre ?? "",
     filters.tag ?? "",
     filters.status ?? "",
@@ -723,12 +714,28 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const openCategory = (kind: CategoryKind, key: string) => {
     setFilters((current) => ({
       ...EMPTY_FILTERS,
-      // The tiles were counted on the games being browsed: stay among those
+      // The tiles were counted on the games being browsed, of the platform chosen above them
+      // if any: stay among those
       collection: current.collection === "notInstalled" ? "notInstalled" : "all",
+      platform: current.platform,
       [kind === "genres" ? "genre" : "tag"]: key,
     }));
     setSearchQuery("");
     showView("library");
+  };
+
+  /**
+   * The platform the tiles of genres and tags are counted on, chosen above them or in the side
+   * panel while they are open. It is the library's own platform filter: a tile opens the
+   * library on it, and coming back from there finds it still chosen. Like any platform, it
+   * leaves the pool of hidden games, which the tiles do not count.
+   */
+  const changeTilesPlatform = (platform: GameSource | null) => {
+    setFilters((current) => ({
+      ...current,
+      collection: current.collection === "hidden" ? "all" : current.collection,
+      platform,
+    }));
   };
 
   const changeViewMode = (mode: ViewMode) => {
@@ -885,6 +892,32 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const scopedGames = useMemo(
     () => games.filter((game) => isInScope(game, scope)),
     [games, scope]
+  );
+  // The tiles of genres and tags count the games of the platform chosen above them, under
+  // the names the side panel gives them
+  const tilesPlatform = filters.platform;
+  const tilesGames = useMemo(
+    () =>
+      tilesPlatform === null
+        ? scopedGames
+        : scopedGames.filter((game) => sourceOf(game) === tilesPlatform),
+    [scopedGames, tilesPlatform]
+  );
+  const tilesGenres = useMemo(
+    () => (tilesPlatform === null ? genres : recountCategories(genres, tilesGames, "genres")),
+    [genres, tilesGames, tilesPlatform]
+  );
+  const tilesTags = useMemo(
+    () => (tilesPlatform === null ? tags : recountCategories(tags, tilesGames, "tags")),
+    [tags, tilesGames, tilesPlatform]
+  );
+  const tilesPlatforms = useMemo(
+    () =>
+      offeredPlatforms(counts.byPlatform, tilesPlatform, t).map((source) => ({
+        source,
+        count: counts.byPlatform[source] ?? 0,
+      })),
+    [counts.byPlatform, tilesPlatform, t]
   );
   const ownedSteamAppIds = useMemo(
     () =>
@@ -1067,6 +1100,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           onOpenOverview={showView}
           filters={filters}
           onFiltersChange={changeFilters}
+          onTilesPlatformChange={changeTilesPlatform}
           installedOnly={installedOnly}
           onInstalledOnlyChange={changeInstalledOnly}
           counts={counts}
@@ -1164,9 +1198,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           ) : mainView === "genres" || mainView === "tags" ? (
             <CategoryGrid
               kind={mainView}
-              categories={mainView === "genres" ? genres : tags}
-              games={scopedGames}
+              categories={mainView === "genres" ? tilesGenres : tilesTags}
+              games={tilesGames}
               onOpen={(key) => openCategory(mainView, key)}
+              platforms={tilesPlatforms}
+              allCount={scopedGames.length}
+              platform={tilesPlatform}
+              onPlatformChange={changeTilesPlatform}
+              showPlatforms={activeTheme.categories.platforms}
             />
           ) : (
             <>

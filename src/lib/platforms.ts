@@ -96,6 +96,26 @@ export function setPluginLibraryNames(names: ReadonlyMap<string, string>): void 
   pluginLibraryNames = names;
 }
 
+/**
+ * The platforms offered as filters, in the order of the side panel: the stores, then the
+ * libraries the plugins brought, by name. Those with games in `byPlatform`, and the one
+ * already `chosen` even without any, so that it can be switched off.
+ */
+export function offeredPlatforms(
+  byPlatform: Record<string, number>,
+  chosen: GameSource | null,
+  t: (key: "platform.local" | "platform.emulator" | "platform.plugin") => string
+): GameSource[] {
+  const pluginLibraries = Object.keys(byPlatform)
+    .filter((source): source is GameSource => pluginOfSource(source as GameSource) !== null)
+    .concat(chosen !== null && pluginOfSource(chosen) !== null ? [chosen] : [])
+    .filter((source, index, all) => all.indexOf(source) === index)
+    .sort((a, b) => platformLabel(a, t).localeCompare(platformLabel(b, t)));
+  return [...PLATFORM_ORDER, ...pluginLibraries].filter(
+    (platform) => (byPlatform[platform] ?? 0) > 0 || chosen === platform
+  );
+}
+
 /** Display name of a platform, or of a plugin's library, in the current language. */
 export function platformLabel(
   source: GameSource,
