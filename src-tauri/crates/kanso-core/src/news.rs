@@ -624,7 +624,7 @@ impl NewsClient {
             // The whole answer, not each piece of it: a site that sends a few bytes now and
             // then would otherwise keep the page waiting, and with it every other source
             .timeout(Duration::from_secs(25))
-            .user_agent("KansoLauncher/0.1.0 (feed reader)")
+            .user_agent(&format!("{} (feed reader)", crate::USER_AGENT))
             .build();
         Self { agent }
     }

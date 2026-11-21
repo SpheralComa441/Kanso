@@ -99,7 +99,7 @@ impl EpicApi {
             agent: ureq::AgentBuilder::new()
                 .timeout_connect(Duration::from_secs(8))
                 .timeout_read(Duration::from_secs(20))
-                .user_agent("KansoLauncher/0.1.0")
+                .user_agent(crate::USER_AGENT)
                 .build(),
         }
     }
