@@ -6,7 +6,8 @@ lists every request Kanso makes, to whom, when, and what it carries. Each one go
 PC straight to the service named.
 
 As with any program that talks to a website, a request shows that service your IP address
-and the name Kanso gives itself (`KansoLauncher/<version>`).
+and the name Kanso gives itself: `KansoLauncher/<version>`, or `Kanso/<version>` for the
+requests of plugins.
 
 ## What Kanso asks for by itself
 

@@ -1,3 +1,7 @@
+/// How Kanso names itself to the services it asks for something: its own name and the
+/// version being run, which comes from the build and so is never out of date.
+pub const USER_AGENT: &str = concat!("KansoLauncher/", env!("CARGO_PKG_VERSION"));
+
 pub mod accounts;
 pub mod achievements;
 pub mod authenticode;

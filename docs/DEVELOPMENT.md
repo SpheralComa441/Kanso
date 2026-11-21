@@ -125,7 +125,8 @@ good reason.
 ## Releasing
 
 1. Set the new version in `package.json`, `src-tauri/Cargo.toml`,
-   `src-tauri/crates/kanso-core/Cargo.toml` and `src-tauri/tauri.conf.json`, and turn the
+   `src-tauri/crates/kanso-core/Cargo.toml` and `src-tauri/tauri.conf.json` (and the same two
+   packages in `package-lock.json` and `src-tauri/Cargo.lock`), and turn the
    `## Unreleased` section of `CHANGELOG.md` into `## <version>`: the release notes are taken
    from the section named after the version.
 2. Once that is on `main`, run the **Release** workflow from the Actions tab, on `main`. It

@@ -60,7 +60,7 @@ impl WeatherClient {
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(8))
             .timeout_read(Duration::from_secs(12))
-            .user_agent("KansoLauncher/0.1.0")
+            .user_agent(crate::USER_AGENT)
             .build();
         Self {
             forecast_base_url: forecast.trim_end_matches('/').to_string(),
