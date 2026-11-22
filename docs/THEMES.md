@@ -457,7 +457,7 @@ side panel's Genres and Tags titles open.*
 
 | Chiave / Key | Valori / Values | Significato / Meaning |
 | --- | --- | --- |
-| `platforms` | `true` / `false` | La riga delle piattaforme sopra le schede: *Tutte*, poi ogni store e ogni libreria portata da un plugin che ha giochi, ciascuno con quanti ne ha. Sceglierne uno conta le schede sui soli giochi di quella piattaforma, e la scelta resta aprendo una scheda nella libreria. Compare quando i giochi che si stanno guardando (con *Solo installati*, quelli sul disco) sono di almeno due piattaforme, o quando una è già scelta |
+| `platforms` | `true` / `false` | La riga delle piattaforme sopra le schede: *Tutte*, poi ogni store e ogni libreria portata da un plugin che ha giochi (e, nella pagina *Generi*, anche *Emulatori* quando ci sono giochi emulati), ciascuno con quanti ne ha. Sceglierne uno conta le schede sui soli giochi di quella piattaforma, e la scelta resta aprendo una scheda nella libreria. Compare quando i giochi che si stanno guardando (con *Solo installati*, quelli sul disco) sono di almeno due piattaforme, quando ci sono giochi emulati, o quando una è già scelta |
 
 - Anche senza la riga, la piattaforma si sceglie dal pannello laterale: con le schede aperte,
   le voci di *Piattaforma* contano le schede invece di aprire la libreria. *Without the row the

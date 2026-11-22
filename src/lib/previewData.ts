@@ -374,17 +374,23 @@ export const PREVIEW_MOCK_EMULATED_GAMES: DetectedGame[] = [
     playCount: 9,
     genres: ["Azione", "Avventura"],
   }),
-  emulated("dolphin", "Super Mario Sunshine (Europe).iso", "Super Mario Sunshine", ["#1f8fd6", "#0b2f52"]),
+  emulated("dolphin", "Super Mario Sunshine (Europe).iso", "Super Mario Sunshine", ["#1f8fd6", "#0b2f52"], {
+    genres: ["Platform", "Avventura"],
+  }),
   emulated("dolphin", "Legend of Zelda, The - The Wind Waker (Europe).rvz", "The Legend of Zelda: The Wind Waker", ["#2f9d6b", "#0c3324"], {
     isFavorite: true,
     status: "playing",
+    genres: ["Azione", "Avventura"],
   }),
   emulated("duckstation", "Final Fantasy VII (Italy) (Disc 1).chd", "Final Fantasy VII", ["#3a4f9c", "#10162e"], {
     playtimeMinutes: 1980,
     lastPlayedAt: Date.now() - 70 * 24 * 60 * 60 * 1000,
     playCount: 30,
+    genres: ["GDR"],
   }),
-  emulated("duckstation", "Crash Bandicoot (Europe).cue", "Crash Bandicoot", ["#d9731a", "#40200a"]),
+  emulated("duckstation", "Crash Bandicoot (Europe).cue", "Crash Bandicoot", ["#d9731a", "#40200a"], {
+    genres: ["Platform", "Azione"],
+  }),
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;

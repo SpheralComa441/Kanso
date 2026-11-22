@@ -113,9 +113,14 @@ export function genreKey(genre: string): string {
 
 /**
  * Genres found in the metadata of the games in `scope`, most common first. A genre typed
- * with different casing on different games is counted once, under its first spelling.
+ * with different casing on different games is counted once, under its first spelling (or the
+ * spelling `knownLabels` already gave it in the library).
  */
-export function summarizeGenres(games: DetectedGame[], scope: LibraryScope): GenreSummary[] {
+export function summarizeGenres(
+  games: DetectedGame[],
+  scope: LibraryScope,
+  knownLabels?: ReadonlyMap<string, string>
+): GenreSummary[] {
   const byKey = new Map<string, GenreSummary>();
   for (const game of games) {
     if (!isInScope(game, scope)) continue;
@@ -128,7 +133,7 @@ export function summarizeGenres(games: DetectedGame[], scope: LibraryScope): Gen
       if (entry) {
         entry.count += 1;
       } else {
-        byKey.set(key, { key, label: raw.trim(), count: 1 });
+        byKey.set(key, { key, label: knownLabels?.get(key) ?? raw.trim(), count: 1 });
       }
     }
   }

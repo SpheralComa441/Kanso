@@ -301,19 +301,21 @@ export function Sidebar({
 
   /** Toggles a collection. Hidden games form a separate pool, so entering it drops the rest. */
   const toggleCollection = (collection: LibraryCollection) => {
+    const libraryPlatform = filters.platform === "emulator" ? null : filters.platform;
     if (collectionActive(collection)) {
-      onFiltersChange({ ...filters, collection: "all" });
+      onFiltersChange({ ...filters, platform: libraryPlatform, collection: "all" });
     } else if (collection === "hidden") {
       onFiltersChange({ ...EMPTY_FILTERS, collection });
     } else {
-      onFiltersChange({ ...filters, collection });
+      onFiltersChange({ ...filters, platform: libraryPlatform, collection });
     }
   };
 
-  /** Platform and genre describe visible games: picking one leaves the hidden pool. */
+  /** Platform and genre describe visible games: picking one leaves the hidden and emulator pools. */
   const withVisiblePool = (next: Partial<LibraryFilters>): LibraryFilters => ({
     ...filters,
     collection: viewingHidden ? "all" : filters.collection,
+    platform: filters.platform === "emulator" ? null : filters.platform,
     ...next,
   });
 
@@ -624,7 +626,7 @@ export function Sidebar({
   if (leftOut("status") && filters.status !== null) {
     selectedOnly.push(["status", t("sidebar.status"), statusRow(filters.status)]);
   }
-  if (leftOut("platform") && filters.platform !== null) {
+  if (leftOut("platform") && filters.platform !== null && filters.platform !== "emulator") {
     selectedOnly.push(["platform", t("sidebar.platform"), platformRow(filters.platform)]);
   }
   if (leftOut("genres") && activeGenre) {

@@ -83,6 +83,7 @@ import {
   isEmulated,
   offeredPlatforms,
   platformLabel,
+  sourceGroupLabel,
   uninstallMode,
   sourceOf,
   setPluginLibraryNames,
@@ -880,45 +881,83 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const filteredGames = useMemo(
     () =>
       applyLibraryFilters(
-        filters.status === null
-          ? games
-          : allGames.filter((game) => !isEmulated(game) || game.isHidden || game.status === filters.status),
+        filters.platform === "emulator"
+          ? emulatedGames
+          : filters.status === null
+            ? games
+            : allGames.filter((game) => !isEmulated(game) || game.isHidden || game.status === filters.status),
         filters,
         searchQuery,
         installedOnly
       ),
-    [games, allGames, filters, searchQuery, installedOnly]
+    [games, emulatedGames, allGames, filters, searchQuery, installedOnly]
   );
   const scopedGames = useMemo(
     () => games.filter((game) => isInScope(game, scope)),
     [games, scope]
   );
+  const scopedEmulatedGames = useMemo(
+    () => emulatedGames.filter((game) => isInScope(game, scope)),
+    [emulatedGames, scope]
+  );
+  const genreLabels = useMemo(
+    () => new Map(genres.map((genre) => [genre.key, genre.label])),
+    [genres]
+  );
+  const emulatedGenres = useMemo(
+    () => summarizeGenres(scopedEmulatedGames, scope, genreLabels),
+    [scopedEmulatedGames, scope, genreLabels]
+  );
+  const allKnownGenreLabels = useMemo(() => {
+    const seen = new Set(genres.map((genre) => genre.key));
+    return [
+      ...genres.map((genre) => genre.label),
+      ...emulatedGenres.filter((genre) => !seen.has(genre.key)).map((genre) => genre.label),
+    ];
+  }, [genres, emulatedGenres]);
   // The tiles of genres and tags count the games of the platform chosen above them, under
-  // the names the side panel gives them
-  const tilesPlatform = filters.platform;
+  // the names the side panel gives them; on the genres screen Emulators sits beside the stores
+  const tilesPlatform =
+    mainView === "tags" && filters.platform === "emulator" ? null : filters.platform;
   const tilesGames = useMemo(
     () =>
       tilesPlatform === null
         ? scopedGames
-        : scopedGames.filter((game) => sourceOf(game) === tilesPlatform),
-    [scopedGames, tilesPlatform]
+        : tilesPlatform === "emulator"
+          ? scopedEmulatedGames
+          : scopedGames.filter((game) => sourceOf(game) === tilesPlatform),
+    [scopedGames, scopedEmulatedGames, tilesPlatform]
   );
   const tilesGenres = useMemo(
-    () => (tilesPlatform === null ? genres : recountCategories(genres, tilesGames, "genres")),
-    [genres, tilesGames, tilesPlatform]
+    () =>
+      tilesPlatform === null
+        ? genres
+        : tilesPlatform === "emulator"
+          ? emulatedGenres
+          : recountCategories(genres, tilesGames, "genres"),
+    [genres, emulatedGenres, tilesGames, tilesPlatform]
   );
   const tilesTags = useMemo(
     () => (tilesPlatform === null ? tags : recountCategories(tags, tilesGames, "tags")),
     [tags, tilesGames, tilesPlatform]
   );
-  const tilesPlatforms = useMemo(
-    () =>
-      offeredPlatforms(counts.byPlatform, tilesPlatform, t).map((source) => ({
-        source,
-        count: counts.byPlatform[source] ?? 0,
-      })),
-    [counts.byPlatform, tilesPlatform, t]
-  );
+  const tilesPlatforms = useMemo(() => {
+    const offered = offeredPlatforms(
+      counts.byPlatform,
+      tilesPlatform === "emulator" ? null : tilesPlatform,
+      t
+    ).map((source) => ({
+      source,
+      count: counts.byPlatform[source] ?? 0,
+    }));
+    if (
+      mainView === "genres" &&
+      (scopedEmulatedGames.length > 0 || tilesPlatform === "emulator")
+    ) {
+      offered.push({ source: "emulator", count: scopedEmulatedGames.length });
+    }
+    return offered;
+  }, [counts.byPlatform, tilesPlatform, t, mainView, scopedEmulatedGames.length]);
   const ownedSteamAppIds = useMemo(
     () =>
       new Set(
@@ -957,12 +996,21 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   );
 
   // A genre filter whose last game was edited or uninstalled would show an empty library
-  const activeGenre = genres.find((g) => g.key === filters.genre) ?? null;
+  const activeGenrePool = filters.platform === "emulator" ? emulatedGenres : genres;
+  const platformPoolCount =
+    filters.platform === "emulator" ? emulatedGames.length : games.length;
+  const activeGenre = activeGenrePool.find((g) => g.key === filters.genre) ?? null;
   useEffect(() => {
-    if (filters.genre && !activeGenre && games.length > 0) {
+    if (filters.genre && !activeGenre && platformPoolCount > 0) {
       setFilters((f) => ({ ...f, genre: null }));
     }
-  }, [filters.genre, activeGenre, games.length]);
+  }, [filters.genre, activeGenre, platformPoolCount]);
+
+  useEffect(() => {
+    if (emulatorsRead && filters.platform === "emulator" && emulatedGames.length === 0) {
+      setFilters((f) => ({ ...f, platform: null }));
+    }
+  }, [emulatorsRead, filters.platform, emulatedGames.length]);
 
   // Same for a tag (tags also change with the interface language)
   const activeTag = tags.find((tag) => tag.key === filters.tag) ?? null;
@@ -1030,15 +1078,17 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const isNarrowed = hasActiveFilters(filters) || searchQuery.trim().length > 0;
   // What "N of M" is measured against: the pool the current view draws from
   const poolSize =
-    filters.collection === "hidden"
-      ? counts.hidden
-      : filters.collection === "notInstalled"
-        ? counts.notInstalled
-        : counts.visible;
+    filters.platform === "emulator"
+      ? scopedEmulatedGames.length
+      : filters.collection === "hidden"
+        ? counts.hidden
+        : filters.collection === "notInstalled"
+          ? counts.notInstalled
+          : counts.visible;
   // Games the search or the filters would also find, were "installed only" switched off
   const absentMatches = useMemo(
     () =>
-      installedOnly && isNarrowed && scope === "installed"
+      installedOnly && isNarrowed && scope === "installed" && filters.platform !== "emulator"
         ? applyLibraryFilters(games, filters, searchQuery, false).length - filteredGames.length
         : 0,
     [installedOnly, isNarrowed, scope, games, filters, searchQuery, filteredGames.length]
@@ -1097,7 +1147,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
             showView("emulators");
           }}
           emulatorCount={emulators.length}
-          onOpenOverview={showView}
+          onOpenOverview={(kind) => {
+            if (kind === "tags" && filters.platform === "emulator") {
+              setFilters((current) => ({ ...current, platform: null }));
+            }
+            showView(kind);
+          }}
           filters={filters}
           onFiltersChange={changeFilters}
           onTilesPlatformChange={changeTilesPlatform}
@@ -1210,7 +1265,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           ) : (
             <>
               {/* Active filters: always visible, even with the sidebar collapsed */}
-              {isNarrowed && games.length > 0 && (
+              {isNarrowed && platformPoolCount > 0 && (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-500">
                   {/* The way back to the tiles the genre or tag was picked from */}
                   {(activeGenre ? navGroups.includes("genres") : activeTag !== null && navGroups.includes("tags")) && (
@@ -1243,7 +1298,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
                   )}
                   {filters.platform && (
                     <FilterChip
-                      label={platformLabel(filters.platform, t)}
+                      label={sourceGroupLabel(filters.platform, t)}
                       onRemove={() => setFilters((f) => ({ ...f, platform: null }))}
                     />
                   )}
@@ -1297,7 +1352,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
               <GameList
                 games={filteredGames}
-                totalDetected={games.length}
+                totalDetected={platformPoolCount}
                 viewMode={viewMode}
                 isScanning={isScanning}
                 launchingId={launchingId}
@@ -1333,7 +1388,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onToggleHidden={handleToggleHidden}
         onEdit={(game) => setEditingGameId(game.id)}
         onSelectGenre={(key) => {
-          setFilters({ ...EMPTY_FILTERS, collection: collectionOf(detailGame), genre: key });
+          setFilters({
+            ...EMPTY_FILTERS,
+            collection: collectionOf(detailGame),
+            platform: detailGame?.platform === "emulator" ? "emulator" : null,
+            genre: key,
+          });
           setSearchQuery("");
           showView("library");
           closeDetail();
@@ -1365,7 +1425,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
             setStatusMessage(typeof err === "string" ? err : err instanceof Error ? err.message : t("app.statusError"))
           );
         }}
-        knownGenres={genres.map((genre) => genre.label)}
+        knownGenres={allKnownGenreLabels}
         plugins={detailPlugins}
       />
 

@@ -134,6 +134,19 @@ export function platformLabel(
         : PLATFORM_META[source as GamePlatform].label;
 }
 
+/**
+ * Name of a source when it stands for its whole group of games (a tab above the genres, a
+ * filter chip of the library): plural "Emulatori" rather than one game's "Emulatore".
+ */
+export function sourceGroupLabel(
+  source: GameSource,
+  t: (
+    key: "platform.local" | "platform.emulator" | "platform.plugin" | "sidebar.emulators"
+  ) => string
+): string {
+  return source === "emulator" ? t("sidebar.emulators") : platformLabel(source, t);
+}
+
 /** A game file run by an emulator: it lives in the Emulators section, not in the library. */
 export function isEmulated(game: DetectedGame): boolean {
   return game.platform === "emulator";

@@ -9,7 +9,7 @@ import {
 import { useI18n } from "../i18n";
 import { resolveCoverUrl } from "../lib/backend";
 import { genreKey, type GenreSummary } from "../lib/library";
-import { platformLabel } from "../lib/platforms";
+import { sourceGroupLabel } from "../lib/platforms";
 import { useBrokenCovers } from "../lib/useBrokenCovers";
 import type { DetectedGame, GameSource } from "../types/game";
 import { FilterChip } from "./FilterChip";
@@ -231,10 +231,12 @@ export function CategoryGrid({
   const { t, plural } = useI18n();
   const { usableCover, markBroken } = useBrokenCovers();
   const covers = useMemo(() => pickCovers(kind, categories, games), [kind, categories, games]);
-  const platformName = platform === null ? null : platformLabel(platform, t);
-  // A choice between one platform and all of them would be no choice: the row needs two. One
-  // already chosen stays in sight, so that it can be undone
-  const offersRow = showPlatforms && (platforms.length > 1 || platform !== null);
+  const platformName = platform === null ? null : sourceGroupLabel(platform, t);
+  // A choice between one store and all of them would be no choice: the row needs two, unless
+  // Emulators is offered (its games are not part of "All"). One already chosen stays in sight
+  const hasSeparatePool = platforms.some((entry) => entry.source === "emulator");
+  const offersRow =
+    showPlatforms && (platforms.length > 1 || hasSeparatePool || platform !== null);
   const pill = (active: boolean) =>
     `inline-flex items-center gap-2 rounded-lg border px-3.5 py-1.5 text-xs font-medium transition-colors ${
       active
@@ -299,7 +301,7 @@ export function CategoryGrid({
                 onClick={() => onPlatformChange(active ? null : source)}
                 className={pill(active)}
               >
-                <span>{platformLabel(source, t)}</span>
+                <span>{sourceGroupLabel(source, t)}</span>
                 <span className={`tabular-nums ${active ? "opacity-75" : "text-zinc-500"}`}>{count}</span>
               </button>
             );
