@@ -1,7 +1,7 @@
 {
   "name": "kanso",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A clean, light game launcher for Windows: every store in one library, themes and plugins, no account needed",
   "license": "GPL-3.0-or-later",
   "type": "module",
