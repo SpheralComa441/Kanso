@@ -2,7 +2,7 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
-## Unreleased
+## 0.2.1
 
 - **Emulators on the Genres page.** Next to the stores at the top of *Genres*, an *Emulators*
   tab divides the emulated games by genre and opens them on the chosen genre.
