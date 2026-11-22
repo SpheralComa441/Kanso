@@ -2,6 +2,12 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
+## Unreleased
+
+- **Accurate counts on the Genres and Tags tabs.** The platform tabs at the top of *Genres* and
+  *Tags* (including *Emulators*) now count only the games that actually have at least one genre
+  or tag, leaving out entries without any.
+
 ## 0.2.1
 
 - **Emulators on the Genres page.** Next to the stores at the top of *Genres*, an *Emulators*

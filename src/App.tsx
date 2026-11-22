@@ -68,6 +68,7 @@ import {
   applyLibraryFilters,
   countLibrary,
   hasActiveFilters,
+  hasCategory,
   isInScope,
   libraryScope,
   readUiPreference,
@@ -941,23 +942,46 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     () => (tilesPlatform === null ? tags : recountCategories(tags, tilesGames, "tags")),
     [tags, tilesGames, tilesPlatform]
   );
+  // Each tab above the tiles counts only the games that actually appear among those tiles
+  // (games without a genre — such as uncategorised ROMs or tools — are not in Genres)
+  const listedTagKeys = useMemo(() => new Set(tags.map((tag) => tag.key)), [tags]);
+  const tileKind: CategoryKind = mainView === "tags" ? "tags" : "genres";
+  const categorizedGames = useMemo(
+    () =>
+      scopedGames.filter((game) =>
+        hasCategory(game, tileKind, tileKind === "tags" ? listedTagKeys : undefined)
+      ),
+    [scopedGames, tileKind, listedTagKeys]
+  );
+  const categorizedByPlatform = useMemo(() => {
+    const byPlatform: Record<string, number> = {};
+    for (const game of categorizedGames) {
+      const source = sourceOf(game);
+      byPlatform[source] = (byPlatform[source] ?? 0) + 1;
+    }
+    return byPlatform;
+  }, [categorizedGames]);
+  const categorizedEmulatedCount = useMemo(
+    () => scopedEmulatedGames.filter((game) => hasCategory(game, "genres")).length,
+    [scopedEmulatedGames]
+  );
   const tilesPlatforms = useMemo(() => {
     const offered = offeredPlatforms(
-      counts.byPlatform,
+      categorizedByPlatform,
       tilesPlatform === "emulator" ? null : tilesPlatform,
       t
     ).map((source) => ({
       source,
-      count: counts.byPlatform[source] ?? 0,
+      count: categorizedByPlatform[source] ?? 0,
     }));
     if (
       mainView === "genres" &&
-      (scopedEmulatedGames.length > 0 || tilesPlatform === "emulator")
+      (categorizedEmulatedCount > 0 || tilesPlatform === "emulator")
     ) {
-      offered.push({ source: "emulator", count: scopedEmulatedGames.length });
+      offered.push({ source: "emulator", count: categorizedEmulatedCount });
     }
     return offered;
-  }, [counts.byPlatform, tilesPlatform, t, mainView, scopedEmulatedGames.length]);
+  }, [categorizedByPlatform, tilesPlatform, t, mainView, categorizedEmulatedCount]);
   const ownedSteamAppIds = useMemo(
     () =>
       new Set(
@@ -1257,7 +1281,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
               games={tilesGames}
               onOpen={(key) => openCategory(mainView, key)}
               platforms={tilesPlatforms}
-              allCount={scopedGames.length}
+              allCount={categorizedGames.length}
               platform={tilesPlatform}
               onPlatformChange={changeTilesPlatform}
               showPlatforms={activeTheme.categories.platforms}

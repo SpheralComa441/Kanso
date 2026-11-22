@@ -112,6 +112,22 @@ export function genreKey(genre: string): string {
 }
 
 /**
+ * Whether `game` actually appears among the tiles of `kind`: it has at least one genre, or at
+ * least one tag among `listedKeys` (tags that merely repeat a genre are not tiles).
+ */
+export function hasCategory(
+  game: DetectedGame,
+  kind: "genres" | "tags",
+  listedKeys?: ReadonlySet<string>
+): boolean {
+  const values = kind === "genres" ? game.genres : game.tags;
+  return values.some((raw) => {
+    const key = genreKey(raw);
+    return key !== "" && (listedKeys === undefined || listedKeys.has(key));
+  });
+}
+
+/**
  * Genres found in the metadata of the games in `scope`, most common first. A genre typed
  * with different casing on different games is counted once, under its first spelling (or the
  * spelling `knownLabels` already gave it in the library).
