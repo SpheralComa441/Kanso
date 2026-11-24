@@ -3,7 +3,8 @@
 Kanso ha una sezione **Emulatori**: una scheda per ogni emulatore presente sul PC e, aprendola,
 l'elenco dei giochi di quell'emulatore. Un gioco emulato si comporta come ogni altro (copertina,
 scheda, preferito, stato, tempo di gioco) e si avvia nel suo emulatore, ma resta nella sua
-sezione: non compare in *Tutti i giochi*, nei conteggi, nei generi o nei tag della libreria.
+sezione: non compare in *Tutti i giochi* o nei tag della libreria, mentre compare tra i *Preferiti*,
+negli stati, in *Nascosti* e nella scheda *Emulatori* di *Generi*.
 
 ## Che cosa fa Kanso, e che cosa no
 

@@ -870,28 +870,32 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const scope = libraryScope(filters.collection, installedOnly);
   const genres = useMemo(() => summarizeGenres(games, scope), [games, scope]);
   const tags = useMemo(() => summarizeTags(games, genres, scope), [games, genres, scope]);
-  // Where the user stands with a game is about the game, whatever runs it: the statuses
-  // count the emulated games too, and choosing one lists them with the others
+  // Where the user stands with a game is about the game, whatever runs it: favorites and
+  // statuses count the emulated games too, and choosing either lists them with the others
   const counts = useMemo(() => {
     const counted = countLibrary(games, installedOnly, scope);
     for (const game of emulatedGames) {
-      if (!game.isHidden && game.status && isInScope(game, scope)) counted.byStatus[game.status] += 1;
+      if (game.isHidden) continue;
+      if (game.status && isInScope(game, scope)) counted.byStatus[game.status] += 1;
+      if (game.isFavorite && (!installedOnly || game.isInstalled)) counted.favorites += 1;
     }
     return counted;
   }, [games, emulatedGames, installedOnly, scope]);
-  const filteredGames = useMemo(
+  const includesEmulated =
+    filters.platform === null &&
+    (filters.collection === "favorites" || filters.status !== null);
+  const libraryPool = useMemo(
     () =>
-      applyLibraryFilters(
-        filters.platform === "emulator"
-          ? emulatedGames
-          : filters.status === null
-            ? games
-            : allGames.filter((game) => !isEmulated(game) || game.isHidden || game.status === filters.status),
-        filters,
-        searchQuery,
-        installedOnly
-      ),
-    [games, emulatedGames, allGames, filters, searchQuery, installedOnly]
+      filters.platform === "emulator"
+        ? emulatedGames
+        : includesEmulated
+          ? allGames
+          : games,
+    [filters.platform, includesEmulated, emulatedGames, allGames, games]
+  );
+  const filteredGames = useMemo(
+    () => applyLibraryFilters(libraryPool, filters, searchQuery, installedOnly),
+    [libraryPool, filters, searchQuery, installedOnly]
   );
   const scopedGames = useMemo(
     () => games.filter((game) => isInScope(game, scope)),
@@ -1021,8 +1025,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
 
   // A genre filter whose last game was edited or uninstalled would show an empty library
   const activeGenrePool = filters.platform === "emulator" ? emulatedGenres : genres;
-  const platformPoolCount =
-    filters.platform === "emulator" ? emulatedGames.length : games.length;
+  const platformPoolCount = libraryPool.length;
   const activeGenre = activeGenrePool.find((g) => g.key === filters.genre) ?? null;
   useEffect(() => {
     if (filters.genre && !activeGenre && platformPoolCount > 0) {
@@ -1107,15 +1110,15 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       : filters.collection === "hidden"
         ? counts.hidden
         : filters.collection === "notInstalled"
-          ? counts.notInstalled
-          : counts.visible;
+          ? counts.notInstalled + (includesEmulated ? scopedEmulatedGames.length : 0)
+          : counts.visible + (includesEmulated ? scopedEmulatedGames.length : 0);
   // Games the search or the filters would also find, were "installed only" switched off
   const absentMatches = useMemo(
     () =>
-      installedOnly && isNarrowed && scope === "installed" && filters.platform !== "emulator"
-        ? applyLibraryFilters(games, filters, searchQuery, false).length - filteredGames.length
+      installedOnly && isNarrowed && scope === "installed"
+        ? applyLibraryFilters(libraryPool, filters, searchQuery, false).length - filteredGames.length
         : 0,
-    [installedOnly, isNarrowed, scope, games, filters, searchQuery, filteredGames.length]
+    [installedOnly, isNarrowed, scope, libraryPool, filters, searchQuery, filteredGames.length]
   );
 
   return (
