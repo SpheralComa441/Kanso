@@ -2,7 +2,7 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
-## Unreleased
+## 0.2.3
 
 - **Emulated games in Favorites.** Emulated games marked with the star are now counted in
   *Favorites* and listed there alongside the rest of the library.

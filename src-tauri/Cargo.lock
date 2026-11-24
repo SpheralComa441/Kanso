@@ -1985,7 +1985,7 @@ dependencies = [
 
 [[package]]
 name = "kanso"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "kanso-core",
  "serde",
@@ -1999,7 +1999,7 @@ dependencies = [
 
 [[package]]
 name = "kanso-core"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "base64 0.22.1",
  "encoding_rs",
