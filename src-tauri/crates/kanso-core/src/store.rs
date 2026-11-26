@@ -1,8 +1,10 @@
 use crate::cleaner::{clean_game_title, is_placeholder_title};
 use crate::db::{sort_games_by_title, LibraryDb};
-use crate::i18n::T;
-use crate::metadata::{remove_existing_cover_variants, sanitize_filename_id};
-use crate::metadata::title_key;
+use crate::i18n::{Lang, T};
+use crate::metadata::{
+    canonical_genre_key, dedup_custom_genres_against, remove_existing_cover_variants,
+    sanitize_filename_id, title_key, translate_genre, translate_known_genres,
+};
 use crate::models::{
     now_timestamp_ms, DetectedGame, GameManualUpdate, GamePlatform, GameStatus, ScanReport,
 };
@@ -21,6 +23,15 @@ pub struct LibraryStore {
 /// Most genres a user adds to one game, and the longest a genre's name gets.
 const MAX_CUSTOM_GENRES: usize = 24;
 const MAX_GENRE_CHARS: usize = 40;
+
+fn clean_genre_label(raw: &str, max_chars: Option<usize>) -> String {
+    let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let iter = collapsed.chars().filter(|c| !c.is_control());
+    match max_chars {
+        Some(limit) => iter.take(limit).collect(),
+        None => iter.collect(),
+    }
+}
 
 fn has_user_data(game: &DetectedGame) -> bool {
     game.is_favorite
@@ -236,7 +247,8 @@ impl LibraryStore {
         enriched.last_played_at = existing.last_played_at;
         enriched.playtime_minutes = existing.playtime_minutes;
         enriched.status = existing.status;
-        enriched.custom_genres = existing.custom_genres.clone();
+        enriched.custom_genres =
+            dedup_custom_genres_against(&existing.custom_genres, &enriched.genres);
         // What the scan read from disk, not something a lookup online knows
         enriched.version = existing.version.clone();
         enriched.is_family_shared = existing.is_family_shared;
@@ -281,25 +293,51 @@ impl LibraryStore {
     }
 
     /// Sets the genres the user gives a game besides its store's own: plain names, each once
-    /// (whatever the capitals), and none that the game already has from its store.
+    /// (even across languages or aliases), and none that the game already has from its store.
     pub fn set_custom_genres(&mut self, game_id: &str, genres: &[String]) -> Result<DetectedGame, String> {
+        self.set_custom_genres_opt_lang(game_id, genres, None)
+    }
+
+    /// Same as [`Self::set_custom_genres`], normalizing recognized genres into `lang` so typing
+    /// a genre in another language never creates duplicates.
+    pub fn set_custom_genres_in_lang(
+        &mut self,
+        game_id: &str,
+        genres: &[String],
+        lang: Lang,
+    ) -> Result<DetectedGame, String> {
+        self.set_custom_genres_opt_lang(game_id, genres, Some(lang))
+    }
+
+    fn set_custom_genres_opt_lang(
+        &mut self,
+        game_id: &str,
+        genres: &[String],
+        lang: Option<Lang>,
+    ) -> Result<DetectedGame, String> {
         let Some(game) = self.get_game_mut(game_id) else {
             return Err(format!("{}: {game_id}", T::GameNotFound.s()));
         };
-        let mut seen: HashSet<String> = game.genres.iter().map(|genre| genre.trim().to_lowercase()).collect();
+        let mut seen: HashSet<String> = game
+            .genres
+            .iter()
+            .map(|genre| canonical_genre_key(genre))
+            .filter(|key| !key.is_empty())
+            .collect();
         game.custom_genres = genres
             .iter()
-            .map(|genre| {
-                genre
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ")
-                    .chars()
-                    .filter(|c| !c.is_control())
-                    .take(MAX_GENRE_CHARS)
-                    .collect::<String>()
+            .filter_map(|genre| {
+                let cleaned = clean_genre_label(genre, Some(MAX_GENRE_CHARS));
+                if cleaned.is_empty() {
+                    return None;
+                }
+                let normalized = lang
+                    .and_then(|l| translate_genre(&cleaned, l))
+                    .map(ToString::to_string)
+                    .unwrap_or(cleaned);
+                let key = canonical_genre_key(&normalized);
+                (!key.is_empty() && seen.insert(key)).then_some(normalized)
             })
-            .filter(|genre| !genre.is_empty() && seen.insert(genre.to_lowercase()))
             .take(MAX_CUSTOM_GENRES)
             .collect();
         Ok(game.clone())
@@ -317,6 +355,24 @@ impl LibraryStore {
 
     /// Applies manual edits (title, executable path, genres, description, favorite) to a single game.
     pub fn apply_manual_update(&mut self, payload: GameManualUpdate) -> Result<DetectedGame, String> {
+        self.apply_manual_update_opt_lang(payload, None)
+    }
+
+    /// Same as [`Self::apply_manual_update`], normalizing recognized genres into `lang` so
+    /// manual edits never introduce cross-language duplicates.
+    pub fn apply_manual_update_in_lang(
+        &mut self,
+        payload: GameManualUpdate,
+        lang: Lang,
+    ) -> Result<DetectedGame, String> {
+        self.apply_manual_update_opt_lang(payload, Some(lang))
+    }
+
+    fn apply_manual_update_opt_lang(
+        &mut self,
+        payload: GameManualUpdate,
+        lang: Option<Lang>,
+    ) -> Result<DetectedGame, String> {
         let Some(game) = self.get_game_mut(&payload.id) else {
             return Err(format!("{}: {}", T::GameNotFound.s(), payload.id));
         };
@@ -339,12 +395,31 @@ impl LibraryStore {
             .map(|d| d.trim().to_string())
             .filter(|d| !d.is_empty());
 
+        let mut seen: HashSet<String> = HashSet::new();
         game.genres = payload
             .genres
             .into_iter()
-            .map(|g| g.trim().to_string())
-            .filter(|g| !g.is_empty())
+            .filter_map(|g| {
+                let cleaned = clean_genre_label(&g, None);
+                if cleaned.is_empty() {
+                    return None;
+                }
+                let normalized = lang
+                    .and_then(|l| translate_genre(&cleaned, l))
+                    .map(ToString::to_string)
+                    .unwrap_or(cleaned);
+                let key = canonical_genre_key(&normalized);
+                (!key.is_empty() && seen.insert(key)).then_some(normalized)
+            })
             .collect();
+
+        if !game.custom_genres.is_empty() {
+            let custom = match lang {
+                Some(l) => translate_known_genres(&game.custom_genres, l).0,
+                None => game.custom_genres.clone(),
+            };
+            game.custom_genres = dedup_custom_genres_against(&custom, &game.genres);
+        }
 
         if let Some(fav) = payload.is_favorite {
             game.is_favorite = fav;
@@ -1001,5 +1076,73 @@ mod tests {
         );
         assert_eq!(game(GamePlatform::Xbox, Some("Microsoft.Game"), None), None);
         assert_eq!(game(GamePlatform::Standalone, None, None), None);
+    }
+
+    #[test]
+    fn user_genres_normalize_into_active_language_and_prevent_cross_language_duplicates() {
+        let mut game = scanned_steam("2344520", "Diablo IV", false);
+        game.genres = vec!["Massively Multiplayer".into(), "Action".into()];
+        let mut store = LibraryStore { games: vec![game] };
+
+        // While UI is in English, typing Italian/Russian equivalents must NOT duplicate store genres,
+        // and known sub-genres normalize into English right at input time
+        let saved = store
+            .set_custom_genres_in_lang(
+                "steam:2344520",
+                &[
+                    "Multigiocatore di massa".into(), // already present as Massively Multiplayer
+                    "Экшен".into(),                   // already present as Action
+                    "GDR".into(),                     // -> RPG
+                    "Giochi di ruolo".into(),         // alias duplicate of RPG -> dropped
+                    "Sparatutto".into(),              // -> Shooter
+                    "Пиксельная графика".into(),      // -> Pixel Art
+                    "Da rigiocare".into(),            // personal label -> preserved
+                ],
+                Lang::En,
+            )
+            .unwrap();
+        assert_eq!(
+            saved.custom_genres,
+            ["RPG", "Shooter", "Pixel Art", "Da rigiocare"]
+        );
+
+        // Manual edit modal normalizes known genres, deduplicates cross-language input,
+        // and strips any custom_genres now covered by game.genres
+        let edited = store
+            .apply_manual_update_in_lang(
+                GameManualUpdate {
+                    id: "steam:2344520".into(),
+                    title: "Diablo IV".into(),
+                    executable_path: None,
+                    short_description: None,
+                    genres: vec![
+                        "Action".into(),
+                        "Azione".into(),
+                        "Shooter".into(),
+                        "Sparatutto".into(),
+                        "Preferiti miei".into(),
+                    ],
+                    is_favorite: None,
+                },
+                Lang::It,
+            )
+            .unwrap();
+        assert_eq!(edited.genres, ["Azione", "Sparatutto", "Preferiti miei"]);
+        assert_eq!(
+            edited.custom_genres,
+            ["GDR", "Pixel Art", "Da rigiocare"],
+            "Shooter/Sparatutto moved into genres is dropped from custom_genres; remaining custom genres follow Italian"
+        );
+
+        // Automatic metadata write-back drops custom_genres that Steam now supplies (even in another language)
+        let mut fresh = scanned_steam("620", "Portal 2", false);
+        fresh.custom_genres = vec!["Azione".into(), "Rompicapo".into(), "Co-op serale".into()];
+        let mut store2 = LibraryStore { games: vec![fresh.clone()] };
+        let mut synced = fresh;
+        synced.genres = vec!["Action".into(), "Adventure".into()];
+        synced.custom_genres = Vec::new();
+        let committed = store2.commit_enriched_game(synced, false).unwrap();
+        assert_eq!(committed.genres, ["Action", "Adventure"]);
+        assert_eq!(committed.custom_genres, ["Rompicapo", "Co-op serale"]);
     }
 }

@@ -218,6 +218,14 @@ async fn scan_games(
         let before = store.games.clone();
         let mut merged = store.merge_with_scan(raw_report);
         store.save_all(&mut db)?;
+        if !kanso_core::owned::translate_cached_genres(
+            &mut db,
+            config.lang().unwrap_or(FALLBACK_LANGUAGE),
+        )
+        .is_empty()
+        {
+            merged.games = LibraryStore::load(&db)?.games;
+        }
 
         // What Steam's own counters gained since the last scan becomes play history
         let played = kanso_core::playtime::steam_sessions_between(
@@ -664,7 +672,7 @@ fn update_game_details(
 ) -> Result<DetectedGame, String> {
     let game_id = payload.id.clone();
     update_stored_game(&app, &state, &game_id, |store| {
-        store.apply_manual_update(payload)
+        store.apply_manual_update_in_lang(payload, current_language())
     })
 }
 
@@ -733,7 +741,9 @@ fn set_game_genres(
     game_id: String,
     genres: Vec<String>,
 ) -> Result<DetectedGame, String> {
-    update_stored_game(&app, &state, &game_id, |store| store.set_custom_genres(&game_id, &genres))
+    update_stored_game(&app, &state, &game_id, |store| {
+        store.set_custom_genres_in_lang(&game_id, &genres, current_language())
+    })
 }
 
 /// Launches a game by library id. The launch target is always read from the local store,

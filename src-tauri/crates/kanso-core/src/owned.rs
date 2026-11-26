@@ -24,9 +24,9 @@ use crate::accounts::StoreError;
 use crate::epic_account::{EpicApi, EpicAsset, EpicSession};
 use crate::i18n::Lang;
 use crate::metadata::{
-    can_batch_translate_installed, has_foreign_steam_genre, needs_translation, title_key,
-    translate_all_steam_genres, translate_known_steam_genres, translate_only_known_steam_genres,
-    MetadataClient, SteamAppDetails, STEAM_SUMMARY_BATCH,
+    can_batch_translate_installed, dedup_custom_genres_against, has_foreign_steam_genre,
+    needs_translation, title_key, translate_all_steam_genres, translate_known_genres,
+    translate_only_known_steam_genres, MetadataClient, SteamAppDetails, STEAM_SUMMARY_BATCH,
 };
 use crate::models::{DetectedGame, GamePlatform};
 use crate::scanner::steam::SteamPlayStats;
@@ -532,29 +532,38 @@ fn is_absent_steam_game(game: &DetectedGame) -> bool {
     game.platform == GamePlatform::Steam && !game.is_installed
 }
 
-/// Translates every known official Steam store genre on non-overridden games in `db` into
-/// `lang` immediately without touching `metadata_lang` (so the upcoming Steam sync still
-/// refreshes descriptions and community tags). If a game was previously left with foreign
-/// genres while claiming `lang`, its `metadata_lang` is cleared so its description is
-/// refreshed too. Returns the games whose stored row changed.
+/// Translates every known genre on every game in `db` — both `genres` (including manually
+/// edited games) and user-added `custom_genres` — into `lang` immediately, collapsing any
+/// cross-language duplicates between `custom_genres` and `genres`. Personal custom labels
+/// outside the known genre dictionary are kept verbatim.
+///
+/// Does not touch `metadata_lang` on normal rows so the upcoming Steam sync still refreshes
+/// descriptions and community tags; clears `metadata_lang` on non-overridden rows previously
+/// left with foreign Steam genres while claiming `lang`. Returns the games whose stored row
+/// changed.
 pub fn translate_cached_genres(db: &mut LibraryDb, lang: Lang) -> Vec<DetectedGame> {
     let code = lang.code();
     let games = db.load_games().unwrap_or_default();
     let mut updated: Vec<DetectedGame> = Vec::new();
     for mut game in games {
-        if game.custom_override || game.genres.is_empty() {
+        if game.genres.is_empty() && game.custom_genres.is_empty() {
             continue;
         }
-        let had_foreign = has_foreign_steam_genre(&game.genres, lang);
-        let (translated, changed) = translate_known_steam_genres(&game.genres, lang);
-        if !changed {
+        let had_foreign_steam =
+            !game.custom_override && has_foreign_steam_genre(&game.genres, lang);
+        let (translated_genres, genres_changed) = translate_known_genres(&game.genres, lang);
+        let (translated_custom, _) = translate_known_genres(&game.custom_genres, lang);
+        let deduped_custom = dedup_custom_genres_against(&translated_custom, &translated_genres);
+        let custom_changed = deduped_custom != game.custom_genres;
+        if !genres_changed && !custom_changed {
             continue;
         }
-        if had_foreign && game.metadata_lang.as_deref() == Some(code) {
+        if had_foreign_steam && game.metadata_lang.as_deref() == Some(code) {
             // Previously poisoned row: force description refresh in `lang` as well
             game.metadata_lang = None;
         }
-        game.genres = translated;
+        game.genres = translated_genres;
+        game.custom_genres = deduped_custom;
         updated.push(game);
     }
     if updated.is_empty() || db.upsert_games(&updated).is_err() {
@@ -643,6 +652,7 @@ where
             let before = (
                 game.tags.clone(),
                 game.genres.clone(),
+                game.custom_genres.clone(),
                 game.short_description.clone(),
             );
             game.tags = details.tags.clone();
@@ -656,6 +666,11 @@ where
                 } else if !details.genres.is_empty() {
                     game.genres = details.genres.clone();
                 }
+                if !game.custom_genres.is_empty() {
+                    let (translated_custom, _) = translate_known_genres(&game.custom_genres, lang);
+                    game.custom_genres =
+                        dedup_custom_genres_against(&translated_custom, &game.genres);
+                }
                 if game.short_description.is_some() || !game.genres.is_empty() {
                     game.metadata_lang = Some(code.to_string());
                 }
@@ -666,6 +681,7 @@ where
                 != (
                     game.tags.clone(),
                     game.genres.clone(),
+                    game.custom_genres.clone(),
                     game.short_description.clone(),
                 )
             {
@@ -788,7 +804,12 @@ where
 /// Writes what the store said into `game` and notes that it was asked in `lang`. Returns
 /// whether anything the user can see changed.
 fn apply_details(game: &mut DetectedGame, details: &SteamAppDetails, lang: Lang) -> bool {
-    let before = (game.tags.clone(), game.genres.clone(), game.short_description.clone());
+    let before = (
+        game.tags.clone(),
+        game.genres.clone(),
+        game.custom_genres.clone(),
+        game.short_description.clone(),
+    );
     let code = lang.code();
 
     if details.listed {
@@ -818,13 +839,23 @@ fn apply_details(game: &mut DetectedGame, details: &SteamAppDetails, lang: Lang)
             }
         }
     } else if needs_translation(game, lang) {
-        let (translated, _) = translate_known_steam_genres(&game.genres, lang);
+        let (translated, _) = translate_known_genres(&game.genres, lang);
         game.genres = translated;
         game.metadata_lang = Some(code.to_string());
     }
+    if !game.custom_genres.is_empty() {
+        let (translated_custom, _) = translate_known_genres(&game.custom_genres, lang);
+        game.custom_genres = dedup_custom_genres_against(&translated_custom, &game.genres);
+    }
     // An answer settles the matter, even "the store does not list it": no asking forever
     game.tags_lang = Some(code.to_string());
-    before != (game.tags.clone(), game.genres.clone(), game.short_description.clone())
+    before
+        != (
+            game.tags.clone(),
+            game.genres.clone(),
+            game.custom_genres.clone(),
+            game.short_description.clone(),
+        )
 }
 
 #[cfg(test)]
@@ -1624,12 +1655,18 @@ mod tests {
     }
 
     #[test]
-    fn cached_genre_translation_heals_poisoned_rows_and_respects_manual_overrides() {
+    fn cached_genre_translation_heals_poisoned_rows_and_translates_user_categories() {
         let mut db = LibraryDb::open_in_memory().unwrap();
 
-        // Normal game switched back from Russian to Italian
+        // Normal game switched back from Russian to Italian, with user-added custom genres
         let mut normal = installed("620", "Portal 2");
         normal.genres = vec!["Экшены".into(), "Приключенческие игры".into(), "Инди".into()];
+        normal.custom_genres = vec![
+            "Action".into(),            // duplicate of "Экшены" across languages -> dropped
+            "Шутер".into(),             // known sub-genre -> translated
+            "Пиксельная графика".into(), // known sub-genre -> translated
+            "Da rigiocare".into(),      // personal label -> preserved verbatim
+        ];
         normal.metadata_lang = Some("ru".into());
         db.upsert_game(&normal).unwrap();
 
@@ -1640,18 +1677,30 @@ mod tests {
         poisoned.metadata_lang = Some("it".into());
         db.upsert_game(&poisoned).unwrap();
 
-        // User-edited game: must never be touched
+        // User-edited game (or custom cover): known genres translate to prevent sidebar duplicates,
+        // while personal labels, custom description and override flag stay untouched
         let mut manual = installed("1145360", "Hades");
         manual.custom_override = true;
-        manual.genres = vec!["Экшены".into()];
-        manual.metadata_lang = Some("ru".into());
+        manual.short_description = Some("La mia descrizione.".into());
+        manual.genres = vec![
+            "Экшены".into(),
+            "Ролевые игры".into(),
+            "Шутер".into(),
+            "Preferiti miei".into(),
+        ];
+        manual.metadata_lang = Some("it".into());
         db.upsert_game(&manual).unwrap();
 
         let changed = translate_cached_genres(&mut db, Lang::It);
-        assert_eq!(changed.len(), 2);
+        assert_eq!(changed.len(), 3);
 
         let normal = db.get_game("steam:620").unwrap().unwrap();
         assert_eq!(normal.genres, ["Azione", "Avventura", "Indie"]);
+        assert_eq!(
+            normal.custom_genres,
+            ["Sparatutto", "Pixel Art", "Da rigiocare"],
+            "known custom genres translate, duplicates against store genres drop, personal labels stay"
+        );
         assert_eq!(normal.metadata_lang.as_deref(), Some("ru"), "kept so Steam still refreshes description");
 
         let poisoned = db.get_game("steam:570").unwrap().unwrap();
@@ -1659,7 +1708,35 @@ mod tests {
         assert_eq!(poisoned.metadata_lang, None, "cleared so Russian description gets refreshed");
 
         let manual = db.get_game("steam:1145360").unwrap().unwrap();
-        assert_eq!(manual.genres, ["Экшены"], "manual overrides are preserved");
+        assert_eq!(manual.genres, ["Azione", "GDR", "Sparatutto", "Preferiti miei"]);
+        assert!(manual.custom_override, "override flag stays set");
+        assert_eq!(manual.short_description.as_deref(), Some("La mia descrizione."));
+        assert_eq!(manual.metadata_lang.as_deref(), Some("it"), "manual rows are not flagged for Steam overwrite");
+
+        // Cycle through English -> Spanish -> Russian -> Italian and confirm zero cross-language duplicates
+        let mut mmo = installed("2344520", "Diablo IV");
+        mmo.genres = vec!["Massively Multiplayer".into(), "Action".into()];
+        mmo.custom_genres = vec![
+            "Multigiocatore di massa".into(),
+            "GDR".into(),
+            "Sparatutto".into(),
+            "Pixel Art".into(),
+            "Co-op serale".into(),
+        ];
+        db.upsert_game(&mmo).unwrap();
+
+        let expected: &[(Lang, &[&str], &[&str])] = &[
+            (Lang::En, &["Massively Multiplayer", "Action"], &["RPG", "Shooter", "Pixel Art", "Co-op serale"]),
+            (Lang::Es, &["Multijugador masivo", "Acción"], &["Rol", "Disparos", "Pixel Art", "Co-op serale"]),
+            (Lang::Ru, &["Многопользовательские игры", "Экшены"], &["Ролевые игры", "Шутер", "Пиксельная графика", "Co-op serale"]),
+            (Lang::It, &["Multigiocatore di massa", "Azione"], &["GDR", "Sparatutto", "Pixel Art", "Co-op serale"]),
+        ];
+        for &(lang, want_genres, want_custom) in expected {
+            translate_cached_genres(&mut db, lang);
+            let row = db.get_game("steam:2344520").unwrap().unwrap();
+            assert_eq!(row.genres, want_genres, "genres in {lang:?}");
+            assert_eq!(row.custom_genres, want_custom, "custom_genres in {lang:?}");
+        }
     }
 
     #[test]

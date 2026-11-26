@@ -2,6 +2,15 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
+## Unreleased
+
+- **Translated user categories with no cross-language duplicates.** Genres added by hand from a
+  game's sheet or edited manually in *Edit game* now follow interface language switches across
+  Italian, English, Spanish and Russian (covering official Steam genres, aliases and common
+  sub-genres such as *Shooter* / *Sparatutto* or *Pixel Art* / *Пиксельная графика*), normalize
+  into the active language on input, and deduplicate against store genres across languages while
+  keeping personal labels untouched.
+
 ## 0.3.1
 
 - **Consistent genres, tags and descriptions across language switches.** Switching the interface

@@ -282,6 +282,872 @@ const STEAM_EXTRA_STORE_GENRES: &[[&str; 4]] = &[
     ["Contenuti sessuali", "Sexual Content", "Contenido sexual", "Сексуальный контент"],
 ];
 
+/// Common user-typed or Steam community tag spellings that map to an official Steam store
+/// genre (identified by its English store name). Kept separate from [`translate_steam_genre`]
+/// so automatic Steam sync only treats official store strings as Steam genres while user
+/// categories and aliases normalize to the exact same store spelling.
+const STEAM_GENRE_USER_ALIASES: &[(&str, &[&str])] = &[
+    ("Action", &["Accion", "Экшен", "Экшн"]),
+    ("Adventure", &["Приключение", "Приключения"]),
+    (
+        "RPG",
+        &[
+            "Giochi di ruolo",
+            "Gioco di ruolo",
+            "Role-Playing",
+            "Role Playing",
+            "Roleplaying",
+            "Juego de rol",
+            "Juegos de rol",
+            "Ролевая игра",
+            "Ролевая",
+            "РПГ",
+        ],
+    ),
+    ("Strategy", &["Strategico", "Strategici", "Стратегия"]),
+    (
+        "Simulation",
+        &[
+            "Simulatore",
+            "Simulador",
+            "Simulación",
+            "Simulacion",
+            "Симулятор",
+        ],
+    ),
+    ("Casual", &["Казуальная игра", "Казуальная"]),
+    ("Indie", &["Indipendente", "Independiente"]),
+    ("Racing", &["Automobilismo", "Гонка"]),
+    (
+        "Sports",
+        &[
+            "Sportivo",
+            "Sportivi",
+            "Deporte",
+            "Спортивная игра",
+            "Спортивные игры",
+            "Спортивные",
+        ],
+    ),
+    (
+        "Massively Multiplayer",
+        &["MMO", "Multigiocatore online di massa", "ММО"],
+    ),
+    ("Free To Play", &["F2P", "Gratuito", "Gratis"]),
+    ("Utilities", &["Utilita"]),
+    ("Education", &["Educativo", "Educacion", "Educational", "Образовательная"]),
+    ("Animation & Modeling", &["Animacion y modelado"]),
+    ("Design & Illustration", &["Diseno e ilustracion"]),
+    ("Audio Production", &["Produccion de audio"]),
+    ("Video Production", &["Produccion de video"]),
+    ("Photo Editing", &["Edicion fotografica"]),
+    ("Web Publishing", &["Publicacion web"]),
+    ("Nudity", &["Nudita"]),
+];
+
+/// Common gaming genres and sub-genres that users add by hand or edit manually, in
+/// `[It, En, Es, Ru]` order alongside common alternate spellings/aliases.
+const COMMON_USER_GENRES: &[([&str; 4], &[&str])] = &[
+    // Shooters & combat
+    (
+        ["Sparatutto", "Shooter", "Disparos", "Шутер"],
+        &["Шутеры", "Juego de disparos", "Juegos de disparos"],
+    ),
+    (
+        [
+            "Sparatutto in prima persona",
+            "FPS",
+            "FPS",
+            "Шутер от первого лица",
+        ],
+        &[
+            "First-Person Shooter",
+            "First Person Shooter",
+            "Disparos en primera persona",
+        ],
+    ),
+    (
+        [
+            "Sparatutto in terza persona",
+            "Third-Person Shooter",
+            "Disparos en tercera persona",
+            "Шутер от третьего лица",
+        ],
+        &["TPS", "Third Person Shooter"],
+    ),
+    (
+        [
+            "Sparatutto tattico",
+            "Tactical Shooter",
+            "Disparos táctico",
+            "Тактический шутер",
+        ],
+        &["Disparos tactico"],
+    ),
+    (
+        [
+            "Sparatutto arena",
+            "Arena Shooter",
+            "Disparos en arena",
+            "Арена-шутер",
+        ],
+        &[],
+    ),
+    (
+        [
+            "Sparatutto a scorrimento",
+            "Shoot 'Em Up",
+            "Shoot 'Em Up",
+            "Shoot 'em up",
+        ],
+        &["Shmup", "Shoot em up"],
+    ),
+    (
+        ["Looter Shooter", "Looter Shooter", "Looter Shooter", "Лутер-шутер"],
+        &[],
+    ),
+    (
+        [
+            "Extraction Shooter",
+            "Extraction Shooter",
+            "Extraction Shooter",
+            "Экстракшн-шутер",
+        ],
+        &[],
+    ),
+    (
+        ["Boomer Shooter", "Boomer Shooter", "Boomer Shooter", "Бумер-шутер"],
+        &[],
+    ),
+    (
+        ["Hero Shooter", "Hero Shooter", "Hero Shooter", "Геройский шутер"],
+        &[],
+    ),
+    (
+        ["Bullet Hell", "Bullet Hell", "Bullet Hell", "Пулевой ад"],
+        &["Danmaku"],
+    ),
+    (
+        ["Picchiaduro", "Fighting", "Lucha", "Файтинг"],
+        &["Picchiaduro a incontri", "Lotta", "Файтинги"],
+    ),
+    (
+        ["Picchiaduro a scorrimento", "Beat 'em up", "Beat 'em up", "Beat 'em up"],
+        &["Beat em up", "Brawler"],
+    ),
+    (
+        ["Hack and Slash", "Hack and Slash", "Hack and Slash", "Слэшер"],
+        &["Hack & Slash", "Slasher", "Хак-энд-слэш"],
+    ),
+    (
+        ["Battle Royale", "Battle Royale", "Battle Royale", "Королевская битва"],
+        &["Батл-рояль"],
+    ),
+    // Action-adventure, platformers & exploration
+    (
+        [
+            "Azione e avventura",
+            "Action-Adventure",
+            "Acción y aventura",
+            "Приключенческий экшен",
+        ],
+        &["Action Adventure", "Accion y aventura", "Azione-Avventura"],
+    ),
+    (
+        ["Platform", "Platformer", "Plataformas", "Платформер"],
+        &["Piattaforme", "Платформеры"],
+    ),
+    (
+        ["Metroidvania", "Metroidvania", "Metroidvania", "Метроидвания"],
+        &[],
+    ),
+    (
+        ["Stealth", "Stealth", "Sigilo", "Стелс"],
+        &["Furtivo", "Furtività", "Furtivita", "Infiltrazione"],
+    ),
+    (
+        ["Mondo aperto", "Open World", "Mundo abierto", "Открытый мир"],
+        &["Open-World"],
+    ),
+    (["Sandbox", "Sandbox", "Sandbox", "Песочница"], &[]),
+    (
+        ["Sopravvivenza", "Survival", "Supervivencia", "Выживание"],
+        &[],
+    ),
+    (
+        ["Esplorazione", "Exploration", "Exploración", "Исследование"],
+        &["Exploracion"],
+    ),
+    (["Parkour", "Parkour", "Parkour", "Паркур"], &[]),
+    // RPG & roguelikes
+    (
+        ["GDR d'azione", "Action RPG", "Rol de acción", "Ролевой экшен"],
+        &[
+            "ARPG",
+            "Action-RPG",
+            "GDR azione",
+            "Gioco di ruolo d'azione",
+            "Giochi di ruolo d'azione",
+            "Rol de accion",
+            "Экшен-RPG",
+        ],
+    ),
+    (
+        ["JRPG", "JRPG", "JRPG", "Японская ролевая игра"],
+        &["GDR giapponese", "Rol japonés", "Rol japones"],
+    ),
+    (["MMORPG", "MMORPG", "MMORPG", "ММОРПГ"], &[]),
+    (
+        [
+            "GDR tattico",
+            "Tactical RPG",
+            "Rol táctico",
+            "Тактическая ролевая игра",
+        ],
+        &["TRPG", "SRPG", "Rol tactico"],
+    ),
+    (
+        [
+            "GDR a turni",
+            "Turn-Based RPG",
+            "Rol por turnos",
+            "Пошаговая ролевая игра",
+        ],
+        &["Turn Based RPG"],
+    ),
+    (
+        ["CRPG", "CRPG", "CRPG", "Классическая ролевая игра"],
+        &["GDR classico", "Classic RPG", "Rol clásico", "Rol clasico"],
+    ),
+    (
+        ["Roguelike", "Roguelike", "Roguelike", "Рогалик"],
+        &["Rogue-like", "Роуглайк"],
+    ),
+    (
+        ["Roguelite", "Roguelite", "Roguelite", "Упрощённый рогалик"],
+        &["Rogue-lite", "Роуглайт", "Упрощенный рогалик"],
+    ),
+    (
+        [
+            "Azione roguelike",
+            "Action Roguelike",
+            "Roguelike de acción",
+            "Экшен-рогалик",
+        ],
+        &["Roguelike d'azione", "Roguelike de accion"],
+    ),
+    (
+        [
+            "Souls-like",
+            "Souls-like",
+            "Tipo Dark Souls",
+            "Похожа на Dark Souls",
+        ],
+        &["Soulslike", "Stile Souls", "Соулслайк"],
+    ),
+    (
+        [
+            "Dungeon Crawler",
+            "Dungeon Crawler",
+            "Exploración de mazmorras",
+            "Подземелья",
+        ],
+        &["Exploracion de mazmorras"],
+    ),
+    // Strategy, tactics, management & simulation sub-genres
+    (
+        [
+            "Strategia in tempo reale",
+            "RTS",
+            "Estrategia en tiempo real",
+            "Стратегия в реальном времени",
+        ],
+        &["Real-Time Strategy", "Real Time Strategy", "РТС"],
+    ),
+    (
+        [
+            "Strategia a turni",
+            "Turn-Based Strategy",
+            "Estrategia por turnos",
+            "Пошаговая стратегия",
+        ],
+        &["Turn Based Strategy", "TBS"],
+    ),
+    (
+        ["Tattico", "Tactical", "Táctico", "Тактика"],
+        &["Tattica", "Tactico", "Tactics", "Тактическая игра"],
+    ),
+    (
+        ["A turni", "Turn-Based", "Por turnos", "Пошаговая"],
+        &["Turn Based"],
+    ),
+    (
+        [
+            "Combattimento a turni",
+            "Turn-Based Combat",
+            "Combate por turnos",
+            "Пошаговые сражения",
+        ],
+        &["Turn Based Combat"],
+    ),
+    (
+        [
+            "Tower Defense",
+            "Tower Defense",
+            "Defensa de torres",
+            "Башенная защита",
+        ],
+        &["Difesa della torre", "Защита башен"],
+    ),
+    (["MOBA", "MOBA", "MOBA", "МОБА"], &[]),
+    (
+        ["Auto Battler", "Auto Battler", "Combate automático", "Автобаттлер"],
+        &["Combate automatico", "Auto-Battler", "Autobattler"],
+    ),
+    (
+        [
+            "Grande strategia",
+            "Grand Strategy",
+            "Gran estrategia",
+            "Глобальная стратегия",
+        ],
+        &[],
+    ),
+    (
+        ["Gestionale", "Management", "Gestión", "Менеджмент"],
+        &["Gestion", "Gestione", "Управление"],
+    ),
+    (
+        [
+            "Costruzione di città",
+            "City Builder",
+            "Construcción de ciudades",
+            "Градостроение",
+        ],
+        &[
+            "Costruzione di citta",
+            "Construccion de ciudades",
+            "City-Builder",
+            "Градостроительный симулятор",
+        ],
+    ),
+    (
+        ["Costruzione", "Building", "Construcción", "Строительство"],
+        &["Construccion"],
+    ),
+    (
+        ["Creazione", "Crafting", "Fabricación", "Крафтинг"],
+        &["Fabricacion", "Крафт"],
+    ),
+    (
+        ["Automazione", "Automation", "Automatización", "Автоматизация"],
+        &["Automatizacion"],
+    ),
+    (
+        [
+            "Simulatore di colonie",
+            "Colony Sim",
+            "Simulador de colonias",
+            "Симулятор колонии",
+        ],
+        &["Colonia", "Gestione colonie"],
+    ),
+    (
+        [
+            "Agricoltura",
+            "Farming Sim",
+            "Simulador agrícola",
+            "Симулятор фермы",
+        ],
+        &["Simulatore agricolo", "Farming", "Simulador agricola", "Фермерство"],
+    ),
+    (
+        [
+            "Simulatore di vita",
+            "Life Sim",
+            "Simulador de vida",
+            "Симулятор жизни",
+        ],
+        &["Simulazione di vita"],
+    ),
+    (
+        [
+            "Simulatore immersivo",
+            "Immersive Sim",
+            "Simulador inmersivo",
+            "Иммерсивный симулятор",
+        ],
+        &[],
+    ),
+    (
+        ["Volo", "Flight", "Vuelo", "Полёты"],
+        &[
+            "Simulatore di volo",
+            "Flight Sim",
+            "Flight Simulator",
+            "Полеты",
+            "Авиасимулятор",
+        ],
+    ),
+    (
+        ["Guida", "Driving", "Conducción", "Вождение"],
+        &["Simulatore di guida", "Conduccion"],
+    ),
+    // Puzzle, cards, board & party
+    (
+        ["Rompicapo", "Puzzle", "Puzles", "Головоломка"],
+        &["Puzzle Game", "Puzle", "Enigmi", "Головоломки"],
+    ),
+    (
+        [
+            "Rompicapo platform",
+            "Puzzle Platformer",
+            "Puzles y plataformas",
+            "Головоломка-платформер",
+        ],
+        &["Puzzle-Platformer"],
+    ),
+    (
+        ["Gioco di carte", "Card Game", "Juego de cartas", "Карточная игра"],
+        &["Carte", "Cards", "Cartas", "Карточные игры", "Карты"],
+    ),
+    (
+        [
+            "Costruzione di mazzi",
+            "Deckbuilding",
+            "Construcción de mazos",
+            "Построение колоды",
+        ],
+        &["Deckbuilder", "Deck-building", "Construccion de mazos", "Колодострой"],
+    ),
+    (
+        ["Gioco da tavolo", "Board Game", "Juego de mesa", "Настольная игра"],
+        &["Da tavolo", "Tabletop", "Juegos de mesa", "Настольные игры", "Настолка"],
+    ),
+    (["Scacchi", "Chess", "Ajedrez", "Шахматы"], &[]),
+    (
+        ["Giochi di società", "Party Game", "Juegos de fiesta", "Для вечеринок"],
+        &["Party", "Giochi di societa", "Juego de fiesta"],
+    ),
+    (
+        ["Quiz", "Trivia", "Preguntas y respuestas", "Викторина"],
+        &["Trivial", "Викторины"],
+    ),
+    (
+        [
+            "Oggetti nascosti",
+            "Hidden Object",
+            "Objetos ocultos",
+            "Поиск предметов",
+        ],
+        &[],
+    ),
+    (["Match 3", "Match 3", "Combina 3", "Три в ряд"], &["Match-3"]),
+    (
+        ["Escape Room", "Escape Room", "Escape Room", "Побег из комнаты"],
+        &["Stanza della fuga"],
+    ),
+    // Horror, narrative, mystery & adventure sub-genres
+    (
+        ["Horror", "Horror", "Terror", "Хоррор"],
+        &["Orrore", "Ужасы"],
+    ),
+    (
+        [
+            "Survival Horror",
+            "Survival Horror",
+            "Terror y supervivencia",
+            "Хоррор на выживание",
+        ],
+        &["Horror di sopravvivenza"],
+    ),
+    (
+        [
+            "Horror psicologico",
+            "Psychological Horror",
+            "Terror psicológico",
+            "Психологический хоррор",
+        ],
+        &["Terror psicologico"],
+    ),
+    (
+        ["Romanzo visivo", "Visual Novel", "Novela visual", "Визуальная новелла"],
+        &["Visual-Novel", "Визуальные новеллы"],
+    ),
+    (
+        ["Punta e clicca", "Point & Click", "Apuntar y clicar", "Point & Click"],
+        &["Point and Click", "Punta e clic"],
+    ),
+    (
+        [
+            "Avventura grafica",
+            "Graphic Adventure",
+            "Aventura gráfica",
+            "Графическое приключение",
+        ],
+        &["Aventura grafica"],
+    ),
+    (
+        ["Avventura testuale", "Text-Based", "Basado en texto", "Текстовая"],
+        &["Text Adventure", "Aventura de texto", "Текстовый квест"],
+    ),
+    (
+        ["Narrativo", "Story Rich", "Buena trama", "Глубокий сюжет"],
+        &[
+            "Narrativa",
+            "Storia profonda",
+            "Trama ricca",
+            "Narrative",
+            "Сюжетный",
+            "Сюжетная",
+            "Сюжетные",
+        ],
+    ),
+    (
+        [
+            "Fiction interattiva",
+            "Interactive Fiction",
+            "Ficción interactiva",
+            "Интерактивная литература",
+        ],
+        &["Ficcion interactiva"],
+    ),
+    (
+        [
+            "Simulatore di camminata",
+            "Walking Simulator",
+            "Simulador de caminatas",
+            "Симулятор ходьбы",
+        ],
+        &[],
+    ),
+    (
+        [
+            "Simulatore di appuntamenti",
+            "Dating Sim",
+            "Simulador de citas",
+            "Симулятор свиданий",
+        ],
+        &[],
+    ),
+    (["Mistero", "Mystery", "Misterio", "Тайна"], &[]),
+    (
+        ["Investigativo", "Detective", "Detectives", "Детектив"],
+        &["Investigazione", "Giallo"],
+    ),
+    (["Thriller", "Thriller", "Suspense", "Триллер"], &[]),
+    (
+        [
+            "Scelte importanti",
+            "Choices Matter",
+            "Las elecciones importan",
+            "Выбор имеет значение",
+        ],
+        &[],
+    ),
+    (
+        [
+            "Finali multipli",
+            "Multiple Endings",
+            "Finales múltiples",
+            "Несколько концовок",
+        ],
+        &["Finales multiples"],
+    ),
+    // Art styles, perspectives & tech
+    (
+        ["Pixel Art", "Pixel Art", "Pixel Art", "Пиксельная графика"],
+        &[
+            "Pixel Graphics",
+            "Grafica pixel",
+            "Gráficos pixelados",
+            "Graficos pixelados",
+            "Пиксель-арт",
+            "Пиксельная",
+        ],
+    ),
+    (["Retro", "Retro", "Retro", "Ретро"], &["Retrò"]),
+    (
+        ["Arcade", "Arcade", "Arcade", "Аркада"],
+        &["Аркады", "Аркадная"],
+    ),
+    (["Anime", "Anime", "Anime", "Аниме"], &[]),
+    (
+        ["Isometrico", "Isometric", "Isométrico", "Изометрия"],
+        &["Isometrica", "Изометрическая"],
+    ),
+    (
+        ["Prima persona", "First-Person", "Primera persona", "От первого лица"],
+        &["First Person"],
+    ),
+    (
+        ["Terza persona", "Third Person", "Tercera persona", "От третьего лица"],
+        &["Third-Person"],
+    ),
+    (
+        ["Visuale dall'alto", "Top-Down", "Vista cenital", "Вид сверху"],
+        &["Top Down"],
+    ),
+    (
+        [
+            "Scorrimento laterale",
+            "Side Scroller",
+            "Desplazamiento lateral",
+            "Сайд-скроллер",
+        ],
+        &["Side-Scroller"],
+    ),
+    (
+        ["Realtà virtuale", "VR", "RV", "VR"],
+        &[
+            "Realta virtuale",
+            "Virtual Reality",
+            "Realidad virtual",
+            "Виртуальная реальность",
+        ],
+    ),
+    (["Fisica", "Physics", "Física", "Физика"], &[]),
+    // Themes & settings
+    (
+        ["Fantascienza", "Sci-Fi", "Ciencia ficción", "Научная фантастика"],
+        &[
+            "Sci Fi",
+            "Science Fiction",
+            "Ciencia ficcion",
+            "Фантастика",
+            "Сай-фай",
+        ],
+    ),
+    (
+        ["Fantasy", "Fantasy", "Fantasía", "Фэнтези"],
+        &["Fantasia"],
+    ),
+    (
+        ["Dark Fantasy", "Dark Fantasy", "Fantasía oscura", "Тёмное фэнтези"],
+        &["Fantasy oscuro", "Fantasia oscura", "Темное фэнтези"],
+    ),
+    (["Cyberpunk", "Cyberpunk", "Ciberpunk", "Киберпанк"], &[]),
+    (["Steampunk", "Steampunk", "Steampunk", "Стимпанк"], &[]),
+    (
+        [
+            "Post-apocalittico",
+            "Post-apocalyptic",
+            "Posapocalíptico",
+            "Постапокалипсис",
+        ],
+        &[
+            "Post apocalittico",
+            "Postapocalittico",
+            "Post apocalyptic",
+            "Posapocaliptico",
+            "Postapocalíptico",
+            "Postapocaliptico",
+        ],
+    ),
+    (["Zombie", "Zombies", "Zombis", "Зомби"], &["Zombi"]),
+    (["Medievale", "Medieval", "Medieval", "Средневековье"], &[]),
+    (
+        ["Spazio", "Space", "Espacio", "Космос"],
+        &["Spaziale", "Espacial", "Космическая"],
+    ),
+    (["Guerra", "War", "Guerra", "Война"], &[]),
+    (
+        ["Militare", "Military", "Militar", "Военная"],
+        &["Военные действия"],
+    ),
+    (
+        ["Storico", "Historical", "Histórico", "Историческая"],
+        &["Storica", "Historico", "Исторический"],
+    ),
+    (
+        ["Western", "Western", "Oeste", "Вестерн"],
+        &["Far West", "Дикий Запад"],
+    ),
+    (["Pirati", "Pirates", "Piratas", "Пираты"], &[]),
+    (["Mitologia", "Mythology", "Mitología", "Мифология"], &[]),
+    (
+        ["Supereroi", "Superhero", "Superhéroes", "Супергерои"],
+        &["Superheroes"],
+    ),
+    (["Mecha", "Mechs", "Mechas", "Мехи"], &["Mech"]),
+    (["Dinosauri", "Dinosaurs", "Dinosaurios", "Динозавры"], &[]),
+    (["Vampiri", "Vampire", "Vampiros", "Вампиры"], &["Vampires"]),
+    (["Ninja", "Ninja", "Ninjas", "Ниндзя"], &[]),
+    (
+        ["Samurai", "Samurai", "Samuráis", "Самураи"],
+        &["Samurais"],
+    ),
+    (
+        ["Gotico", "Gothic", "Gótico", "Готика"],
+        &["Gotica"],
+    ),
+    (["Noir", "Noir", "Noir", "Нуар"], &[]),
+    (
+        ["Commedia", "Comedy", "Comedia", "Комедия"],
+        &["Comico", "Humor", "Юмор"],
+    ),
+    // Music, lifestyle, sports & casual sub-genres
+    (
+        ["Musicale", "Music", "Música", "Музыка"],
+        &["Musica", "Музыкальная"],
+    ),
+    (
+        ["Ritmo", "Rhythm", "Ritmo", "Ритм-игра"],
+        &["Ritmico", "Rhythm Game", "Ритм"],
+    ),
+    (
+        ["Rilassante", "Relaxing", "Relajante", "Расслабляющая"],
+        &[],
+    ),
+    (["Accogliente", "Cozy", "Acogedor", "Уютная"], &[]),
+    (
+        [
+            "Per famiglie",
+            "Family Friendly",
+            "Para toda la familia",
+            "Для всей семьи",
+        ],
+        &["Famiglia", "Family", "Familia", "Семейная"],
+    ),
+    (["Clicker", "Clicker", "Clicker", "Кликер"], &[]),
+    (
+        ["Incrementale", "Incremental", "Incremental", "Инкрементальная"],
+        &[],
+    ),
+    (["Gacha", "Gacha", "Gacha", "Гача"], &[]),
+    (["Pesca", "Fishing", "Pesca", "Рыбалка"], &[]),
+    (["Caccia", "Hunting", "Caza", "Охота"], &[]),
+    (
+        ["Cucina", "Cooking", "Cocina", "Кулинария"],
+        &["Готовка"],
+    ),
+    (
+        ["Calcio", "Football", "Fútbol", "Футбол"],
+        &["Soccer", "Futbol"],
+    ),
+    (
+        ["Basket", "Basketball", "Baloncesto", "Баскетбол"],
+        &["Pallacanestro"],
+    ),
+    (["Tennis", "Tennis", "Tenis", "Теннис"], &[]),
+    (["Golf", "Golf", "Golf", "Гольф"], &[]),
+    (
+        [
+            "Collezionismo",
+            "Collectathon",
+            "Coleccionismo",
+            "Коллекционирование",
+        ],
+        &[],
+    ),
+    (
+        [
+            "Cattura mostri",
+            "Creature Collector",
+            "Coleccionista de criaturas",
+            "Коллекционирование существ",
+        ],
+        &["Monster Taming", "Monster Catching"],
+    ),
+    (
+        ["Classico", "Classic", "Clásico", "Классика"],
+        &["Clasico", "Classici", "Классическая"],
+    ),
+    (
+        ["Difficile", "Difficult", "Difícil", "Сложная"],
+        &["Dificil"],
+    ),
+    (["Hardcore", "Hardcore", "Hardcore", "Хардкор"], &[]),
+    (
+        ["Atmosferico", "Atmospheric", "Atmosférico", "Атмосферная"],
+        &["Atmosferica", "Атмосферный"],
+    ),
+    (
+        ["Realistico", "Realistic", "Realista", "Реализм"],
+        &["Realistica", "Реалистичная"],
+    ),
+    (
+        ["Minimalista", "Minimalist", "Minimalista", "Минимализм"],
+        &[],
+    ),
+    (["Astratto", "Abstract", "Abstracto", "Абстрактная"], &[]),
+    (["Surreale", "Surreal", "Surrealista", "Сюрреализм"], &[]),
+    // Player modes & multiplayer
+    (
+        [
+            "Giocatore singolo",
+            "Singleplayer",
+            "Un jugador",
+            "Для одного игрока",
+        ],
+        &["Single-player", "Single Player", "Одиночная", "Одиночная игра"],
+    ),
+    (
+        [
+            "Multigiocatore",
+            "Multiplayer",
+            "Multijugador",
+            "Мультиплеер",
+        ],
+        &[
+            "Multi-player",
+            "Multi Player",
+            "Для нескольких игроков",
+            "Сетевая игра",
+        ],
+    ),
+    (
+        ["Cooperativo", "Co-op", "Cooperativo", "Кооператив"],
+        &["Coop", "Кооперативная", "Кооперативная игра"],
+    ),
+    (
+        [
+            "Cooperativo locale",
+            "Local Co-Op",
+            "Cooperativo local",
+            "Локальный кооператив",
+        ],
+        &["Local Coop", "Co-op locale", "Coop locale"],
+    ),
+    (
+        [
+            "Cooperativo online",
+            "Online Co-Op",
+            "Cooperativo en línea",
+            "Сетевой кооператив",
+        ],
+        &["Online Coop", "Co-op online", "Coop online", "Cooperativo en linea"],
+    ),
+    (
+        [
+            "Schermo condiviso",
+            "Split Screen",
+            "Pantalla dividida",
+            "Разделённый экран",
+        ],
+        &["Split-Screen", "Разделенный экран"],
+    ),
+    (
+        ["Competitivo", "Competitive", "Competitivo", "Соревновательная"],
+        &["Соревновательный"],
+    ),
+    (["eSports", "eSports", "eSports", "Киберспорт"], &[]),
+    (
+        ["PvP", "PvP", "JcJ", "Игрок против игрока"],
+        &["Player vs Player"],
+    ),
+    (["PvE", "PvE", "JcE", "Игрок против ИИ"], &[]),
+    (
+        [
+            "Multipiattaforma",
+            "Cross-Platform",
+            "Multiplataforma",
+            "Кроссплатформенная игра",
+        ],
+        &["Cross Platform", "Crossplay", "Cross-play"],
+    ),
+];
+
 fn in_language(names: &[&'static str; 4], lang: Lang) -> &'static str {
     match lang {
         Lang::It => names[0],
@@ -331,6 +1197,46 @@ pub fn translate_steam_genre(genre: &str, lang: Lang) -> Option<&'static str> {
     None
 }
 
+/// Maps any known genre — official Steam store genres, their common user/tag aliases, or
+/// common gaming sub-genres — from any of Kanso's four languages into its canonical spelling
+/// in `lang`. Returns `None` for personal custom labels outside the built-in dictionary.
+pub fn translate_genre(genre: &str, lang: Lang) -> Option<&'static str> {
+    let trimmed = genre.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(steam) = translate_steam_genre(trimmed, lang) {
+        return Some(steam);
+    }
+    let lower = trimmed.to_lowercase();
+    for (canonical_en, aliases) in STEAM_GENRE_USER_ALIASES {
+        if aliases.iter().any(|alias| alias.to_lowercase() == lower) {
+            return translate_steam_genre(canonical_en, lang);
+        }
+    }
+    for (names, aliases) in COMMON_USER_GENRES {
+        if matches_genre_names(&lower, names)
+            || aliases.iter().any(|alias| alias.to_lowercase() == lower)
+        {
+            return Some(in_language(names, lang));
+        }
+    }
+    None
+}
+
+/// Language-independent identity of a genre label: known genres across any supported language
+/// or alias collapse to the same key, while personal custom labels fall back to their trimmed
+/// lowercase spelling.
+pub fn canonical_genre_key(genre: &str) -> String {
+    let trimmed = genre.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    translate_genre(trimmed, Lang::En)
+        .map(str::to_lowercase)
+        .unwrap_or_else(|| trimmed.to_lowercase())
+}
+
 /// Translates `genres` into `lang` only if non-empty and every entry is a known official Steam
 /// store genre. Duplicates created by normalization are removed while preserving order.
 pub fn translate_all_steam_genres(genres: &[String], lang: Lang) -> Option<Vec<String>> {
@@ -347,21 +1253,45 @@ pub fn translate_all_steam_genres(genres: &[String], lang: Lang) -> Option<Vec<S
     Some(out)
 }
 
-/// Translates every known official Steam genre in `genres` into `lang`, keeping unrecognized
-/// entries untouched. Returns the updated list and whether anything changed.
-pub fn translate_known_steam_genres(genres: &[String], lang: Lang) -> (Vec<String>, bool) {
+/// Translates every known genre (official Steam store genres, aliases, and common gaming
+/// sub-genres) in `genres` into `lang`, keeping personal custom labels untouched and
+/// collapsing cross-language duplicates while preserving order. Returns the updated list and
+/// whether anything changed.
+pub fn translate_known_genres(genres: &[String], lang: Lang) -> (Vec<String>, bool) {
     let mut out = Vec::with_capacity(genres.len());
+    let mut seen = std::collections::HashSet::with_capacity(genres.len());
     for raw in genres {
-        let next = translate_steam_genre(raw, lang)
+        let next = translate_genre(raw, lang)
             .map(ToString::to_string)
             .unwrap_or_else(|| raw.clone());
-        let next_lower = next.to_lowercase();
-        if !out.iter().any(|existing: &String| existing.to_lowercase() == next_lower) {
+        let key = canonical_genre_key(&next);
+        if !key.is_empty() && seen.insert(key) {
             out.push(next);
         }
     }
     let changed = out != genres;
     (out, changed)
+}
+
+/// Returns `custom_genres` without any entry that duplicates `store_genres` or an earlier
+/// custom entry (even if spelled in a different language or via an alias).
+pub fn dedup_custom_genres_against(
+    custom_genres: &[String],
+    store_genres: &[String],
+) -> Vec<String> {
+    let mut seen: std::collections::HashSet<String> = store_genres
+        .iter()
+        .map(|g| canonical_genre_key(g))
+        .filter(|k| !k.is_empty())
+        .collect();
+    custom_genres
+        .iter()
+        .filter(|g| {
+            let key = canonical_genre_key(g);
+            !key.is_empty() && seen.insert(key)
+        })
+        .cloned()
+        .collect()
 }
 
 /// Translates only the entries of `genres` that are recognized official Steam genres, dropping
@@ -1349,7 +2279,7 @@ impl MetadataClient {
                             game.genres = meta.genres;
                         } else if !game.genres.is_empty() {
                             let (translated, _) =
-                                translate_known_steam_genres(&game.genres, self.lang);
+                                translate_known_genres(&game.genres, self.lang);
                             game.genres = translated;
                         }
                     } else {
@@ -1384,10 +2314,10 @@ impl MetadataClient {
                         game.app_type = Some("unlisted".to_string());
                     }
                     if translate {
-                        // Nothing better exists on Steam: translate any known Steam genres so
+                        // Nothing better exists on Steam: translate any known genres so
                         // they never stay in the previous language, then stop asking.
                         let (translated, _) =
-                            translate_known_steam_genres(&game.genres, self.lang);
+                            translate_known_genres(&game.genres, self.lang);
                         game.genres = translated;
                         game.metadata_lang = Some(lang_code.to_string());
                     }
@@ -2990,5 +3920,157 @@ pub(crate) mod tests {
         italian.enrich_game_automatically(&mut delisted, None, covers_dir.path());
         assert_eq!(delisted.genres, vec!["Azione", "Avventura"]);
         assert_eq!(delisted.metadata_lang.as_deref(), Some("it"));
+    }
+
+    #[test]
+    fn genre_dictionary_has_no_collisions_and_round_trips_every_entry() {
+        // Track every lowercased entry across all tables to guarantee zero collisions across rows
+        let mut owner: HashMap<String, String> = HashMap::new();
+        let mut claim = |term: &str, canonical_en: &str| {
+            let key = term.trim().to_lowercase();
+            assert!(!key.is_empty(), "empty term under {canonical_en}");
+            if let Some(existing) = owner.get(&key) {
+                assert_eq!(
+                    existing, canonical_en,
+                    "collision on {term:?}: claimed by both {existing:?} and {canonical_en:?}"
+                );
+            } else {
+                owner.insert(key, canonical_en.to_string());
+            }
+        };
+
+        // 1. Official Steam genres
+        for &raw in &STEAM_FREE_TO_PLAY_GENRE {
+            claim(raw, STEAM_FREE_TO_PLAY_GENRE[1]);
+        }
+        for &alias in STEAM_FREE_TO_PLAY_ALIASES {
+            claim(alias, STEAM_FREE_TO_PLAY_GENRE[1]);
+        }
+        for (_, names) in STEAM_GENRE_TAGS {
+            for &raw in names {
+                claim(raw, names[1]);
+            }
+        }
+        for names in STEAM_EXTRA_STORE_GENRES {
+            for &raw in names {
+                claim(raw, names[1]);
+            }
+        }
+        // 2. Steam genre user aliases
+        for &(canonical_en, aliases) in STEAM_GENRE_USER_ALIASES {
+            assert!(
+                translate_steam_genre(canonical_en, Lang::En) == Some(canonical_en),
+                "STEAM_GENRE_USER_ALIASES target {canonical_en:?} must be an official Steam English genre"
+            );
+            for &alias in aliases {
+                claim(alias, canonical_en);
+                for &to in &Lang::ALL {
+                    assert_eq!(
+                        translate_genre(alias, to),
+                        translate_steam_genre(canonical_en, to),
+                        "alias {alias:?} -> {to:?}"
+                    );
+                }
+                assert_eq!(
+                    canonical_genre_key(alias),
+                    canonical_en.to_lowercase(),
+                    "canonical key for alias {alias:?}"
+                );
+            }
+        }
+        // 3. Common user genres + aliases
+        let mut seen_common_en: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for (names, aliases) in COMMON_USER_GENRES {
+            assert!(
+                seen_common_en.insert(names[1].to_lowercase()),
+                "duplicate English entry in COMMON_USER_GENRES: {:?}",
+                names[1]
+            );
+            for &from in &Lang::ALL {
+                let raw = in_language(names, from);
+                claim(raw, names[1]);
+                for &to in &Lang::ALL {
+                    assert_eq!(
+                        translate_genre(raw, to),
+                        Some(in_language(names, to)),
+                        "{raw:?} ({from:?}) -> {to:?}"
+                    );
+                }
+                assert_eq!(canonical_genre_key(raw), names[1].to_lowercase());
+            }
+            for &alias in *aliases {
+                claim(alias, names[1]);
+                for &to in &Lang::ALL {
+                    assert_eq!(
+                        translate_genre(alias, to),
+                        Some(in_language(names, to)),
+                        "alias {alias:?} -> {to:?}"
+                    );
+                }
+                assert_eq!(canonical_genre_key(alias), names[1].to_lowercase());
+            }
+        }
+    }
+
+    #[test]
+    fn translate_known_genres_and_dedup_collapse_cross_language_duplicates() {
+        let mixed: Vec<String> = [
+            "Azione",
+            "Action",
+            "Экшен",
+            "Multigiocatore di massa",
+            "Massively Multiplayer",
+            "Sparatutto",
+            "Pixel Art",
+            "Da rigiocare",
+            "da rigiocare",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+
+        let (en, changed) = translate_known_genres(&mixed, Lang::En);
+        assert!(changed);
+        assert_eq!(
+            en,
+            ["Action", "Massively Multiplayer", "Shooter", "Pixel Art", "Da rigiocare"]
+        );
+
+        let (ru, _) = translate_known_genres(&en, Lang::Ru);
+        assert_eq!(
+            ru,
+            [
+                "Экшены",
+                "Многопользовательские игры",
+                "Шутер",
+                "Пиксельная графика",
+                "Da rigiocare",
+            ]
+        );
+
+        let (es, _) = translate_known_genres(&ru, Lang::Es);
+        assert_eq!(
+            es,
+            ["Acción", "Multijugador masivo", "Disparos", "Pixel Art", "Da rigiocare"]
+        );
+
+        let (it, _) = translate_known_genres(&es, Lang::It);
+        assert_eq!(
+            it,
+            ["Azione", "Multigiocatore di massa", "Sparatutto", "Pixel Art", "Da rigiocare"]
+        );
+
+        let store = vec!["Massively Multiplayer".to_string(), "Action".to_string()];
+        let custom = vec![
+            "Multigiocatore di massa".to_string(),
+            "Экшены".to_string(),
+            "Sparatutto".to_string(),
+            "Shooter".to_string(),
+            "Preferiti miei".to_string(),
+        ];
+        assert_eq!(
+            dedup_custom_genres_against(&custom, &store),
+            ["Sparatutto", "Preferiti miei"]
+        );
     }
 }
