@@ -135,7 +135,8 @@ export function hasCategory(
 export function summarizeGenres(
   games: DetectedGame[],
   scope: LibraryScope,
-  knownLabels?: ReadonlyMap<string, string>
+  knownLabels?: ReadonlyMap<string, string>,
+  locale = "it"
 ): GenreSummary[] {
   const byKey = new Map<string, GenreSummary>();
   for (const game of games) {
@@ -154,7 +155,7 @@ export function summarizeGenres(
     }
   }
   return [...byKey.values()].sort(
-    (a, b) => b.count - a.count || a.label.localeCompare(b.label, "it")
+    (a, b) => b.count - a.count || a.label.localeCompare(b.label, locale)
   );
 }
 
@@ -165,7 +166,8 @@ export function summarizeGenres(
 export function summarizeTags(
   games: DetectedGame[],
   genres: GenreSummary[],
-  scope: LibraryScope
+  scope: LibraryScope,
+  locale = "it"
 ): GenreSummary[] {
   const genreKeys = new Set(genres.map((genre) => genre.key));
   const byKey = new Map<string, GenreSummary>();
@@ -185,7 +187,7 @@ export function summarizeTags(
     }
   }
   return [...byKey.values()].sort(
-    (a, b) => b.count - a.count || a.label.localeCompare(b.label, "it")
+    (a, b) => b.count - a.count || a.label.localeCompare(b.label, locale)
   );
 }
 
@@ -198,7 +200,8 @@ export function summarizeTags(
 export function recountCategories(
   summary: GenreSummary[],
   games: DetectedGame[],
-  kind: "genres" | "tags"
+  kind: "genres" | "tags",
+  locale = "it"
 ): GenreSummary[] {
   const counts = new Map<string, number>();
   for (const game of games) {
@@ -215,7 +218,7 @@ export function recountCategories(
       const count = counts.get(category.key);
       return count === undefined ? [] : [{ ...category, count }];
     })
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "it"));
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, locale));
 }
 
 /**

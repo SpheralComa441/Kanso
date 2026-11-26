@@ -556,11 +556,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     });
   }, []);
 
+  const metadataSyncSeq = useRef(0);
   const runMetadataSync = useCallback(async (retryNow: boolean) => {
     if (!isRunningInTauri()) return;
+    const seq = (metadataSyncSeq.current += 1);
     setIsSyncingMetadata(true);
     try {
       const syncedReport = await syncLibraryMetadata(retryNow);
+      if (seq !== metadataSyncSeq.current) return;
       // The scan's warnings stay; the sync adds its own (a plugin's library that failed)
       setReport((prev) => ({
         ...syncedReport,
@@ -569,8 +572,11 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     } catch {
       // Individual errors do not block library browsing
     } finally {
-      setIsSyncingMetadata(false);
+      if (seq === metadataSyncSeq.current) {
+        setIsSyncingMetadata(false);
+      }
     }
+    if (seq !== metadataSyncSeq.current) return;
     // The games of the store accounts, then genres and tags for the games of other stores
     // that are not installed: a slow, quiet pass whose results arrive in batches
     void completeLibraryInBackground().catch(() => {});
@@ -953,8 +959,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   // What genres, tags, platforms and statuses are counted on: everything, what is on disk
   // ("installed only") or, inside the "not installed" collection, what is not
   const scope = libraryScope(filters.collection, installedOnly);
-  const genres = useMemo(() => summarizeGenres(games, scope), [games, scope]);
-  const tags = useMemo(() => summarizeTags(games, genres, scope), [games, genres, scope]);
+  const genres = useMemo(() => summarizeGenres(games, scope, undefined, lang), [games, scope, lang]);
+  const tags = useMemo(() => summarizeTags(games, genres, scope, lang), [games, genres, scope, lang]);
   // Where the user stands with a game is about the game, whatever runs it: favorites and
   // statuses count the emulated games too, and choosing either lists them with the others
   const counts = useMemo(() => {
@@ -995,8 +1001,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     [genres]
   );
   const emulatedGenres = useMemo(
-    () => summarizeGenres(scopedEmulatedGames, scope, genreLabels),
-    [scopedEmulatedGames, scope, genreLabels]
+    () => summarizeGenres(scopedEmulatedGames, scope, genreLabels, lang),
+    [scopedEmulatedGames, scope, genreLabels, lang]
   );
   const allKnownGenreLabels = useMemo(() => {
     const seen = new Set(genres.map((genre) => genre.key));
@@ -1024,12 +1030,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         ? genres
         : tilesPlatform === "emulator"
           ? emulatedGenres
-          : recountCategories(genres, tilesGames, "genres"),
-    [genres, emulatedGenres, tilesGames, tilesPlatform]
+          : recountCategories(genres, tilesGames, "genres", lang),
+    [genres, emulatedGenres, tilesGames, tilesPlatform, lang]
   );
   const tilesTags = useMemo(
-    () => (tilesPlatform === null ? tags : recountCategories(tags, tilesGames, "tags")),
-    [tags, tilesGames, tilesPlatform]
+    () => (tilesPlatform === null ? tags : recountCategories(tags, tilesGames, "tags", lang)),
+    [tags, tilesGames, tilesPlatform, lang]
   );
   // Each tab above the tiles counts only the games that actually appear among those tiles
   // (games without a genre — such as uncategorised ROMs or tools — are not in Genres)
@@ -1157,26 +1163,36 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   );
 
   // A game that is not on disk arrives with name and cover only: the rest is looked up the
-  // first time its sheet is opened (once per session, whether or not anything is found)
+  // first time its sheet is opened (once per language per session, whether or not anything is found)
   const completedIds = useRef(new Set<string>());
   useEffect(() => {
+    completedIds.current.clear();
+  }, [lang]);
+  useEffect(() => {
     const game = detailGame;
-    if (
-      !game ||
-      game.isInstalled ||
-      game.shortDescription ||
-      game.genres.length > 0 ||
-      completedIds.current.has(game.id)
-    ) {
+    if (!game || game.isInstalled || completedIds.current.has(game.id)) {
       return;
     }
+    const lacksDetails = !game.shortDescription && game.genres.length === 0;
+    const wrongLanguage =
+      (!game.customOverride && game.metadataLang !== null && game.metadataLang !== lang) ||
+      (game.tagsLang !== null && game.tagsLang !== lang);
+    if (!lacksDetails && !wrongLanguage) {
+      return;
+    }
+    let active = true;
     completedIds.current.add(game.id);
     completeGameDetails(game)
-      .then(upsertSingleGameInState)
+      .then((updated) => {
+        if (active) upsertSingleGameInState(updated);
+      })
       .catch(() => {
         // The sheet simply stays as it is; opening it in a later session tries again
       });
-  }, [detailGame, upsertSingleGameInState]);
+    return () => {
+      active = false;
+    };
+  }, [detailGame, lang, upsertSingleGameInState]);
 
   /**
    * Where a genre or tag picked on `game`'s sheet is listed: with "installed only" on, a game

@@ -71,6 +71,9 @@ pub(crate) struct AppState {
     /// It was asked for again while under way (someone just signed in to a store): once done,
     /// it starts over.
     complete_library_again: Arc<std::sync::atomic::AtomicBool>,
+    /// Monotonically bumped on every language switch and metadata sync start so an older
+    /// in-flight sync never writes previous-language metadata over a newer one.
+    sync_generation: Arc<std::sync::atomic::AtomicU64>,
     /// The emulators the last scan found.
     pub(crate) emulators: emulators::SharedEmulators,
     /// Emulated games started from Kanso, for the play time tracker.
@@ -140,8 +143,24 @@ fn save_settings(
     let config_path = resolve_config_path(&app)?;
     let before = load_config(&app);
     let (had_game_pass, listed_catalog) = (before.has_game_pass, before.game_pass_catalog);
+    let before_lang = before.lang().unwrap_or(FALLBACK_LANGUAGE);
     let saved = config.save_to_file(&config_path)?;
-    apply_language(&app, saved.lang().unwrap_or(FALLBACK_LANGUAGE));
+    let saved_lang = saved.lang().unwrap_or(FALLBACK_LANGUAGE);
+    apply_language(&app, saved_lang);
+    if saved_lang != before_lang {
+        let translated = {
+            let mut db = lock_db(&state.db);
+            // Bump under the DB lock so no older in-flight sync can commit previous-language
+            // metadata after this point, and immediately normalize known Steam genres.
+            state
+                .sync_generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            kanso_core::owned::translate_cached_genres(&mut db, saved_lang)
+        };
+        if !translated.is_empty() {
+            let _ = app.emit(GAMES_UPDATED_EVENT, &translated);
+        }
+    }
     if saved.has_game_pass != had_game_pass {
         accounts::apply_game_pass(&app, &state.db, saved.has_game_pass);
     }
@@ -231,13 +250,29 @@ async fn sync_library_metadata(
     let covers_dir = resolve_covers_dir(&app)?;
     let config = AppConfig::load_from_file(&config_path)?;
     let db = Arc::clone(&state.db);
+    let sync_generation = Arc::clone(&state.sync_generation);
     let app_handle = app.clone();
     let plugin_host = Arc::clone(&state.plugins);
 
     tauri::async_runtime::spawn_blocking(move || {
+        use std::sync::atomic::Ordering;
+
         let has_api_key = config.has_api_key();
         let lang = config.lang().unwrap_or(FALLBACK_LANGUAGE);
         let now = now_timestamp_ms();
+
+        // Claim the latest generation under the DB lock so any earlier pass stops before
+        // writing again, and immediately heal any cached foreign Steam genres.
+        let (my_gen, normalized) = {
+            let mut db = lock_db(&db);
+            let generation = sync_generation.fetch_add(1, Ordering::SeqCst) + 1;
+            let normalized = kanso_core::owned::translate_cached_genres(&mut db, lang);
+            (generation, normalized)
+        };
+        let is_stale = || sync_generation.load(Ordering::SeqCst) != my_gen;
+        if !normalized.is_empty() && !is_stale() {
+            let _ = app_handle.emit(GAMES_UPDATED_EVENT, &normalized);
+        }
 
         let client = MetadataClient::new().with_language(lang);
         let api_key = has_api_key.then_some(config.steamgriddb_api_key.as_str());
@@ -245,15 +280,40 @@ async fn sync_library_metadata(
         // The games the plugins' libraries bring join first, so that what follows looks for
         // their covers and details as for any other game. A plugin that fails is a line for
         // the user and takes nothing away
-        let plugin_warnings = plugins::sync_libraries(&app_handle, &db, &plugin_host, &config, retry_now);
+        let plugin_warnings = if is_stale() {
+            Vec::new()
+        } else {
+            plugins::sync_libraries(&app_handle, &db, &plugin_host, &config, retry_now)
+        };
 
-        let candidates: Vec<DetectedGame> = lock_db(&db)
-            .load_games()?
-            .into_iter()
-            .filter(|game| is_metadata_sync_due(game, has_api_key, lang, now, retry_now))
-            .collect();
+        // Installed games that only need a language refresh go fifty per request through
+        // `IStoreBrowseService`, avoiding per-app `appdetails` rate limits.
+        let batch_translated = kanso_core::owned::sync_installed_game_translations(
+            &db,
+            &client,
+            has_api_key,
+            now,
+            retry_now,
+            is_stale,
+        );
+        if !batch_translated.is_empty() && !is_stale() {
+            let _ = app_handle.emit(GAMES_UPDATED_EVENT, &batch_translated);
+        }
+
+        let candidates: Vec<DetectedGame> = if is_stale() {
+            Vec::new()
+        } else {
+            lock_db(&db)
+                .load_games()?
+                .into_iter()
+                .filter(|game| is_metadata_sync_due(game, has_api_key, lang, now, retry_now))
+                .collect()
+        };
 
         for mut game in candidates {
+            if is_stale() {
+                break;
+            }
             let game_id = game.id.clone();
             let outcome = client.enrich_game_automatically(&mut game, api_key, &covers_dir);
 
@@ -261,6 +321,9 @@ async fn sync_library_metadata(
             // overrides changed while the requests were in flight are kept
             let committed = {
                 let db = lock_db(&db);
+                if is_stale() {
+                    break;
+                }
                 let Ok(mut current) = load_single_game_store(&db, &game_id) else {
                     continue;
                 };
@@ -271,43 +334,51 @@ async fn sync_library_metadata(
                 committed
             };
 
-            if let Some(updated) = committed.filter(|_| outcome.changed) {
+            if let Some(updated) = committed.filter(|_| outcome.changed && !is_stale()) {
                 let _ = app_handle.emit(GAME_UPDATED_EVENT, updated);
             }
         }
 
-        // Steam games the account owns or has played but that are not on disk join the
-        // library as "not installed", from the Steam client's own records. They come with
-        // name and cover; the report below carries them to the interface in one go.
-        if let Some(steam_root) = kanso_core::scanner::steam::detect_steam_root() {
-            let play_stats = kanso_core::scanner::steam::read_steam_play_stats(&steam_root);
-            let owned_apps = kanso_core::scanner::steam_packages::read_owned_steam_apps(&steam_root);
-            kanso_core::owned::sync_steam_library(&db, &client, &play_stats, &owned_apps, now);
-            // Which of them are the family's: the client's own list of licences says whose
-            // each one is, for the games that are not installed as for those that are
-            if let Some(ownership) = kanso_core::scanner::steam_licenses::read_steam_ownership(&steam_root) {
-                kanso_core::owned::apply_steam_ownership(&db, &ownership);
+        if !is_stale() {
+            // Steam games the account owns or has played but that are not on disk join the
+            // library as "not installed", from the Steam client's own records. They come with
+            // name and cover; the report below carries them to the interface in one go.
+            if let Some(steam_root) = kanso_core::scanner::steam::detect_steam_root() {
+                let play_stats = kanso_core::scanner::steam::read_steam_play_stats(&steam_root);
+                let owned_apps = kanso_core::scanner::steam_packages::read_owned_steam_apps(&steam_root);
+                kanso_core::owned::sync_steam_library(&db, &client, &play_stats, &owned_apps, now);
+                // Which of them are the family's: the client's own list of licences says whose
+                // each one is, for the games that are not installed as for those that are
+                if let Some(ownership) = kanso_core::scanner::steam_licenses::read_steam_ownership(&steam_root) {
+                    kanso_core::owned::apply_steam_ownership(&db, &ownership);
+                }
+            }
+            // The clients of Epic, GOG Galaxy and Ubisoft Connect name the account's games in
+            // their own local records: those join too, with no sign-in and no request
+            kanso_core::owned::merge_owned_games(
+                &db,
+                kanso_core::scanner::read_owned_games_from_clients(),
+                now,
+            );
+            // With Game Pass, as the user says in the settings: the games it makes installable
+            // on Battle.net, from the list Kanso ships with
+            if config.has_game_pass {
+                kanso_core::owned::merge_owned_games(&db, kanso_core::battlenet_account::game_pass_games(), now);
+            }
+            // What is not on disk is left out of the loop above: its genres, tags and description
+            // come fifty games per request, so that it can be browsed like the rest
+            let absent_changed =
+                kanso_core::owned::sync_absent_game_details_cancellable(&db, &client, now, is_stale);
+            if !absent_changed.is_empty() && !is_stale() {
+                let _ = app_handle.emit(GAMES_UPDATED_EVENT, &absent_changed);
             }
         }
-        // The clients of Epic, GOG Galaxy and Ubisoft Connect name the account's games in
-        // their own local records: those join too, with no sign-in and no request
-        kanso_core::owned::merge_owned_games(
-            &db,
-            kanso_core::scanner::read_owned_games_from_clients(),
-            now,
-        );
-        // With Game Pass, as the user says in the settings: the games it makes installable
-        // on Battle.net, from the list Kanso ships with
-        if config.has_game_pass {
-            kanso_core::owned::merge_owned_games(&db, kanso_core::battlenet_account::game_pass_games(), now);
-        }
-        // What is not on disk is left out of the loop above: its genres, tags and description
-        // come fifty games per request, so that it can be browsed like the rest
-        kanso_core::owned::sync_absent_game_details(&db, &client, now);
 
         let final_store = LibraryStore::load(&lock_db(&db))?;
-        // The library is settled: plugins that label the game cards can catch up quietly
-        plugin_host.wake_background_fill();
+        if !is_stale() {
+            // The library is settled: plugins that label the game cards can catch up quietly
+            plugin_host.wake_background_fill();
+        }
         let mut report = final_store.to_report();
         report.warnings = plugin_warnings;
         Ok(report)
@@ -329,9 +400,13 @@ async fn complete_game_details(
     let covers_dir = resolve_covers_dir(&app)?;
     let config = AppConfig::load_from_file(&config_path)?;
     let db = Arc::clone(&state.db);
+    let sync_generation = Arc::clone(&state.sync_generation);
     let app_handle = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
+        use std::sync::atomic::Ordering;
+
+        let my_gen = sync_generation.load(Ordering::SeqCst);
         let mut game = lock_db(&db)
             .get_game(&game_id)?
             .ok_or_else(|| game_not_found(&game_id))?;
@@ -342,19 +417,24 @@ async fn complete_game_details(
             .then_some(config.steamgriddb_api_key.as_str());
         let outcome = client.enrich_game_automatically(&mut game, api_key, &covers_dir);
 
-        let stored = {
+        let (stored, committed_fresh) = {
             let db = lock_db(&db);
             let mut current = load_single_game_store(&db, &game_id)?;
-            match current.commit_enriched_game(game, outcome.auto_hidden) {
-                Some(updated) => {
-                    db.upsert_game(&updated)?;
-                    updated
+            if sync_generation.load(Ordering::SeqCst) != my_gen {
+                // Language or metadata sync changed while in flight: never write stale data
+                (current.games.remove(0), false)
+            } else {
+                match current.commit_enriched_game(game, outcome.auto_hidden) {
+                    Some(updated) => {
+                        db.upsert_game(&updated)?;
+                        (updated, true)
+                    }
+                    // The user edited the game by hand meanwhile: their version stands
+                    None => (current.games.remove(0), false),
                 }
-                // The user edited the game by hand meanwhile: their version stands
-                None => current.games.remove(0),
             }
         };
-        if outcome.changed {
+        if committed_fresh && outcome.changed && sync_generation.load(Ordering::SeqCst) == my_gen {
             let _ = app_handle.emit(GAME_UPDATED_EVENT, stored.clone());
         }
         Ok(stored)
@@ -376,6 +456,7 @@ fn find_covers_for_absent_games(
     client: &MetadataClient,
     config: &AppConfig,
     covers_dir: &Path,
+    is_cancelled: &impl Fn() -> bool,
 ) {
     let now = now_timestamp_ms();
     let api_key = config.has_api_key().then_some(config.steamgriddb_api_key.as_str());
@@ -388,6 +469,9 @@ fn find_covers_for_absent_games(
         .collect();
 
     for mut game in due {
+        if is_cancelled() {
+            break;
+        }
         let found = client.find_missing_cover(&mut game, api_key, covers_dir);
         // Written against the game as it is now: only the cover and the note that it was
         // looked for; whatever else changed meanwhile stays
@@ -429,15 +513,18 @@ async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<
     }
     let covers_dir = resolve_covers_dir(&app)?;
     let db = Arc::clone(&state.db);
+    let sync_generation = Arc::clone(&state.sync_generation);
 
     let outcome = tauri::async_runtime::spawn_blocking(move || loop {
         // Read at each pass: a pass asked for while another runs follows a change of settings
+        let my_gen = sync_generation.load(Ordering::SeqCst);
+        let is_stale = || sync_generation.load(Ordering::SeqCst) != my_gen;
         let config = load_config(&app);
         accounts::sync_store_accounts(&app, &db, &|added| {
             let _ = app.emit(GAMES_UPDATED_EVENT, added);
         });
         // The Game Pass catalog, where the user asked for it: public, read once a day
-        if config.game_pass_catalog {
+        if !is_stale() && config.game_pass_catalog {
             gamepass::sync_catalog(&app, &db, config.lang().unwrap_or(FALLBACK_LANGUAGE));
         }
 
@@ -445,16 +532,26 @@ async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<
             MetadataClient::new().with_language(config.lang().unwrap_or(FALLBACK_LANGUAGE));
         // Before the long matching below: the games a store listed without any cover
         // (Battle.net gives none) are few, and are what the eye falls on first
-        find_covers_for_absent_games(&app, &db, &client, &config, &covers_dir);
+        find_covers_for_absent_games(&app, &db, &client, &config, &covers_dir, &is_stale);
+        let mut restarted_for_change = false;
         loop {
-            let step = kanso_core::owned::match_absent_games_step(
+            if is_stale() {
+                restarted_for_change = true;
+                break;
+            }
+            let step = kanso_core::owned::match_absent_games_step_cancellable(
                 &db,
                 &client,
                 STORE_SEARCH_PAUSE,
                 now_timestamp_ms(),
+                is_stale,
             );
-            if !step.changed.is_empty() {
+            if !step.changed.is_empty() && !is_stale() {
                 let _ = app.emit(GAMES_UPDATED_EVENT, &step.changed);
+            }
+            if is_stale() {
+                restarted_for_change = true;
+                break;
             }
             if step.unreachable || step.remaining == 0 {
                 break;
@@ -462,7 +559,7 @@ async fn complete_library(app: AppHandle, state: State<'_, AppState>) -> Result<
             std::thread::sleep(STORE_SEARCH_PAUSE);
         }
 
-        if !again.swap(false, Ordering::SeqCst) {
+        if !restarted_for_change && !again.swap(false, Ordering::SeqCst) {
             break;
         }
     })
@@ -832,8 +929,9 @@ async fn fetch_deals(
                 }
             }
         }
-        // A fully failed fetch (offline) is not worth caching: the next visit retries
-        if !report.deals.is_empty() {
+        // A fully failed fetch (offline) is not worth caching, and an older fetch for a
+        // previous language must not replace a fresher cache entry
+        if !report.deals.is_empty() && lang == current_language() {
             *cache.lock().unwrap_or_else(|p| p.into_inner()) = Some(CachedDeals {
                 lang,
                 country,
@@ -1019,6 +1117,7 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         plugins: Arc::clone(&plugin_host),
         completing_library: Arc::default(),
         complete_library_again: Arc::default(),
+        sync_generation: Arc::default(),
         emulators: Arc::default(),
         emulated_sessions: Arc::clone(&emulated_sessions),
         updater_cache: Arc::default(),

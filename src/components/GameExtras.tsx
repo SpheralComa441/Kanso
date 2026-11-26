@@ -218,7 +218,7 @@ export interface PluginPanelData {
  * or fails does not hold the others back.
  */
 export function usePluginPanels(game: DetectedGame, plugins: PluginInfo[]): PluginPanelData[] {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [states, setStates] = useState<Record<string, PanelState>>({});
   const gameRef = useRef(game);
   gameRef.current = game;
@@ -254,9 +254,9 @@ export function usePluginPanels(game: DetectedGame, plugins: PluginInfo[]): Plug
     loadRef.current = generation;
     setStates({});
     for (const plugin of plugins) load(plugin, false, generation);
-    // `game`, `plugins` and `t` change identity on every library update; ids are what matter
+    // `game`, `plugins` and `t` change identity on every library update; ids and language matter
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gameId, pluginIds]);
+  }, [gameId, pluginIds, lang]);
 
   return plugins.map((plugin) => ({
     plugin,

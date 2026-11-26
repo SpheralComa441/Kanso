@@ -91,7 +91,9 @@ pub fn needs_metadata(game: &DetectedGame, has_api_key: bool, lang: Lang) -> boo
 
 /// Whether an automatic metadata pass should run for `game` now. Incomplete games are retried
 /// at most once per [`METADATA_RETRY_INTERVAL_MS`] unless `retry_now` (the user asked for a
-/// scan, changed language, or just configured an API key).
+/// scan, changed language, or just configured an API key). Games whose cached texts or tags
+/// belong to another language are always due so a transient error or interruption never leaves
+/// mixed languages stuck for a day.
 pub fn is_metadata_sync_due(
     game: &DetectedGame,
     has_api_key: bool,
@@ -99,10 +101,48 @@ pub fn is_metadata_sync_due(
     now_ms: u64,
     retry_now: bool,
 ) -> bool {
+    let wrong_language =
+        needs_translation(game, lang) || (game.tags_lang.is_some() && needs_tags(game, lang));
     needs_metadata(game, has_api_key, lang)
         && (retry_now
+            || wrong_language
             || game.metadata_attempted_at == 0
             || now_ms.saturating_sub(game.metadata_attempted_at) >= METADATA_RETRY_INTERVAL_MS)
+}
+
+/// `true` for an installed game whose only pending metadata work is refreshing its language
+/// (description, genres, community tags) and whose Steam store page is already known, so it
+/// can be refreshed fifty games per request via `IStoreBrowseService` instead of hitting the
+/// strictly rate-limited per-app `appdetails` endpoint one game at a time.
+pub(crate) fn can_batch_translate_installed(
+    game: &DetectedGame,
+    has_api_key: bool,
+    lang: Lang,
+    now_ms: u64,
+    retry_now: bool,
+) -> bool {
+    if !is_metadata_sync_due(game, has_api_key, lang, now_ms, retry_now) {
+        return false;
+    }
+    let missing_cover = cover_is_missing(game) && (has_api_key || steam_appid_of(game).is_some());
+    let missing_details = game.short_description.is_none() && game.genres.is_empty();
+    let steam_type_unknown = game.app_type.is_none() && steam_appid_of(game).is_some();
+    if missing_cover
+        || missing_details
+        || game.title_provisional
+        || steam_type_unknown
+        || needs_store_page(game)
+        || game.steam_store_id().is_none()
+    {
+        return false;
+    }
+    let translate = needs_translation(game, lang);
+    if translate && !game.genres.is_empty() && translate_all_steam_genres(&game.genres, lang).is_none()
+    {
+        // Contains a genre outside the known Steam store table: let `appdetails` translate it
+        return false;
+    }
+    translate || needs_tags(game, lang)
 }
 
 /// `true` for a game that is not on disk and came without any cover: its store gave none
@@ -128,16 +168,18 @@ fn cover_is_missing(game: &DetectedGame) -> bool {
         .is_none_or(|p| !Path::new(p).is_file())
 }
 
-/// Automatically fetched description/genres exist but in another language. Texts the user
-/// edited by hand are never replaced.
-fn needs_translation(game: &DetectedGame, lang: Lang) -> bool {
+/// Automatically fetched description/genres exist but in another language (or still carry a
+/// Steam store genre spelled for another language). Texts the user edited by hand are never
+/// replaced.
+pub(crate) fn needs_translation(game: &DetectedGame, lang: Lang) -> bool {
     !game.custom_override
         && (game.short_description.is_some() || !game.genres.is_empty())
-        && game.metadata_lang.as_deref() != Some(lang.code())
+        && (game.metadata_lang.as_deref() != Some(lang.code())
+            || has_foreign_steam_genre(&game.genres, lang))
 }
 
 /// Tags were never fetched, or are in another language.
-fn needs_tags(game: &DetectedGame, lang: Lang) -> bool {
+pub(crate) fn needs_tags(game: &DetectedGame, lang: Lang) -> bool {
     game.tags_lang.as_deref() != Some(lang.code())
 }
 
@@ -157,7 +199,7 @@ fn steam_appid_of(game: &DetectedGame) -> Option<&str> {
 }
 
 /// Apps asked about in one request to the store service.
-const STEAM_SUMMARY_BATCH: usize = 50;
+pub(crate) const STEAM_SUMMARY_BATCH: usize = 50;
 /// `type` of a game in the store service's answers (4 is DLC, 11 a soundtrack, ...).
 const STEAM_STORE_TYPE_GAME: u64 = 0;
 
@@ -205,6 +247,40 @@ const STEAM_GENRE_TAGS: &[(u64, [&str; 4])] = &[
 /// The store's "Free to Play" genre: read from the app's `is_free` flag, not from a tag.
 const STEAM_FREE_TO_PLAY_GENRE: [&str; 4] =
     ["Free-to-Play", "Free To Play", "Free to Play", "Бесплатные"];
+/// Additional official/historical Steam spellings of "Free to Play" that map to
+/// [`STEAM_FREE_TO_PLAY_GENRE`].
+const STEAM_FREE_TO_PLAY_ALIASES: &[&str] = &["Бесплатно", "Бесплатные игры"];
+
+/// Additional official Steam store genres returned by `appdetails` beyond [`STEAM_GENRE_TAGS`]
+/// and [`STEAM_FREE_TO_PLAY_GENRE`], in `[It, En, Es, Ru]` order.
+const STEAM_EXTRA_STORE_GENRES: &[[&str; 4]] = &[
+    ["Accesso anticipato", "Early Access", "Acceso anticipado", "Ранний доступ"],
+    ["Utilità", "Utilities", "Utilidades", "Утилиты"],
+    [
+        "Animazione e modellazione",
+        "Animation & Modeling",
+        "Animación y modelado",
+        "Анимация и моделирование",
+    ],
+    [
+        "Design e illustrazione",
+        "Design & Illustration",
+        "Diseño e ilustración",
+        "Дизайн и иллюстрация",
+    ],
+    ["Produzione audio", "Audio Production", "Producción de audio", "Работа со звуком"],
+    ["Produzione video", "Video Production", "Producción de vídeo", "Обработка видео"],
+    ["Fotoritocco", "Photo Editing", "Edición fotográfica", "Обработка фото"],
+    ["Sviluppo di giochi", "Game Development", "Desarrollo de videojuegos", "Разработка игр"],
+    ["Istruzione", "Education", "Educación", "Образование"],
+    ["Formazione software", "Software Training", "Formación con software", "Обучение"],
+    ["Pubblicazione web", "Web Publishing", "Publicación web", "Веб-разработка"],
+    ["Contabilità", "Accounting", "Contabilidad", "Бухгалтерия"],
+    ["Violenti", "Violent", "Violentos", "Насилие"],
+    ["Gore", "Gore", "Gore", "Мясо"],
+    ["Nudità", "Nudity", "Desnudos", "Нагота"],
+    ["Contenuti sessuali", "Sexual Content", "Contenido sexual", "Сексуальный контент"],
+];
 
 fn in_language(names: &[&'static str; 4], lang: Lang) -> &'static str {
     match lang {
@@ -221,6 +297,107 @@ fn steam_genre_of_tag(tag_id: u64, lang: Lang) -> Option<&'static str> {
         .iter()
         .find(|(id, _)| *id == tag_id)
         .map(|(_, names)| in_language(names, lang))
+}
+
+fn matches_genre_names(lower: &str, names: &[&str; 4]) -> bool {
+    names.iter().any(|candidate| candidate.to_lowercase() == lower)
+}
+
+/// Maps a known official Steam store genre (from any of Kanso's four languages) to its
+/// canonical Steam spelling in `lang`. Returns `None` for unrecognized/custom genres.
+pub fn translate_steam_genre(genre: &str, lang: Lang) -> Option<&'static str> {
+    let trimmed = genre.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lower = trimmed.to_lowercase();
+    if matches_genre_names(&lower, &STEAM_FREE_TO_PLAY_GENRE)
+        || STEAM_FREE_TO_PLAY_ALIASES
+            .iter()
+            .any(|alias| alias.to_lowercase() == lower)
+    {
+        return Some(in_language(&STEAM_FREE_TO_PLAY_GENRE, lang));
+    }
+    for (_, names) in STEAM_GENRE_TAGS {
+        if matches_genre_names(&lower, names) {
+            return Some(in_language(names, lang));
+        }
+    }
+    for names in STEAM_EXTRA_STORE_GENRES {
+        if matches_genre_names(&lower, names) {
+            return Some(in_language(names, lang));
+        }
+    }
+    None
+}
+
+/// Translates `genres` into `lang` only if non-empty and every entry is a known official Steam
+/// store genre. Duplicates created by normalization are removed while preserving order.
+pub fn translate_all_steam_genres(genres: &[String], lang: Lang) -> Option<Vec<String>> {
+    if genres.is_empty() {
+        return None;
+    }
+    let mut out = Vec::with_capacity(genres.len());
+    for raw in genres {
+        let translated = translate_steam_genre(raw, lang)?;
+        if !out.iter().any(|existing: &String| existing.eq_ignore_ascii_case(translated)) {
+            out.push(translated.to_string());
+        }
+    }
+    Some(out)
+}
+
+/// Translates every known official Steam genre in `genres` into `lang`, keeping unrecognized
+/// entries untouched. Returns the updated list and whether anything changed.
+pub fn translate_known_steam_genres(genres: &[String], lang: Lang) -> (Vec<String>, bool) {
+    let mut out = Vec::with_capacity(genres.len());
+    for raw in genres {
+        let next = translate_steam_genre(raw, lang)
+            .map(ToString::to_string)
+            .unwrap_or_else(|| raw.clone());
+        let next_lower = next.to_lowercase();
+        if !out.iter().any(|existing: &String| existing.to_lowercase() == next_lower) {
+            out.push(next);
+        }
+    }
+    let changed = out != genres;
+    (out, changed)
+}
+
+/// Translates only the entries of `genres` that are recognized official Steam genres, dropping
+/// any unrecognized foreign auto-fetched genres.
+pub(crate) fn translate_only_known_steam_genres(genres: &[String], lang: Lang) -> Vec<String> {
+    let mut out = Vec::with_capacity(genres.len());
+    for raw in genres {
+        if let Some(translated) = translate_steam_genre(raw, lang) {
+            if !out.iter().any(|existing: &String| existing.eq_ignore_ascii_case(translated)) {
+                out.push(translated.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// `true` when `genres` contains a known Steam store genre spelled for a language other than
+/// `lang` (for example `"Экшены"` while the interface is in Italian). Hyphen/casing variants
+/// of `"Free to Play"` across Latin languages are not flagged as foreign to avoid churn.
+pub fn has_foreign_steam_genre(genres: &[String], lang: Lang) -> bool {
+    genres.iter().any(|raw| {
+        let trimmed = raw.trim();
+        let Some(expected) = translate_steam_genre(trimmed, lang) else {
+            return false;
+        };
+        let raw_lower = trimmed.to_lowercase();
+        let exp_lower = expected.to_lowercase();
+        if raw_lower == exp_lower {
+            return false;
+        }
+        // Treat Latin spellings of Free-to-Play ("Free-to-Play", "Free To Play", "Free to Play")
+        // as equivalent for mismatch detection, while still catching Cyrillic <-> Latin switches
+        let raw_f2p_latin = matches!(raw_lower.as_str(), "free-to-play" | "free to play");
+        let exp_f2p_latin = matches!(exp_lower.as_str(), "free-to-play" | "free to play");
+        !(raw_f2p_latin && exp_f2p_latin)
+    })
 }
 
 /// Steam could not be asked, or its answer could not be read: nothing was learned.
@@ -684,6 +861,19 @@ impl MetadataClient {
     /// off the app's most relevant tags, the ones that are also store genres, and named as
     /// the store names them. `None` means Steam could not be asked: try again later.
     pub fn fetch_steam_app_details(&self, appids: &[u64]) -> Option<Vec<SteamAppDetails>> {
+        self.fetch_steam_app_details_cancellable(appids, || false)
+    }
+
+    /// Same as [`Self::fetch_steam_app_details`], stopping between batches if `is_cancelled`
+    /// returns `true` (returning `None` so callers discard obsolete-language data).
+    pub fn fetch_steam_app_details_cancellable(
+        &self,
+        appids: &[u64],
+        is_cancelled: impl Fn() -> bool,
+    ) -> Option<Vec<SteamAppDetails>> {
+        if is_cancelled() {
+            return None;
+        }
         let names = self.steam_tag_names()?;
         let data_request = serde_json::json!({
             "include_tag_count": MAX_GAME_TAGS,
@@ -691,6 +881,9 @@ impl MetadataClient {
         });
         let mut details = Vec::with_capacity(appids.len());
         for batch in appids.chunks(STEAM_SUMMARY_BATCH) {
+            if is_cancelled() {
+                return None;
+            }
             let items = self.fetch_steam_store_items(batch, &data_request)?;
             for appid in batch {
                 let Some(item) = listed_store_item(&items, *appid) else {
@@ -1102,8 +1295,23 @@ impl MetadataClient {
         let type_unknown = steam_appid.is_some() && game.app_type.is_none();
         let translate = needs_translation(game, self.lang);
         // What step 1 learns about the Steam store page of a non-Steam game: its appid, that
-        // there is none (`Ok(None)`), or that the store could not be asked (`Err`)
-        let mut store_app: Option<Result<Option<String>, ()>> = None;
+        // there is none (`Ok(None)`), or that the store could not be asked (`Err`). Pre-seed
+        // from what an earlier sync already stored so language switches reuse the matched page
+        // without repeating title searches.
+        let mut store_app: Option<Result<Option<String>, ()>> = if steam_appid.is_some() {
+            None
+        } else {
+            game.steam_store_appid.as_ref().map(|raw| {
+                let trimmed = raw.trim();
+                if trimmed.is_empty() {
+                    Ok(None)
+                } else if trimmed.bytes().all(|b| b.is_ascii_digit()) {
+                    Ok(Some(trimmed.to_string()))
+                } else {
+                    Ok(None)
+                }
+            })
+        };
 
         // 1. Official name, type, description & genres via the public Steam Store API. Runs
         //    before the cover lookup so a freshly resolved title also drives SteamGridDB's
@@ -1114,7 +1322,17 @@ impl MetadataClient {
             || game.short_description.is_none()
             || game.genres.is_empty()
         {
-            match self.lookup_steam_store(steam_appid.as_deref(), &game.clean_title) {
+            let lookup = match &steam_appid {
+                Some(id) => self.lookup_steam_store(Some(id.as_str()), &game.clean_title),
+                None => match &store_app {
+                    Some(Ok(Some(cached_id))) => {
+                        self.lookup_steam_store(Some(cached_id.as_str()), &game.clean_title)
+                    }
+                    Some(Ok(None)) => SteamStoreLookup::NotListed,
+                    _ => self.lookup_steam_store(None, &game.clean_title),
+                },
+            };
+            match lookup {
                 SteamStoreLookup::Found(meta) => {
                     store_app = Some(Ok(Some(meta.steam_appid.clone())));
                     if needs_title
@@ -1129,6 +1347,10 @@ impl MetadataClient {
                         }
                         if !meta.genres.is_empty() {
                             game.genres = meta.genres;
+                        } else if !game.genres.is_empty() {
+                            let (translated, _) =
+                                translate_known_steam_genres(&game.genres, self.lang);
+                            game.genres = translated;
                         }
                     } else {
                         if game.short_description.is_none() {
@@ -1155,16 +1377,26 @@ impl MetadataClient {
                     }
                 }
                 SteamStoreLookup::NotListed => {
-                    store_app = Some(Ok(None));
+                    if store_app.is_none() {
+                        store_app = Some(Ok(None));
+                    }
                     if type_unknown {
                         game.app_type = Some("unlisted".to_string());
                     }
                     if translate {
-                        // Nothing better exists: keep the old texts and stop asking
+                        // Nothing better exists on Steam: translate any known Steam genres so
+                        // they never stay in the previous language, then stop asking.
+                        let (translated, _) =
+                            translate_known_steam_genres(&game.genres, self.lang);
+                        game.genres = translated;
                         game.metadata_lang = Some(lang_code.to_string());
                     }
                 }
-                SteamStoreLookup::Unavailable => store_app = Some(Err(())),
+                SteamStoreLookup::Unavailable => {
+                    if store_app.is_none() {
+                        store_app = Some(Err(()));
+                    }
+                }
             }
         }
 
@@ -2578,5 +2810,185 @@ pub(crate) mod tests {
         assert!(game.tags.is_empty());
         assert_eq!(game.tags_lang, None, "asked again at the next retry");
         assert!(needs_metadata(&game, false, Lang::It));
+    }
+
+    #[test]
+    fn steam_genres_round_trip_cleanly_across_all_four_languages() {
+        let sample = vec![
+            "Azione".to_string(),
+            "Avventura".to_string(),
+            "GDR".to_string(),
+            "Strategia".to_string(),
+            "Simulazione".to_string(),
+            "Passatempo".to_string(),
+            "Indie".to_string(),
+            "Corse".to_string(),
+            "Sport".to_string(),
+            "Multigiocatore di massa".to_string(),
+            "Free-to-Play".to_string(),
+            "Accesso anticipato".to_string(),
+        ];
+
+        // Full cycle across every supported language and back to Italian
+        let ru = translate_all_steam_genres(&sample, Lang::Ru).expect("all known in ru");
+        assert_eq!(
+            ru,
+            vec![
+                "Экшены",
+                "Приключенческие игры",
+                "Ролевые игры",
+                "Стратегии",
+                "Симуляторы",
+                "Казуальные игры",
+                "Инди",
+                "Гонки",
+                "Спорт",
+                "Многопользовательские игры",
+                "Бесплатные",
+                "Ранний доступ",
+            ]
+        );
+        let en = translate_all_steam_genres(&ru, Lang::En).expect("all known in en");
+        assert_eq!(
+            en,
+            vec![
+                "Action",
+                "Adventure",
+                "RPG",
+                "Strategy",
+                "Simulation",
+                "Casual",
+                "Indie",
+                "Racing",
+                "Sports",
+                "Massively Multiplayer",
+                "Free To Play",
+                "Early Access",
+            ]
+        );
+        let es = translate_all_steam_genres(&en, Lang::Es).expect("all known in es");
+        assert_eq!(
+            es,
+            vec![
+                "Acción",
+                "Aventura",
+                "Rol",
+                "Estrategia",
+                "Simuladores",
+                "Casual",
+                "Indie",
+                "Carreras",
+                "Deportes",
+                "Multijugador masivo",
+                "Free to Play",
+                "Acceso anticipado",
+            ]
+        );
+        let back_to_it = translate_all_steam_genres(&es, Lang::It).expect("all known in it");
+        assert_eq!(back_to_it, sample);
+
+        // Pairwise check: every table entry translates cleanly between every pair of languages
+        for &from in &Lang::ALL {
+            for (_, names) in STEAM_GENRE_TAGS {
+                let raw = in_language(names, from);
+                for &to in &Lang::ALL {
+                    assert_eq!(translate_steam_genre(raw, to), Some(in_language(names, to)));
+                }
+            }
+            for names in STEAM_EXTRA_STORE_GENRES {
+                let raw = in_language(names, from);
+                for &to in &Lang::ALL {
+                    assert_eq!(translate_steam_genre(raw, to), Some(in_language(names, to)));
+                }
+            }
+        }
+        assert_eq!(translate_steam_genre("Бесплатно", Lang::It), Some("Free-to-Play"));
+        assert_eq!(translate_steam_genre("Custom Genre", Lang::It), None);
+    }
+
+    #[test]
+    fn wrong_language_games_are_due_immediately_and_foreign_genres_are_detected() {
+        let now = 10 * METADATA_RETRY_INTERVAL_MS;
+        let covers_dir = tempdir().unwrap();
+        let cover = covers_dir.path().join("steam_1321440.png");
+        fs::write(&cover, b"png").unwrap();
+
+        let mut game = bare_steam_game("1321440", "Cassette Beasts");
+        game.cover_path = Some(cover.to_string_lossy().to_string());
+        game.short_description = Some("Russian description.".to_string());
+        game.genres = vec!["Экшены".to_string(), "Инди".to_string()];
+        game.metadata_lang = Some("ru".to_string());
+        game.tags_lang = Some("ru".to_string());
+        game.metadata_attempted_at = now - 5_000;
+
+        // Even with a recent attempt and retry_now=false, wrong-language games are due right away
+        assert!(is_metadata_sync_due(&game, false, Lang::It, now, false));
+        assert!(is_metadata_sync_due(&game, false, Lang::En, now, false));
+        assert!(is_metadata_sync_due(&game, false, Lang::Es, now, false));
+        assert!(!is_metadata_sync_due(&game, false, Lang::Ru, now, false));
+
+        // Poisoned row: metadata_lang says "it" while genres are still Russian
+        game.metadata_lang = Some("it".to_string());
+        game.tags_lang = Some("it".to_string());
+        assert!(has_foreign_steam_genre(&game.genres, Lang::It));
+        assert!(needs_translation(&game, Lang::It));
+        assert!(is_metadata_sync_due(&game, false, Lang::It, now, false));
+
+        // Shared Latin spellings do not trigger false foreign-genre detection
+        assert!(!has_foreign_steam_genre(&["Indie".into(), "Casual".into()], Lang::En));
+        assert!(!has_foreign_steam_genre(&["Indie".into(), "Casual".into()], Lang::Es));
+        assert!(!has_foreign_steam_genre(&["Free to Play".into()], Lang::En));
+        assert!(!has_foreign_steam_genre(&["Free To Play".into()], Lang::It));
+        assert!(has_foreign_steam_genre(&["Бесплатные".into()], Lang::It));
+        assert!(has_foreign_steam_genre(&["Indie".into()], Lang::Ru));
+    }
+
+    #[test]
+    fn non_steam_games_reuse_cached_steam_store_appid_and_delisted_games_translate_known_genres() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let covers_dir = tempdir().unwrap();
+        let cover = covers_dir.path().join("steam_777777.png");
+        fs::write(&cover, b"png").unwrap();
+
+        // Non-Steam game already matched to 2344520: language switch must NOT re-call SearchApps
+        let mut diablo = DetectedGame::new_detected(
+            "battlenet:diablo4".to_string(),
+            "Diablo IV".to_string(),
+            "Diablo IV".to_string(),
+            GamePlatform::BattleNet,
+            Some("Diablo IV".to_string()),
+            r"C:\Games\Diablo IV".to_string(),
+            None,
+            None,
+        );
+        diablo.cover_path = Some(cover.to_string_lossy().to_string());
+        diablo.steam_store_appid = Some("2344520".to_string());
+        diablo.short_description = Some("Russian desc.".to_string());
+        diablo.genres = vec!["Экшены".to_string(), "Ролевые игры".to_string()];
+        diablo.metadata_lang = Some("ru".to_string());
+        diablo.tags_lang = Some("ru".to_string());
+
+        let italian = MetadataClient::with_base_urls(&base_url, &base_url, &base_url)
+            .with_language(Lang::It);
+        italian.enrich_game_automatically(&mut diablo, None, covers_dir.path());
+        assert_eq!(diablo.genres, vec!["Azione", "GDR"]);
+        assert_eq!(diablo.metadata_lang.as_deref(), Some("it"));
+        assert_eq!(diablo.tags_lang.as_deref(), Some("it"));
+        let paths = recorded.lock().unwrap().clone();
+        assert!(
+            !paths.iter().any(|p| p.starts_with("/actions/SearchApps/")),
+            "must reuse cached steam_store_appid without repeating SearchApps: {paths:?}"
+        );
+
+        // Delisted Steam game (777777 -> success:false) with cached Russian genres:
+        // translating to Italian normalizes its genres instead of leaving Russian behind
+        let mut delisted = bare_steam_game("777777", "Delisted Gem");
+        delisted.cover_path = Some(cover.to_string_lossy().to_string());
+        delisted.genres = vec!["Экшены".to_string(), "Приключенческие игры".to_string()];
+        delisted.metadata_lang = Some("ru".to_string());
+        delisted.tags_lang = Some("it".to_string());
+        italian.enrich_game_automatically(&mut delisted, None, covers_dir.path());
+        assert_eq!(delisted.genres, vec!["Azione", "Avventura"]);
+        assert_eq!(delisted.metadata_lang.as_deref(), Some("it"));
     }
 }

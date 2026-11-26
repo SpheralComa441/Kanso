@@ -2,6 +2,13 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
+## Unreleased
+
+- **Consistent genres, tags and descriptions across language switches.** Switching the interface
+  language back and forth (for example Italian → Russian → Italian, or across English and Spanish)
+  cancels any previous-language metadata sync in flight, refreshes installed games in batches
+  instead of hitting per-app rate limits, and heals any genres left in another language.
+
 ## 0.3.0
 
 - **In-app updates.** Kanso checks GitHub Releases automatically at startup (can be toggled or

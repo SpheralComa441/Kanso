@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BellRing, ExternalLink, EyeOff, Heart, RefreshCw, SlidersHorizontal, WifiOff } from "lucide-react";
 import { detectCountry, useI18n, type MessageKey } from "../i18n";
 import { DEAL_STORES, fetchDeals, openStorePage } from "../lib/backend";
@@ -387,16 +387,21 @@ export function StoreView({
   const [pickedTab, setPickedTab] = useState<StoreTab | null>(null);
   const [sort, setSort] = useState<Sort>("discount");
 
+  // Only the answer to the latest request counts: a slower response from an earlier language
+  // must not overwrite deals and genre picks fetched for the current one
+  const latest = useRef(0);
   const load = useCallback(
     async (forceRefresh: boolean) => {
+      const mine = (latest.current += 1);
       setIsLoading(true);
       setFailed(false);
       try {
-        setReport(await fetchDeals(detectCountry(lang), forceRefresh));
+        const answer = await fetchDeals(detectCountry(lang), forceRefresh);
+        if (mine === latest.current) setReport(answer);
       } catch {
-        setFailed(true);
+        if (mine === latest.current) setFailed(true);
       } finally {
-        setIsLoading(false);
+        if (mine === latest.current) setIsLoading(false);
       }
     },
     // A store shown again is asked afresh: the backend does not ask the ones left out

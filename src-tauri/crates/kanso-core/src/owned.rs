@@ -23,7 +23,11 @@ use crate::db::LibraryDb;
 use crate::accounts::StoreError;
 use crate::epic_account::{EpicApi, EpicAsset, EpicSession};
 use crate::i18n::Lang;
-use crate::metadata::{title_key, MetadataClient, SteamAppDetails};
+use crate::metadata::{
+    can_batch_translate_installed, has_foreign_steam_genre, needs_translation, title_key,
+    translate_all_steam_genres, translate_known_steam_genres, translate_only_known_steam_genres,
+    MetadataClient, SteamAppDetails, STEAM_SUMMARY_BATCH,
+};
 use crate::models::{DetectedGame, GamePlatform};
 use crate::scanner::steam::SteamPlayStats;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -335,6 +339,24 @@ pub fn match_absent_games_step(
     pause: std::time::Duration,
     now_ms: u64,
 ) -> MatchStep {
+    match_absent_games_step_cancellable(db, client, pause, now_ms, || false)
+}
+
+/// Same as [`match_absent_games_step`], stopping early without writing stale-language details
+/// if `is_cancelled` returns `true`.
+pub fn match_absent_games_step_cancellable<F>(
+    db: &Mutex<LibraryDb>,
+    client: &MetadataClient,
+    pause: std::time::Duration,
+    now_ms: u64,
+    is_cancelled: F,
+) -> MatchStep
+where
+    F: Fn() -> bool,
+{
+    if is_cancelled() {
+        return MatchStep::default();
+    }
     let mut pending: Vec<(String, String)> = lock(db)
         .load_games()
         .unwrap_or_default()
@@ -348,8 +370,14 @@ pub fn match_absent_games_step(
     let mut step = MatchStep::default();
     let mut found: Vec<(String, String)> = Vec::new();
     for (index, (game_id, title)) in pending.into_iter().enumerate() {
+        if is_cancelled() {
+            break;
+        }
         if index > 0 && !pause.is_zero() {
             std::thread::sleep(pause);
+            if is_cancelled() {
+                break;
+            }
         }
         match client.find_steam_app_by_title(&title) {
             Ok(appid) => found.push((game_id, appid.unwrap_or_default())),
@@ -361,7 +389,7 @@ pub fn match_absent_games_step(
     }
     step.remaining = waiting - found.len();
 
-    {
+    if !found.is_empty() {
         let mut db = lock(db);
         let settled: Vec<DetectedGame> = found
             .into_iter()
@@ -380,7 +408,9 @@ pub fn match_absent_games_step(
         }
     }
 
-    step.changed = sync_absent_game_details(db, client, now_ms);
+    if !is_cancelled() {
+        step.changed = sync_absent_game_details_cancellable(db, client, now_ms, &is_cancelled);
+    }
     step
 }
 
@@ -502,12 +532,163 @@ fn is_absent_steam_game(game: &DetectedGame) -> bool {
     game.platform == GamePlatform::Steam && !game.is_installed
 }
 
-/// A game that is not installed, has a Steam store page and was never asked about in `lang`.
+/// Translates every known official Steam store genre on non-overridden games in `db` into
+/// `lang` immediately without touching `metadata_lang` (so the upcoming Steam sync still
+/// refreshes descriptions and community tags). If a game was previously left with foreign
+/// genres while claiming `lang`, its `metadata_lang` is cleared so its description is
+/// refreshed too. Returns the games whose stored row changed.
+pub fn translate_cached_genres(db: &mut LibraryDb, lang: Lang) -> Vec<DetectedGame> {
+    let code = lang.code();
+    let games = db.load_games().unwrap_or_default();
+    let mut updated: Vec<DetectedGame> = Vec::new();
+    for mut game in games {
+        if game.custom_override || game.genres.is_empty() {
+            continue;
+        }
+        let had_foreign = has_foreign_steam_genre(&game.genres, lang);
+        let (translated, changed) = translate_known_steam_genres(&game.genres, lang);
+        if !changed {
+            continue;
+        }
+        if had_foreign && game.metadata_lang.as_deref() == Some(code) {
+            // Previously poisoned row: force description refresh in `lang` as well
+            game.metadata_lang = None;
+        }
+        game.genres = translated;
+        updated.push(game);
+    }
+    if updated.is_empty() || db.upsert_games(&updated).is_err() {
+        return Vec::new();
+    }
+    updated
+}
+
+/// Refreshes description, genres and community tags for installed games whose only pending
+/// work is a language switch (cover, store type, title and Steam page are already settled),
+/// fifty games per `IStoreBrowseService` request. Preserves each game's exact publisher genres
+/// by translating known Steam genres losslessly. Stops cleanly without committing if
+/// `is_cancelled` turns `true`.
+pub fn sync_installed_game_translations<F>(
+    db: &Mutex<LibraryDb>,
+    client: &MetadataClient,
+    has_api_key: bool,
+    now_ms: u64,
+    retry_now: bool,
+    is_cancelled: F,
+) -> Vec<DetectedGame>
+where
+    F: Fn() -> bool,
+{
+    if is_cancelled() {
+        return Vec::new();
+    }
+    let lang = client.language();
+    let code = lang.code();
+
+    let pending: Vec<(String, u64)> = lock(db)
+        .load_games()
+        .unwrap_or_default()
+        .iter()
+        .filter(|game| can_batch_translate_installed(game, has_api_key, lang, now_ms, retry_now))
+        .filter_map(|game| Some((game.id.clone(), game.steam_store_id()?.parse().ok()?)))
+        .collect();
+    if pending.is_empty() {
+        return Vec::new();
+    }
+
+    let mut all_changed: Vec<DetectedGame> = Vec::new();
+    for chunk in pending.chunks(STEAM_SUMMARY_BATCH) {
+        if is_cancelled() {
+            break;
+        }
+        let appids: Vec<u64> = chunk
+            .iter()
+            .map(|(_, appid)| *appid)
+            .collect::<BTreeSet<u64>>()
+            .into_iter()
+            .collect();
+        let Some(details) = client.fetch_steam_app_details_cancellable(&appids, &is_cancelled)
+        else {
+            break;
+        };
+        let details: HashMap<u64, SteamAppDetails> =
+            details.into_iter().map(|entry| (entry.appid, entry)).collect();
+
+        let mut db = lock(db);
+        // Checked while holding the DB lock so a concurrent language switch (which bumps the
+        // generation counter under the same lock) can never race with this commit.
+        if is_cancelled() {
+            break;
+        }
+        let mut settled: Vec<DetectedGame> = Vec::new();
+        let mut batch_changed: Vec<DetectedGame> = Vec::new();
+        for (game_id, appid) in chunk {
+            let (Ok(Some(mut game)), Some(details)) = (db.get_game(game_id), details.get(appid))
+            else {
+                continue;
+            };
+            if !can_batch_translate_installed(&game, has_api_key, lang, now_ms, retry_now) {
+                continue;
+            }
+            if !details.listed {
+                // Leave unlisted apps to the per-game `appdetails` pass
+                continue;
+            }
+            let translate = needs_translation(&game, lang);
+            if translate && game.short_description.is_some() && details.short_description.is_none()
+            {
+                // Avoid dropping an existing description when `IStoreBrowseService` omits it
+                continue;
+            }
+            let before = (
+                game.tags.clone(),
+                game.genres.clone(),
+                game.short_description.clone(),
+            );
+            game.tags = details.tags.clone();
+            game.tags_lang = Some(code.to_string());
+            if translate {
+                if details.short_description.is_some() {
+                    game.short_description = details.short_description.clone();
+                }
+                if let Some(translated) = translate_all_steam_genres(&game.genres, lang) {
+                    game.genres = translated;
+                } else if !details.genres.is_empty() {
+                    game.genres = details.genres.clone();
+                }
+                if game.short_description.is_some() || !game.genres.is_empty() {
+                    game.metadata_lang = Some(code.to_string());
+                }
+            }
+            game.metadata_synced = true;
+            game.metadata_attempted_at = now_ms;
+            if before
+                != (
+                    game.tags.clone(),
+                    game.genres.clone(),
+                    game.short_description.clone(),
+                )
+            {
+                game.updated_at = now_ms;
+                batch_changed.push(game.clone());
+            }
+            settled.push(game);
+        }
+        if db.upsert_games(&settled).is_err() {
+            break;
+        }
+        all_changed.extend(batch_changed);
+    }
+    all_changed
+}
+
+/// A game that is not installed, has a Steam store page and was never asked about in `lang`
+/// (or still carries cached texts in another language).
 fn lacks_details(game: &DetectedGame, lang: Lang) -> bool {
     !game.is_installed
         && !game.is_hidden
         && game.steam_store_id().is_some()
-        && game.tags_lang.as_deref() != Some(lang.code())
+        && (game.tags_lang.as_deref() != Some(lang.code()) || needs_translation(game, lang))
 }
 
 /// Gives the games that are not installed their genres, community tags and description, in
@@ -524,6 +705,23 @@ pub fn sync_absent_game_details(
     client: &MetadataClient,
     now_ms: u64,
 ) -> Vec<DetectedGame> {
+    sync_absent_game_details_cancellable(db, client, now_ms, || false)
+}
+
+/// Same as [`sync_absent_game_details`], stopping between batches and refusing to commit if
+/// `is_cancelled` turns `true` (checked under the database lock before writing).
+pub fn sync_absent_game_details_cancellable<F>(
+    db: &Mutex<LibraryDb>,
+    client: &MetadataClient,
+    now_ms: u64,
+    is_cancelled: F,
+) -> Vec<DetectedGame>
+where
+    F: Fn() -> bool,
+{
+    if is_cancelled() {
+        return Vec::new();
+    }
     let lang = client.language();
 
     let mut pending: Vec<(String, u64)> = lock(db)
@@ -538,42 +736,53 @@ pub fn sync_absent_game_details(
         return Vec::new();
     }
 
-    // Two entries can share a store page (the same game owned on two stores)
-    let appids: Vec<u64> = pending
-        .iter()
-        .map(|(_, appid)| *appid)
-        .collect::<BTreeSet<u64>>()
-        .into_iter()
-        .collect();
-    let Some(details) = client.fetch_steam_app_details(&appids) else {
-        return Vec::new();
-    };
-    let details: HashMap<u64, SteamAppDetails> =
-        details.into_iter().map(|details| (details.appid, details)).collect();
-
-    let mut db = lock(db);
-    let mut settled: Vec<DetectedGame> = Vec::new();
-    let mut changed: Vec<DetectedGame> = Vec::new();
-    for (game_id, appid) in pending {
-        // Against the game as it is now: it may have been installed, hidden or edited by
-        // hand while Steam was being asked
-        let (Ok(Some(mut game)), Some(details)) = (db.get_game(&game_id), details.get(&appid))
+    let mut all_changed: Vec<DetectedGame> = Vec::new();
+    for chunk in pending.chunks(STEAM_SUMMARY_BATCH) {
+        if is_cancelled() {
+            break;
+        }
+        // Two entries can share a store page (the same game owned on two stores)
+        let appids: Vec<u64> = chunk
+            .iter()
+            .map(|(_, appid)| *appid)
+            .collect::<BTreeSet<u64>>()
+            .into_iter()
+            .collect();
+        let Some(details) = client.fetch_steam_app_details_cancellable(&appids, &is_cancelled)
         else {
-            continue;
+            break;
         };
-        if !lacks_details(&game, lang) {
-            continue;
+        let details: HashMap<u64, SteamAppDetails> =
+            details.into_iter().map(|details| (details.appid, details)).collect();
+
+        let mut db = lock(db);
+        if is_cancelled() {
+            break;
         }
-        if apply_details(&mut game, details, lang) {
-            game.updated_at = now_ms;
-            changed.push(game.clone());
+        let mut settled: Vec<DetectedGame> = Vec::new();
+        let mut batch_changed: Vec<DetectedGame> = Vec::new();
+        for (game_id, appid) in chunk {
+            // Against the game as it is now: it may have been installed, hidden or edited by
+            // hand while Steam was being asked
+            let (Ok(Some(mut game)), Some(details)) = (db.get_game(game_id), details.get(appid))
+            else {
+                continue;
+            };
+            if !lacks_details(&game, lang) {
+                continue;
+            }
+            if apply_details(&mut game, details, lang) {
+                game.updated_at = now_ms;
+                batch_changed.push(game.clone());
+            }
+            settled.push(game);
         }
-        settled.push(game);
+        if db.upsert_games(&settled).is_err() {
+            break;
+        }
+        all_changed.extend(batch_changed);
     }
-    if db.upsert_games(&settled).is_err() {
-        return Vec::new();
-    }
-    changed
+    all_changed
 }
 
 /// Writes what the store said into `game` and notes that it was asked in `lang`. Returns
@@ -586,17 +795,32 @@ fn apply_details(game: &mut DetectedGame, details: &SteamAppDetails, lang: Lang)
         game.tags = details.tags.clone();
         if !game.custom_override {
             // Texts fetched in another language are replaced, texts in this one are kept
-            let outdated = game.metadata_lang.as_deref() != Some(code);
-            if details.short_description.is_some() && (outdated || game.short_description.is_none()) {
+            let outdated = game.metadata_lang.as_deref() != Some(code)
+                || has_foreign_steam_genre(&game.genres, lang);
+            if outdated {
                 game.short_description = details.short_description.clone();
+                if !details.genres.is_empty() {
+                    game.genres = details.genres.clone();
+                } else if !game.genres.is_empty() {
+                    // Never leave foreign-language auto-fetched genres stamped as `lang`
+                    game.genres = translate_only_known_steam_genres(&game.genres, lang);
+                }
+            } else {
+                if game.short_description.is_none() && details.short_description.is_some() {
+                    game.short_description = details.short_description.clone();
+                }
+                if game.genres.is_empty() && !details.genres.is_empty() {
+                    game.genres = details.genres.clone();
+                }
             }
-            if !details.genres.is_empty() && (outdated || game.genres.is_empty()) {
-                game.genres = details.genres.clone();
-            }
-            if game.short_description.is_some() || !game.genres.is_empty() {
+            if game.short_description.is_some() || !game.genres.is_empty() || outdated {
                 game.metadata_lang = Some(code.to_string());
             }
         }
+    } else if needs_translation(game, lang) {
+        let (translated, _) = translate_known_steam_genres(&game.genres, lang);
+        game.genres = translated;
+        game.metadata_lang = Some(code.to_string());
     }
     // An answer settles the matter, even "the store does not list it": no asking forever
     game.tags_lang = Some(code.to_string());
@@ -1397,5 +1621,337 @@ mod tests {
         assert!(sync_steam_library(&db, &client, &play_stats, &owned, 1).is_empty());
         assert_eq!(lock(&db).game_count().unwrap(), 0);
         assert!(lock(&db).known_steam_non_games(1).unwrap().is_empty(), "asked again next time");
+    }
+
+    #[test]
+    fn cached_genre_translation_heals_poisoned_rows_and_respects_manual_overrides() {
+        let mut db = LibraryDb::open_in_memory().unwrap();
+
+        // Normal game switched back from Russian to Italian
+        let mut normal = installed("620", "Portal 2");
+        normal.genres = vec!["Экшены".into(), "Приключенческие игры".into(), "Инди".into()];
+        normal.metadata_lang = Some("ru".into());
+        db.upsert_game(&normal).unwrap();
+
+        // Poisoned row: Russian genres stamped with Italian metadata_lang
+        let mut poisoned = absent("570", "Dota 2");
+        poisoned.genres = vec!["Стратегии".into(), "Бесплатные".into()];
+        poisoned.short_description = Some("Описание на русском.".into());
+        poisoned.metadata_lang = Some("it".into());
+        db.upsert_game(&poisoned).unwrap();
+
+        // User-edited game: must never be touched
+        let mut manual = installed("1145360", "Hades");
+        manual.custom_override = true;
+        manual.genres = vec!["Экшены".into()];
+        manual.metadata_lang = Some("ru".into());
+        db.upsert_game(&manual).unwrap();
+
+        let changed = translate_cached_genres(&mut db, Lang::It);
+        assert_eq!(changed.len(), 2);
+
+        let normal = db.get_game("steam:620").unwrap().unwrap();
+        assert_eq!(normal.genres, ["Azione", "Avventura", "Indie"]);
+        assert_eq!(normal.metadata_lang.as_deref(), Some("ru"), "kept so Steam still refreshes description");
+
+        let poisoned = db.get_game("steam:570").unwrap().unwrap();
+        assert_eq!(poisoned.genres, ["Strategia", "Free-to-Play"]);
+        assert_eq!(poisoned.metadata_lang, None, "cleared so Russian description gets refreshed");
+
+        let manual = db.get_game("steam:1145360").unwrap().unwrap();
+        assert_eq!(manual.genres, ["Экшены"], "manual overrides are preserved");
+    }
+
+    #[test]
+    fn batched_installed_translation_preserves_exact_genres_and_respects_cancellation() {
+        let (base_url, recorded) = spawn_mock_api_server();
+        let covers = tempfile::tempdir().unwrap();
+        let cover = covers.path().join("steam_620.png");
+        std::fs::write(&cover, b"png").unwrap();
+
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+        let mut portal = installed("620", "Portal 2");
+        portal.cover_path = Some(cover.to_string_lossy().to_string());
+        portal.app_type = Some("game".into());
+        portal.short_description = Some("Rompicapo cooperativi.".into());
+        // Publisher-chosen genres including Early Access (which IStoreBrowseService tags omit)
+        portal.genres = vec!["Azione".into(), "Accesso anticipato".into()];
+        portal.metadata_lang = Some("it".into());
+        portal.tags_lang = Some("it".into());
+        lock(&db).upsert_game(&portal).unwrap();
+
+        // Switch Italian -> English in one batched request (no /api/appdetails call)
+        let english = MetadataClient::with_base_urls(&base_url, &base_url, &base_url)
+            .with_language(Lang::En);
+        let changed = sync_installed_game_translations(&db, &english, false, 100, true, || false);
+        assert_eq!(changed.len(), 1);
+        let stored = lock(&db).get_game("steam:620").unwrap().unwrap();
+        assert_eq!(stored.genres, ["Action", "Early Access"], "publisher genres translated losslessly");
+        assert_eq!(stored.tags, ["Party Game", "RPG"]);
+        assert_eq!(stored.short_description.as_deref(), Some("Co-op puzzles.\n\nWith portals & lasers."));
+        assert_eq!(stored.metadata_lang.as_deref(), Some("en"));
+        assert_eq!(stored.tags_lang.as_deref(), Some("en"));
+        assert!(
+            !recorded.lock().unwrap().iter().any(|p| p.starts_with("/api/appdetails")),
+            "batch translation must avoid per-app appdetails calls"
+        );
+
+        // Cancelled stale pass (e.g. an older Russian sync after user switched back to English)
+        // must write nothing at all into SQLite
+        let russian = MetadataClient::with_base_urls(&base_url, &base_url, &base_url)
+            .with_language(Lang::Ru);
+        let aborted = sync_installed_game_translations(&db, &russian, false, 200, true, || true);
+        assert!(aborted.is_empty());
+        let still_english = lock(&db).get_game("steam:620").unwrap().unwrap();
+        assert_eq!(still_english.genres, ["Action", "Early Access"]);
+        assert_eq!(still_english.metadata_lang.as_deref(), Some("en"));
+    }
+
+    #[test]
+    fn absent_game_details_fix_mismatched_lang_empty_genres_and_cancel_cleanly() {
+        let (base_url, _recorded) = spawn_mock_api_server();
+        let italian = MetadataClient::with_base_urls(&base_url, &base_url, &base_url)
+            .with_language(Lang::It);
+        let db = Mutex::new(LibraryDb::open_in_memory().unwrap());
+
+        // tags_lang already "it" while metadata_lang is still "ru" -> must still be picked up
+        let mut portal = absent("620", "Portal 2");
+        portal.genres = vec!["Экшены".into(), "Ролевые игры".into()];
+        portal.short_description = Some("Старое описание.".into());
+        portal.metadata_lang = Some("ru".into());
+        portal.tags_lang = Some("it".into());
+        lock(&db).upsert_game(&portal).unwrap();
+
+        // Delisted absent game with leftover Russian genres -> translates known genres cleanly
+        let mut delisted = absent("228980", "Removed App");
+        delisted.genres = vec!["Экшены".into(), "Инди".into()];
+        delisted.metadata_lang = Some("ru".into());
+        delisted.tags_lang = Some("ru".into());
+        lock(&db).upsert_game(&delisted).unwrap();
+
+        // Cancelled Russian pass writes nothing
+        let russian = italian.clone().with_language(Lang::Ru);
+        assert!(sync_absent_game_details_cancellable(&db, &russian, 1, || true).is_empty());
+
+        let changed = sync_absent_game_details(&db, &italian, 2);
+        assert_eq!(changed.len(), 2);
+
+        let portal = lock(&db).get_game("steam:620").unwrap().unwrap();
+        assert_eq!(portal.genres, ["Azione", "GDR"]);
+        assert_eq!(portal.metadata_lang.as_deref(), Some("it"));
+        assert_eq!(portal.short_description.as_deref(), Some("Rompicapo cooperativi.\n\nCon portali & laser."));
+
+        let delisted = lock(&db).get_game("steam:228980").unwrap().unwrap();
+        assert_eq!(delisted.genres, ["Azione", "Indie"]);
+        assert_eq!(delisted.metadata_lang.as_deref(), Some("it"));
+        assert_eq!(delisted.tags_lang.as_deref(), Some("it"));
+
+        // Direct unit check on apply_details: if Steam returns listed=true with empty genres
+        // during a language switch, known Steam genres translate and unknown foreign ones drop
+        let mut sparse = absent("999", "Sparse");
+        sparse.genres = vec!["Экшены".into(), "Неизвестный жанр".into()];
+        sparse.short_description = Some("Старое описание.".into());
+        sparse.metadata_lang = Some("ru".into());
+        let empty_details = SteamAppDetails {
+            appid: 999,
+            listed: true,
+            short_description: None,
+            genres: Vec::new(),
+            tags: vec!["Rompicapo".into()],
+        };
+        assert!(apply_details(&mut sparse, &empty_details, Lang::It));
+        assert_eq!(sparse.genres, ["Azione"], "known translated, foreign untranslatable dropped");
+        assert_eq!(sparse.short_description, None, "stale foreign description cleared");
+        assert_eq!(sparse.metadata_lang.as_deref(), Some("it"));
+    }
+
+    #[test]
+    fn rapid_language_switches_across_all_four_languages_never_mix_genres_or_tags() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        use std::sync::{Arc, Barrier};
+
+        // Dedicated 4-language mock Steam server that holds the first Russian request at a
+        // barrier so the test deterministically reproduces an in-flight Russian sync racing
+        // against a user switch back to Italian.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind 4-lang mock");
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let russian_entered = Arc::new(Barrier::new(2));
+        let release_russian = Arc::new(Barrier::new(2));
+        let entered_srv = Arc::clone(&russian_entered);
+        let release_srv = Arc::clone(&release_russian);
+
+        std::thread::spawn(move || {
+            let mut held_once = false;
+            for stream in listener.incoming().flatten() {
+                let mut reader = BufReader::new(&stream);
+                let mut request_line = String::new();
+                if reader.read_line(&mut request_line).is_err() || request_line.is_empty() {
+                    continue;
+                }
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+                        break;
+                    }
+                }
+                let path = request_line.split_whitespace().nth(1).unwrap_or("/").to_string();
+                let lang = if path.contains("russian") {
+                    Lang::Ru
+                } else if path.contains("english") {
+                    Lang::En
+                } else if path.contains("spanish") {
+                    Lang::Es
+                } else {
+                    Lang::It
+                };
+
+                // Pause the first Russian GetItems call mid-flight so the caller switches back to Italian
+                if lang == Lang::Ru && path.starts_with("/IStoreBrowseService/") && !held_once {
+                    held_once = true;
+                    entered_srv.wait();
+                    release_srv.wait();
+                }
+
+                let body = if path.starts_with("/tagdata/populartags/") {
+                    match lang {
+                        Lang::It => r#"[{"tagid":19,"name":"Azione"},{"tagid":21,"name":"Avventura"},{"tagid":122,"name":"GDR"},{"tagid":492,"name":"Indie"},{"tagid":7178,"name":"Giochi di società"}]"#.to_string(),
+                        Lang::En => r#"[{"tagid":19,"name":"Action"},{"tagid":21,"name":"Adventure"},{"tagid":122,"name":"RPG"},{"tagid":492,"name":"Indie"},{"tagid":7178,"name":"Party Game"}]"#.to_string(),
+                        Lang::Es => r#"[{"tagid":19,"name":"Acción"},{"tagid":21,"name":"Aventura"},{"tagid":122,"name":"Rol"},{"tagid":492,"name":"Indie"},{"tagid":7178,"name":"Juegos de fiesta"}]"#.to_string(),
+                        Lang::Ru => r#"[{"tagid":19,"name":"Экшен"},{"tagid":21,"name":"Приключение"},{"tagid":122,"name":"Ролевая игра"},{"tagid":492,"name":"Инди"},{"tagid":7178,"name":"Для вечеринок"}]"#.to_string(),
+                    }
+                } else {
+                    let desc = match lang {
+                        Lang::It => "Descrizione italiana",
+                        Lang::En => "English description",
+                        Lang::Es => "Descripción española",
+                        Lang::Ru => "Русское описание",
+                    };
+                    format!(
+                        r#"{{"response":{{"store_items":[
+                            {{"id":620,"appid":620,"success":1,"name":"Portal 2","type":0,
+                             "basic_info":{{"short_description":"{desc} 620"}},
+                             "tags":[{{"tagid":19,"weight":900}},{{"tagid":21,"weight":500}},{{"tagid":7178,"weight":200}}]}},
+                            {{"id":570,"appid":570,"success":1,"name":"Dota 2","type":0,
+                             "basic_info":{{"short_description":"{desc} 570"}},
+                             "tags":[{{"tagid":122,"weight":800}},{{"tagid":492,"weight":400}}]}}
+                        ]}}}}"#
+                    )
+                };
+
+                let mut stream = stream;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+
+        let covers = tempfile::tempdir().unwrap();
+        let cover = covers.path().join("steam_620.png");
+        std::fs::write(&cover, b"png").unwrap();
+
+        let db = Arc::new(Mutex::new(LibraryDb::open_in_memory().unwrap()));
+        {
+            let db_guard = lock(&db);
+            let mut inst = installed("620", "Portal 2");
+            inst.cover_path = Some(cover.to_string_lossy().to_string());
+            inst.app_type = Some("game".into());
+            inst.short_description = Some("Descrizione italiana 620".into());
+            inst.genres = vec!["Azione".into(), "Avventura".into(), "Accesso anticipato".into()];
+            inst.tags = vec!["Azione".into(), "Avventura".into(), "Giochi di società".into()];
+            inst.metadata_lang = Some("it".into());
+            inst.tags_lang = Some("it".into());
+            db_guard.upsert_game(&inst).unwrap();
+
+            let mut abs = absent("570", "Dota 2");
+            abs.short_description = Some("Descrizione italiana 570".into());
+            abs.genres = vec!["GDR".into(), "Indie".into()];
+            abs.tags = vec!["GDR".into(), "Indie".into()];
+            abs.metadata_lang = Some("it".into());
+            abs.tags_lang = Some("it".into());
+            db_guard.upsert_game(&abs).unwrap();
+        }
+
+        let generation = Arc::new(AtomicU64::new(1));
+
+        // 1. User switches Italian -> Russian: thread starts syncing in Russian (gen=1)
+        let db_ru = Arc::clone(&db);
+        let gen_ru = Arc::clone(&generation);
+        let url_ru = base_url.clone();
+        let ru_thread = std::thread::spawn(move || {
+            let client = MetadataClient::with_base_urls(&url_ru, &url_ru, &url_ru)
+                .with_language(Lang::Ru);
+            let is_stale = || gen_ru.load(Ordering::SeqCst) != 1;
+            sync_installed_game_translations(&db_ru, &client, false, 10, true, is_stale);
+            sync_absent_game_details_cancellable(&db_ru, &client, 10, is_stale);
+        });
+
+        // Wait until the Russian sync is mid-flight inside its HTTP call
+        russian_entered.wait();
+
+        // 2. While Russian sync is still running, user switches back Russian -> Italian!
+        {
+            let mut db_guard = lock(&db);
+            generation.fetch_add(1, Ordering::SeqCst);
+            translate_cached_genres(&mut db_guard, Lang::It);
+        }
+        // Release the blocked Russian HTTP response and wait for the stale thread to exit
+        release_russian.wait();
+        ru_thread.join().unwrap();
+
+        // Run the Italian sync (gen=2)
+        let it_client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url)
+            .with_language(Lang::It);
+        let is_stale_it = || generation.load(Ordering::SeqCst) != 2;
+        sync_installed_game_translations(&db, &it_client, false, 20, true, is_stale_it);
+        sync_absent_game_details_cancellable(&db, &it_client, 20, is_stale_it);
+
+        // Verify ZERO Russian genres, tags, or descriptions leaked into either game
+        for game in lock(&db).load_games().unwrap() {
+            assert_eq!(game.metadata_lang.as_deref(), Some("it"), "{}", game.id);
+            assert_eq!(game.tags_lang.as_deref(), Some("it"), "{}", game.id);
+            assert!(!has_foreign_steam_genre(&game.genres, Lang::It), "{:?}", game.genres);
+            assert!(game.short_description.as_deref().unwrap().starts_with("Descrizione italiana"));
+        }
+
+        // 3. Cycle through EVERY supported language (En -> Es -> Ru -> It) and verify 100% consistency
+        let expected: &[(Lang, &[&str], &[&str], &str)] = &[
+            (Lang::En, &["Action", "Adventure", "Early Access"], &["RPG", "Indie"], "English description"),
+            (Lang::Es, &["Acción", "Aventura", "Acceso anticipado"], &["Rol", "Indie"], "Descripción española"),
+            (Lang::Ru, &["Экшены", "Приключенческие игры", "Ранний доступ"], &["Ролевые игры", "Инди"], "Русское описание"),
+            (Lang::It, &["Azione", "Avventura", "Accesso anticipato"], &["GDR", "Indie"], "Descrizione italiana"),
+        ];
+        for (step, &(lang, inst_genres, abs_genres, desc_prefix)) in expected.iter().enumerate() {
+            let my_gen = {
+                let mut db_guard = lock(&db);
+                let g = generation.fetch_add(1, Ordering::SeqCst) + 1;
+                translate_cached_genres(&mut db_guard, lang);
+                g
+            };
+            let client = MetadataClient::with_base_urls(&base_url, &base_url, &base_url)
+                .with_language(lang);
+            let is_stale = || generation.load(Ordering::SeqCst) != my_gen;
+            let ts = 100 + step as u64;
+            sync_installed_game_translations(&db, &client, false, ts, true, is_stale);
+            sync_absent_game_details_cancellable(&db, &client, ts, is_stale);
+
+            let inst = lock(&db).get_game("steam:620").unwrap().unwrap();
+            assert_eq!(inst.genres, inst_genres, "installed genres in {lang:?}");
+            assert_eq!(inst.metadata_lang.as_deref(), Some(lang.code()));
+            assert_eq!(inst.tags_lang.as_deref(), Some(lang.code()));
+            assert!(inst.short_description.as_deref().unwrap().starts_with(desc_prefix));
+            assert!(!has_foreign_steam_genre(&inst.genres, lang));
+
+            let abs = lock(&db).get_game("steam:570").unwrap().unwrap();
+            assert_eq!(abs.genres, abs_genres, "absent genres in {lang:?}");
+            assert_eq!(abs.metadata_lang.as_deref(), Some(lang.code()));
+            assert_eq!(abs.tags_lang.as_deref(), Some(lang.code()));
+            assert!(abs.short_description.as_deref().unwrap().starts_with(desc_prefix));
+            assert!(!has_foreign_steam_genre(&abs.genres, lang));
+        }
     }
 }
