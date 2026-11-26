@@ -18,7 +18,7 @@ body:
     id: version
     attributes:
       label: Kanso version
-      description: The version of the installer you used (for example 0.2.3).
+      description: The version of the installer you used (for example 0.3.0).
     validations:
       required: true
   - type: input

@@ -2,7 +2,7 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
-## Unreleased
+## 0.3.0
 
 - **In-app updates.** Kanso checks GitHub Releases automatically at startup (can be toggled or
   triggered manually in *Settings → General*) and proposes new versions in a dialog styled to
