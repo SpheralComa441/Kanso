@@ -2,7 +2,7 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
-## Unreleased
+## 0.3.3
 
 - **Customizable page navigation tabs.** *Home*, *Store*, *News*, *Statistics* and *Emulators*
   now sit by default in a horizontal top bar with muted theme-tinted tabs that light up on hover
