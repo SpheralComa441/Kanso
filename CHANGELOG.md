@@ -2,7 +2,7 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
-## Unreleased
+## 0.3.1
 
 - **Consistent genres, tags and descriptions across language switches.** Switching the interface
   language back and forth (for example Italian → Russian → Italian, or across English and Spanish)

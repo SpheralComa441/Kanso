@@ -5,7 +5,7 @@ resolver = "2"
 
 [package]
 name = "kanso"
-version = "0.3.0"
+version = "0.3.1"
 description = "Kanso — Minimalist Windows Game Launcher"
 authors = ["Kanso Contributors"]
 edition = "2021"
