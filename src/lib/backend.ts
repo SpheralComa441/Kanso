@@ -2,8 +2,10 @@ import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import packageJson from "../../package.json";
 import type {
   AppConfig,
+  AppUpdateInfo,
   BadgeEntry,
   DealsReport,
   DetectedGame,
@@ -26,6 +28,8 @@ import type {
   SgdbGameMatch,
   StoreAccountInfo,
   Theme,
+  UpdateCheckResult,
+  UpdateProgress,
   WindowSignIn,
   HideableSection,
   HomeConfig,
@@ -82,6 +86,9 @@ const PREVIEW_THEMES_KEY = "kanso.browser_preview.themes";
  */
 const PREVIEW_HOME_PARTS_KEY = "kanso.browser_preview.home_parts";
 
+/** Version of this build of Kanso (kept in sync with package.json & tauri.conf.json). */
+export const APP_VERSION: string = packageJson.version;
+
 const DEFAULT_CONFIG: AppConfig = {
   steamgriddbApiKey: "",
   customFolders: [],
@@ -102,6 +109,8 @@ const DEFAULT_CONFIG: AppConfig = {
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
+  checkForUpdates: true,
+  skippedUpdateVersion: null,
 };
 
 /** Keeps only well-formed per-plugin choices (the preview reads them from localStorage). */
@@ -196,6 +205,11 @@ export async function getSettings(): Promise<AppConfig> {
       emulators: withEmulatorSettings(parsed.emulators),
       hasGamePass: parsed.hasGamePass === true,
       gamePassCatalog: parsed.gamePassCatalog === true,
+      checkForUpdates: parsed.checkForUpdates !== false,
+      skippedUpdateVersion:
+        typeof parsed.skippedUpdateVersion === "string" && parsed.skippedUpdateVersion.trim()
+          ? parsed.skippedUpdateVersion.trim()
+          : null,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -225,6 +239,11 @@ export async function saveSettings(config: AppConfig): Promise<AppConfig> {
     emulators: withEmulatorSettings(config.emulators),
     hasGamePass: config.hasGamePass === true,
     gamePassCatalog: config.gamePassCatalog === true,
+    checkForUpdates: config.checkForUpdates !== false,
+    skippedUpdateVersion:
+      typeof config.skippedUpdateVersion === "string" && config.skippedUpdateVersion.trim()
+        ? config.skippedUpdateVersion.trim()
+        : null,
   };
 
   if (isTauri()) {
@@ -1505,3 +1524,115 @@ export async function openPluginLink(url: string): Promise<void> {
   }
   window.open(url, "_blank", "noopener,noreferrer");
 }
+
+/* ----------------------------------------------------------- app updates */
+
+const previewProgressListeners = new Set<(progress: UpdateProgress) => void>();
+let previewUpdateCancelled = false;
+
+function nextPreviewVersion(current: string): string {
+  const [maj = 0, min = 0, pat = 0] = current
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+  return `${maj}.${min}.${pat + 1}`;
+}
+
+function previewSampleUpdate(): AppUpdateInfo | null {
+  const custom = (globalThis as { __KANSO_PREVIEW_UPDATE__?: AppUpdateInfo | null })
+    .__KANSO_PREVIEW_UPDATE__;
+  if (custom !== undefined) return custom;
+  if (
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("previewUpdate")
+  ) {
+    const next = nextPreviewVersion(APP_VERSION);
+    return {
+      currentVersion: APP_VERSION,
+      version: next,
+      name: `Kanso ${next}`,
+      notes: [
+        "- **Aggiornamenti direttamente in app.** Kanso verifica le nuove versioni su GitHub, verifica l'impronta SHA-256 del file scaricato e avvia l'aggiornamento senza uscire dall'app.",
+        "- **Finestra in tema.** La proposta di aggiornamento segue i colori, i caratteri, gli angoli e le animazioni del tema selezionato.",
+        "- Miglioramenti minori alla stabilità e tempi di avvio più rapidi.",
+      ].join("\n"),
+      publishedAt: new Date().toISOString(),
+      releaseUrl: "https://github.com/SpheralComa441/Kanso/releases",
+      installerKind: "nsis",
+      assetName: `Kanso_${next}_x64-setup.exe`,
+      assetSize: 7_450_000,
+    };
+  }
+  return null;
+}
+
+/** Checks GitHub Releases for a newer stable version of Kanso. */
+export async function checkForUpdate(force = false): Promise<UpdateCheckResult> {
+  if (isTauri()) {
+    return invoke<UpdateCheckResult>("check_for_update", { force });
+  }
+  return {
+    currentVersion: APP_VERSION,
+    checkedAt: Date.now(),
+    update: previewSampleUpdate(),
+  };
+}
+
+/**
+ * Downloads, verifies (SHA-256), and starts the installer for `version`.
+ * On Windows, Kanso exits once the installer launches and reopens on the new version.
+ */
+export async function installAppUpdate(version: string): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("install_app_update", { version });
+    return;
+  }
+  previewUpdateCancelled = false;
+  const total = previewSampleUpdate()?.assetSize ?? 7_450_000;
+  for (let step = 0; step <= 10; step++) {
+    if (previewUpdateCancelled) {
+      throw new Error("CANCELLED");
+    }
+    const downloaded = Math.round((total * step) / 10);
+    const phase = step === 10 ? "verifying" : "downloading";
+    for (const listener of previewProgressListeners) {
+      listener({ phase, downloaded, total });
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 120));
+  }
+  throw new Error("PREVIEW_ONLY");
+}
+
+/** Signals an in-progress update download to stop cleanly. */
+export async function cancelAppUpdate(): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("cancel_app_update");
+    return;
+  }
+  previewUpdateCancelled = true;
+}
+
+/** Opens the verified GitHub release page in the user's browser. */
+export async function openReleasePage(): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_release_page");
+    return;
+  }
+  const url =
+    previewSampleUpdate()?.releaseUrl ??
+    "https://github.com/SpheralComa441/Kanso/releases";
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** Subscribes to live download / verification / install progress events. */
+export async function watchUpdateProgress(
+  onProgress: (progress: UpdateProgress) => void
+): Promise<() => void> {
+  if (isTauri()) {
+    return listen<UpdateProgress>("updater:progress", (event) => onProgress(event.payload));
+  }
+  previewProgressListeners.add(onProgress);
+  return () => {
+    previewProgressListeners.delete(onProgress);
+  };
+}
+

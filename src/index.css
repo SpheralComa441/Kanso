@@ -1592,4 +1592,56 @@
     width: 0.4375rem;
     height: 0.4375rem;
   }
+
+  /* --------------------------------------------------------- app updater */
+
+  .update-hero {
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent-color) 14%, var(--bg-surface)),
+      color-mix(in srgb, var(--accent-secondary) 8%, var(--bg-surface)) 58%,
+      var(--bg-surface)
+    );
+  }
+
+  .update-emblem {
+    border-color: color-mix(in srgb, var(--accent-color) 38%, var(--border-subtle));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-color) 12%, transparent);
+  }
+
+  :root[data-detail-tiles="glass"] .update-sheet {
+    border-color: color-mix(in srgb, var(--text-primary) 16%, transparent);
+    background-color: color-mix(in srgb, var(--bg-surface) 82%, transparent);
+    backdrop-filter: blur(24px) saturate(1.25);
+  }
+
+  :root[data-detail-tiles="glass"] .update-card {
+    background-color: color-mix(in srgb, var(--bg-primary) 62%, transparent);
+  }
+
+  :root[data-panel-shape="cut"] .update-sheet {
+    --cut: var(--radius-panel);
+    border-radius: 0;
+    clip-path: polygon(
+      0 0,
+      calc(100% - var(--cut)) 0,
+      100% var(--cut),
+      100% 100%,
+      var(--cut) 100%,
+      0 calc(100% - var(--cut))
+    );
+  }
+
+  @keyframes update-indeterminate {
+    0% {
+      transform: translateX(-110%);
+    }
+    100% {
+      transform: translateX(270%);
+    }
+  }
+
+  .update-progress-indeterminate {
+    animation: update-indeterminate 1.25s ease-in-out infinite;
+  }
 }

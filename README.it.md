@@ -83,6 +83,10 @@ release elenca le somme SHA-256 dei suoi file, per controllare che quello che ha
 sia quello costruito qui. La firma è in arrivo: vedi la
 [politica di firma del codice](#politica-di-firma-del-codice).
 
+Una volta installato, Kanso controlla automaticamente le nuove versioni su GitHub all'avvio
+(disattivabile in *Impostazioni → Generale*) e propone di scaricare, verificare tramite
+SHA-256 e installare gli aggiornamenti direttamente in app.
+
 ## Temi e plugin
 
 - **Temi**: otto sono inclusi, e *Impostazioni → Aspetto* ha un editor di colori e font con

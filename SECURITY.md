@@ -39,7 +39,10 @@ vulnerability, and we want to hear about it.
   brought by a plugin's library can open only a web page or a game client from a closed list
   the plugin declared. See [docs/PLUGINS.md](docs/PLUGINS.md).
 - **What is started.** A game is started by its id in the local database; the address or the
-  program to run never comes from the interface, a theme or a web page.
+  program to run never comes from the interface, a theme or a web page. In-app updates download
+  only from this repository's official GitHub Releases over HTTPS (validating every redirect
+  hop against GitHub's hosts) and verify the file's SHA-256 sum against `SHA256SUMS.txt` and
+  GitHub's asset digest before launching the installer.
 - **Your games' files.** Kanso changes none of them, with one exception you have to ask for:
   updating a game's DLSS libraries, which keeps the original next to the new file and only
   accepts a library Windows confirms as signed by NVIDIA. See [docs/DLSS.md](docs/DLSS.md).
@@ -51,5 +54,6 @@ vulnerability, and we want to hear about it.
   those hosts. Install plugins from people you have reason to trust.
 - Kanso cannot protect you from other software on your PC, or from a store's own client.
 - The installer is not signed with a publisher certificate yet, so Windows SmartScreen warns
-  on first run. Download it only from this repository's Releases page, and compare its
-  SHA-256 sum with the one published there.
+  on first run. Download it only from this repository's Releases page (or via Kanso's in-app
+  updater, which checks the published SHA-256 sum automatically), and compare its SHA-256 sum
+  with the one published there.

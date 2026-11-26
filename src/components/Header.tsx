@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ArrowDownToLine,
   LayoutGrid,
   List,
   PanelLeftClose,
@@ -17,6 +18,7 @@ import {
   windowAction,
   type WindowAction,
 } from "../lib/backend";
+import type { AppUpdateInfo } from "../types/game";
 
 export type ViewMode = "grid" | "list";
 
@@ -55,6 +57,9 @@ interface HeaderProps {
   /** How many games carry a DLSS older than NVIDIA's newest; the mark shows only above zero. */
   dlssUpdates: number;
   onOpenDlss: () => void;
+  /** Newer Kanso version ready to install; shown as a compact themed button while available. */
+  availableUpdate: AppUpdateInfo | null;
+  onOpenUpdate: () => void;
   /** Commands of the enabled plugins; the menu is hidden when there are none. */
   pluginCommands: PluginCommandEntry[];
   onRunPluginCommand: (command: PluginCommandEntry) => void;
@@ -236,6 +241,8 @@ export function Header({
   onOpenSettings,
   dlssUpdates,
   onOpenDlss,
+  availableUpdate,
+  onOpenUpdate,
   pluginCommands,
   onRunPluginCommand,
 }: HeaderProps) {
@@ -382,6 +389,23 @@ export function Header({
             >
               <span>DLSS</span>
               <span className="rounded-full bg-amber-400 px-1.5 text-2xs font-semibold tabular-nums text-zinc-950">{dlssUpdates}</span>
+            </button>
+          )}
+
+          {availableUpdate && (
+            <button
+              id="app-update-button"
+              type="button"
+              onClick={onOpenUpdate}
+              disabled={settingsDisabled}
+              title={t("header.updateAvailable", { version: availableUpdate.version })}
+              aria-label={t("header.updateAvailable", { version: availableUpdate.version })}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-accent/45 bg-accent/15 px-2.5 py-1.5 text-xs font-medium text-zinc-100 transition-colors hover:bg-accent/25 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ArrowDownToLine className="h-3.5 w-3.5 text-accent" aria-hidden="true" />
+              <span className="font-mono text-2xs font-semibold tabular-nums">
+                v{availableUpdate.version}
+              </span>
             </button>
           )}
 

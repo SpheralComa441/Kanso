@@ -7,6 +7,7 @@ mod gamepass;
 mod signin_window;
 mod dlss;
 mod news;
+mod updater;
 mod weather;
 
 use kanso_core::deals::is_allowed_store_url;
@@ -74,6 +75,8 @@ pub(crate) struct AppState {
     pub(crate) emulators: emulators::SharedEmulators,
     /// Emulated games started from Kanso, for the play time tracker.
     pub(crate) emulated_sessions: emulators::EmulatedSessions,
+    /// Cached release check and in-flight state for in-app updates.
+    pub(crate) updater_cache: Arc<updater::UpdaterCache>,
 }
 
 /// Language used when none is configured yet (the UI picks one from the OS on first run).
@@ -712,7 +715,7 @@ fn uninstall_game(app: AppHandle, state: State<'_, AppState>, game_id: String) -
         .map_err(|e| format!("{} \"{}\": {e}", T::LaunchFailed.s(), game.title))
 }
 
-const TRAY_ICON_ID: &str = "kanso-tray";
+pub(crate) const TRAY_ICON_ID: &str = "kanso-tray";
 const TRAY_MENU_SHOW_ID: &str = "tray-show";
 const TRAY_MENU_QUIT_ID: &str = "tray-quit";
 
@@ -1018,8 +1021,10 @@ fn setup_app(app: &AppHandle) -> Result<(), String> {
         complete_library_again: Arc::default(),
         emulators: Arc::default(),
         emulated_sessions: Arc::clone(&emulated_sessions),
+        updater_cache: Arc::default(),
     });
     remove_legacy_sql_mirror(app);
+    updater::cleanup_on_startup(app);
     accounts::remove_unused_window_profiles(app);
     #[cfg(debug_assertions)]
     accounts::run_self_test_if_asked(app, &db);
@@ -1121,7 +1126,11 @@ pub fn run() {
             accounts::store_sign_in_window,
             accounts::store_sign_in_browser,
             accounts::cancel_store_sign_in_browser,
-            accounts::store_sign_out
+            accounts::store_sign_out,
+            updater::check_for_update,
+            updater::install_app_update,
+            updater::cancel_app_update,
+            updater::open_release_page
         ])
         .run(tauri::generate_context!())
         .expect("Kanso failed to start");

@@ -16,6 +16,7 @@ import {
   Palette,
   Plus,
   Puzzle,
+  RefreshCw,
   Settings2,
   SlidersHorizontal,
   Gauge,
@@ -34,6 +35,7 @@ import {
   type MessageKey,
 } from "../i18n";
 import {
+  APP_VERSION,
   deleteTheme,
   exportThemeToFile,
   importThemeFromFile,
@@ -62,6 +64,7 @@ import type {
   PluginInfo,
   PluginState,
   Theme,
+  UpdateCheckResult,
 } from "../types/game";
 import { CARD_INFO_CHOICES } from "../lib/cardInfo";
 import { DlssSettings } from "./DlssSettings";
@@ -165,6 +168,14 @@ interface SettingsModalProps {
   onPluginsChanged: (saved: AppConfig) => Promise<void>;
   /** Someone signed in to a store: its games can be fetched. */
   onStoreSignedIn: () => void;
+  /** Latest in-app update check status and handlers. */
+  updateCheck: UpdateCheckResult | null;
+  isCheckingUpdate: boolean;
+  updateCheckError: string | null;
+  onCheckForUpdate: () => void;
+  onOpenUpdate: () => void;
+  /** `false` while another modal (such as the update dialog) is stacked on top. */
+  isTopmost?: boolean;
 }
 
 const SKIPPED_EXE_PATTERNS = "unins, crash, redist, dxsetup, vc_redist, launcher";
@@ -186,8 +197,14 @@ export function SettingsModal({
   pluginWarnings,
   onPluginsChanged,
   onStoreSignedIn,
+  updateCheck,
+  isCheckingUpdate,
+  updateCheckError,
+  onCheckForUpdate,
+  onOpenUpdate,
+  isTopmost = true,
 }: SettingsModalProps) {
-  const { t } = useI18n();
+  const { t, relativePast } = useI18n();
   const [section, setSection] = useState<SettingsSection>("general");
   const formRef = useRef<HTMLFormElement>(null);
   const [apiKey, setApiKey] = useState(initialConfig.steamgriddbApiKey);
@@ -203,6 +220,7 @@ export function SettingsModal({
     initialConfig.accessibility
   );
   const [trackPlaytime, setTrackPlaytime] = useState(initialConfig.trackPlaytime);
+  const [checkForUpdates, setCheckForUpdates] = useState(initialConfig.checkForUpdates);
   const [animations, setAnimations] = useState(initialConfig.animations);
   const [cardInfo, setCardInfo] = useState(initialConfig.cardInfo);
   const [hiddenSections, setHiddenSections] = useState(initialConfig.hiddenSections);
@@ -237,6 +255,7 @@ export function SettingsModal({
       setThemeId(initialConfig.themeId);
       setAccessibility(initialConfig.accessibility);
       setTrackPlaytime(initialConfig.trackPlaytime);
+      setCheckForUpdates(initialConfig.checkForUpdates);
       setAnimations(initialConfig.animations);
       setCardInfo(initialConfig.cardInfo);
       setHiddenSections(initialConfig.hiddenSections);
@@ -285,14 +304,14 @@ export function SettingsModal({
   };
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !isTopmost) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeWithoutSaving();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, isTopmost]);
 
   if (!isOpen) return null;
 
@@ -441,6 +460,8 @@ export function SettingsModal({
         ),
         hasGamePass,
         gamePassCatalog,
+        checkForUpdates,
+        skippedUpdateVersion: initialConfig.skippedUpdateVersion,
       });
       onPreviewTheme(null);
       onPreviewAccessibility(null);
@@ -653,6 +674,101 @@ export function SettingsModal({
                   />
                 </section>
               </div>
+
+              {/* App updates */}
+              <section id="settings-updates" className="space-y-2">
+                <span className="block text-xs font-medium text-zinc-200">
+                  {t("settings.updatesTitle")}
+                </span>
+
+                <div className="flex items-center justify-between gap-4 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+                  <div>
+                    <label
+                      htmlFor="check-for-updates-checkbox"
+                      className="block text-xs font-medium text-zinc-200"
+                    >
+                      {t("settings.updatesAuto")}
+                    </label>
+                    <p className="text-2xs leading-relaxed text-zinc-500">
+                      {t("settings.updatesAutoHelp")}
+                    </p>
+                  </div>
+                  <input
+                    id="check-for-updates-checkbox"
+                    type="checkbox"
+                    checked={checkForUpdates}
+                    onChange={(e) => setCheckForUpdates(e.target.checked)}
+                    className="h-4 w-4 shrink-0 rounded border-zinc-600 bg-oled-surface accent-accent"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-oled-border bg-oled-bg px-3.5 py-2.5">
+                  <div className="min-w-0">
+                    <span className="block font-mono text-xs font-medium tabular-nums text-zinc-200">
+                      {t("settings.updatesCurrent", {
+                        version: `v${updateCheck?.currentVersion ?? APP_VERSION}`,
+                      })}
+                    </span>
+                    <p
+                      className={`text-2xs leading-relaxed ${
+                        updateCheckError
+                          ? "text-amber-200"
+                          : updateCheck?.update
+                            ? "font-medium text-accent"
+                            : "text-zinc-500"
+                      }`}
+                    >
+                      {isCheckingUpdate
+                        ? t("settings.updatesChecking")
+                        : updateCheckError
+                          ? t("settings.updatesError", { error: updateCheckError })
+                          : updateCheck?.update
+                            ? `${t("settings.updatesAvailable", {
+                                version: `v${updateCheck.update.version}`,
+                              })}${
+                                initialConfig.skippedUpdateVersion === updateCheck.update.version
+                                  ? ` · ${t("settings.updatesSkipped", {
+                                      version: `v${updateCheck.update.version}`,
+                                    })}`
+                                  : ""
+                              }`
+                            : updateCheck
+                              ? `${t("settings.updatesUpToDate")} ${t("settings.updatesChecked", {
+                                  time: relativePast(updateCheck.checkedAt),
+                                })}`
+                              : t("settings.updatesNotChecked")}
+                    </p>
+                  </div>
+
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      id="settings-check-updates-button"
+                      type="button"
+                      disabled={isCheckingUpdate}
+                      onClick={onCheckForUpdate}
+                      className={smallButton}
+                    >
+                      <RefreshCw
+                        className={`h-3 w-3 ${
+                          isCheckingUpdate ? "animate-spin text-accent" : "text-zinc-400"
+                        }`}
+                      />
+                      <span>{t("settings.updatesCheckNow")}</span>
+                    </button>
+                    {updateCheck?.update && (
+                      <button
+                        id="settings-open-update-button"
+                        type="button"
+                        onClick={onOpenUpdate}
+                        className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1 text-xs font-semibold text-zinc-950 transition-colors hover:bg-accent-hover"
+                      >
+                        <Download className="h-3 w-3" />
+                        <span>{t("settings.updatesOpen")}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </section>
             </Panel>
 
             <Panel

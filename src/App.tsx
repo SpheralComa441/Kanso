@@ -22,6 +22,7 @@ import { likedEndingSoon, StoreView } from "./components/StoreView";
 import { StatsView } from "./components/StatsView";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./components/StatusIcon";
 import { ThemeEditor } from "./components/ThemeEditor";
+import { UpdateModal } from "./components/UpdateModal";
 import {
   I18nProvider,
   detectLanguage,
@@ -31,6 +32,7 @@ import {
   type MessageKey,
 } from "./i18n";
 import {
+  checkForUpdate,
   completeGameDetails,
   completeLibraryInBackground,
   getSettings,
@@ -110,6 +112,7 @@ import type {
   PluginInfo,
   ScanReport,
   Theme,
+  UpdateCheckResult,
   HomeConfig,
   StoreConfig,
 } from "./types/game";
@@ -134,6 +137,8 @@ const INITIAL_CONFIG: AppConfig = {
   emulators: [],
   hasGamePass: false,
   gamePassCatalog: false,
+  checkForUpdates: true,
+  skippedUpdateVersion: null,
 };
 
 const SIDEBAR_PREF_KEY = "kanso.ui.sidebar";
@@ -263,6 +268,86 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
   const [badges, setBadges] = useState<Record<string, BadgeEntry[]>>({});
   const [runningIds, setRunningIds] = useState<ReadonlySet<string>>(new Set());
   const [commandRun, setCommandRun] = useState<PluginCommandRun | null>(null);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
+  const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const startupUpdateChecked = useRef(false);
+  const editingThemeOrSettings = useRef(false);
+  editingThemeOrSettings.current =
+    isSettingsOpen || themeEditorBase !== null || editingGameId !== null;
+
+  /* ---------------------------------------------------------------- updates */
+
+  const openUpdateDialog = useCallback(() => {
+    setIsUpdateModalOpen(true);
+  }, []);
+
+  const runUpdateCheck = useCallback(
+    async (manual: boolean) => {
+      setIsCheckingUpdate(true);
+      if (manual) setUpdateCheckError(null);
+      try {
+        const result = await checkForUpdate(manual);
+        setUpdateCheck(result);
+        setUpdateCheckError(null);
+        if (
+          result.update &&
+          (manual ||
+            (result.update.version !== config.skippedUpdateVersion &&
+              !editingThemeOrSettings.current))
+        ) {
+          setIsUpdateModalOpen(true);
+        }
+      } catch (err) {
+        if (manual) {
+          setUpdateCheckError(
+            typeof err === "string"
+              ? err
+              : err instanceof Error
+                ? err.message
+                : t("update.failed")
+          );
+        }
+      } finally {
+        setIsCheckingUpdate(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [config.skippedUpdateVersion]
+  );
+
+  // Automatic check once the saved settings and selected theme are applied on screen
+  useEffect(() => {
+    if (!settingsLoaded || !themesLoaded || startupUpdateChecked.current) return;
+    if (!config.checkForUpdates) {
+      startupUpdateChecked.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (startupUpdateChecked.current) return;
+      startupUpdateChecked.current = true;
+      void runUpdateCheck(false);
+    }, 1500);
+    return () => window.clearTimeout(timer);
+  }, [settingsLoaded, themesLoaded, config.checkForUpdates, runUpdateCheck]);
+
+  const handleSkipUpdateVersion = useCallback(
+    async (version: string) => {
+      setIsUpdateModalOpen(false);
+      try {
+        const saved = await saveSettings({
+          ...config,
+          language: lang,
+          skippedUpdateVersion: version,
+        });
+        onConfigChange(saved);
+      } catch {
+        // The modal is already dismissed even if saving fails
+      }
+    },
+    [config, lang, onConfigChange]
+  );
 
   /* ------------------------------------------------------------------ theme */
 
@@ -1139,7 +1224,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           Number(Boolean(detailGame)) +
           Number(Boolean(editingGame)) +
           Number(isSettingsOpen) +
-          Number(Boolean(commandRun))
+          Number(Boolean(commandRun)) +
+          Number(isUpdateModalOpen)
         }
         sheetOpen={Boolean(detailGame)}
         settingsDisabled={themeEditorBase !== null}
@@ -1147,6 +1233,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onOpenSettings={() => openSettings()}
         dlssUpdates={config.dlssUpdates ? gamesToUpdate(dlss) : 0}
         onOpenDlss={() => openSettings("dlss")}
+        availableUpdate={
+          updateCheck?.update && updateCheck.update.version !== config.skippedUpdateVersion
+            ? updateCheck.update
+            : null
+        }
+        onOpenUpdate={openUpdateDialog}
         pluginCommands={pluginCommands}
         onRunPluginCommand={(command) => void startCommand(command)}
       />
@@ -1408,7 +1500,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
             : null
         }
         isLaunching={launchingId !== null && launchingId === detailGameId}
-        isTopmost={!editingGame && !isSettingsOpen}
+        isTopmost={!editingGame && !isSettingsOpen && !isUpdateModalOpen}
         onClose={closeDetail}
         onLaunch={handleLaunchGame}
         onToggleFavorite={handleToggleFavorite}
@@ -1459,7 +1551,7 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
       <PluginCommandDialog
         run={commandRun}
         games={allGames}
-        isTopmost={!detailGame && !editingGame && !isSettingsOpen}
+        isTopmost={!detailGame && !editingGame && !isSettingsOpen && !isUpdateModalOpen}
         onClose={closeCommand}
         onRunAgain={() => {
           if (commandRun) void startCommand(commandRun);
@@ -1515,6 +1607,12 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           await reloadPlugins();
         }}
         onStoreSignedIn={() => void completeLibraryInBackground().catch(() => {})}
+        updateCheck={updateCheck}
+        isCheckingUpdate={isCheckingUpdate}
+        updateCheckError={updateCheckError}
+        onCheckForUpdate={() => void runUpdateCheck(true)}
+        onOpenUpdate={openUpdateDialog}
+        isTopmost={!isUpdateModalOpen}
       />
 
       <ThemeEditor
@@ -1536,6 +1634,14 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onClose={closeEdit}
         onGameUpdated={upsertSingleGameInState}
         onOpenSettings={() => openSettings("library")}
+      />
+
+      <UpdateModal
+        update={updateCheck?.update ?? null}
+        isOpen={isUpdateModalOpen}
+        isTopmost={true}
+        onClose={() => setIsUpdateModalOpen(false)}
+        onSkipVersion={(version) => void handleSkipUpdateVersion(version)}
       />
     </div>
   );

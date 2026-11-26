@@ -20,6 +20,7 @@ Without these the library would be a list of names, so they are on from the star
 | News | The public feeds of the news sites left on in the News page | When you open News | Nothing but the request itself |
 | Reviews and news of a game (the two official plugins that are on from the start) | Steam (`api.steampowered.com`, `store.steampowered.com`) | When you open a game's sheet; the review score also for the labels on the covers | The game's Steam id and the language |
 | Pictures | The image servers of the store or site a picture comes from | When a cover, a screenshot or a news picture is shown | The picture's address |
+| App updates | GitHub's public Releases API (`api.github.com/repos/SpheralComa441/Kanso/releases/latest`, and `github.com` / `*.githubusercontent.com` only if you choose to download an update) | Once at startup (can be switched off in *Settings → General*), or when you click *Check now* | Nothing about you or your library: only Kanso's name and version (`User-Agent`) |
 
 ## What Kanso asks for only if you turn it on
 
@@ -55,7 +56,8 @@ Removing Kanso from Windows' *Installed apps* removes the program; the uninstall
 ## What Kanso does not do
 
 - It does not collect statistics about how you use it, and it sends no crash reports.
-- It does not check for updates by itself: new versions are on the
+- It never downloads or installs an update without asking: automatic update checks can be
+  switched off in *Settings → General*, and releases are always available on the
   [Releases page](https://github.com/SpheralComa441/Kanso/releases).
 - It shows no advertising and earns nothing from the links it opens. A deal found through
   CheapShark opens through CheapShark's own redirect page, which is how that service asks to
@@ -65,9 +67,9 @@ Removing Kanso from Windows' *Installed apps* removes the program; the uninstall
 
 Every address Kanso can reach is written in its source: `src-tauri/crates/kanso-core/src/`
 holds the code that talks to each service (`metadata.rs`, `deals.rs`, `news.rs`,
-`weather.rs`, `dlss.rs`, `gamepass.rs`, one file per store account), and each official plugin
-lists its hosts in `plugins/<name>/plugin.json`. The interface itself cannot make requests:
-its content security policy allows it to load pictures and nothing else.
+`weather.rs`, `dlss.rs`, `gamepass.rs`, `updater.rs`, one file per store account), and each
+official plugin lists its hosts in `plugins/<name>/plugin.json`. The interface itself cannot
+make requests: its content security policy allows it to load pictures and nothing else.
 
 Something here does not match what you see Kanso doing? That is a bug worth reporting:
 [SECURITY.md](SECURITY.md).

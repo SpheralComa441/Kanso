@@ -29,9 +29,10 @@ encoding_rs = "0.8"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.52"
-# Same version winreg already pulls in; used to enumerate fixed drives for the Xbox scanner and
-# to protect the sign-in tokens of the store accounts with the Windows user's own key (DPAPI),
-# and to ask Windows who signed a DLSS library before it replaces a game's own (WinTrust)
+# Same version winreg already pulls in; used to enumerate fixed drives for the Xbox scanner,
+# protect the sign-in tokens of the store accounts with the Windows user's own key (DPAPI),
+# ask Windows who signed a DLSS library before it replaces a game's own (WinTrust), and
+# launch a verified Kanso installer during an in-app update (ShellExecuteW)
 windows-sys = { version = "0.48", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -40,6 +41,8 @@ windows-sys = { version = "0.48", features = [
     "Win32_Security_Cryptography_Sip",
     "Win32_Security_WinTrust",
     "Win32_System_Memory",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [dev-dependencies]

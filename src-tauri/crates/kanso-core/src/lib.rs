@@ -32,6 +32,7 @@ pub mod store;
 mod test_http;
 pub mod theme;
 pub mod ubisoft_account;
+pub mod updater;
 pub mod xbox_account;
 pub mod vdf;
 pub mod weather;

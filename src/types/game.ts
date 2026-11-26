@@ -304,6 +304,42 @@ export interface AppConfig {
   hasGamePass: boolean;
   /** List the games of the Game Pass catalog for PC (Microsoft's public catalog). */
   gamePassCatalog: boolean;
+  /** Whether Kanso checks GitHub Releases on startup and offers in-app updates. */
+  checkForUpdates: boolean;
+  /** A release version (`X.Y.Z`) the user chose to skip until a newer one comes out. */
+  skippedUpdateVersion: string | null;
+}
+
+/** Which Windows installer package an update uses, matching how Kanso was installed. */
+export type InstallerKind = "nsis" | "msi";
+
+/** Details of a newer stable Kanso release published on GitHub. */
+export interface AppUpdateInfo {
+  currentVersion: string;
+  version: string;
+  name: string;
+  notes: string;
+  publishedAt: string | null;
+  releaseUrl: string;
+  installerKind: InstallerKind;
+  assetName: string;
+  assetSize: number;
+}
+
+/** Result of checking GitHub Releases for a newer version of Kanso. */
+export interface UpdateCheckResult {
+  currentVersion: string;
+  checkedAt: number;
+  update: AppUpdateInfo | null;
+}
+
+export type UpdateProgressPhase = "downloading" | "verifying" | "installing";
+
+/** Live progress emitted while downloading and preparing an in-app update. */
+export interface UpdateProgress {
+  phase: UpdateProgressPhase;
+  downloaded: number;
+  total: number | null;
 }
 
 export interface PluginState {

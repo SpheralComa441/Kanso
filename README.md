@@ -85,6 +85,10 @@ it does not recognise the app: choose *More info*, then *Run anyway*. Each relea
 SHA-256 sums of its files, to check that what you downloaded is what was built here.
 Signing is on its way: see the [code signing policy](#code-signing-policy).
 
+Once installed, Kanso checks GitHub Releases automatically on startup (configurable in
+*Settings → General*) and offers to download, SHA-256 verify and install new versions directly
+in the app.
+
 ## Themes and plugins
 
 - **Themes**: eight are built in, and *Settings → Appearance* has an editor for colours and

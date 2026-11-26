@@ -426,6 +426,12 @@ pub struct AppConfig {
     /// installed (see [`crate::gamepass`]): a few hundred games, from Microsoft's public
     /// catalog.
     pub game_pass_catalog: bool,
+    /// Whether Kanso checks GitHub Releases on startup and offers to install newer versions
+    /// in-app. On by default; can be turned off in Settings → General.
+    pub check_for_updates: bool,
+    /// A release version (`X.Y.Z`) the user chose to skip so the prompt stays quiet until a
+    /// newer version comes out.
+    pub skipped_update_version: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -450,6 +456,8 @@ impl Default for AppConfig {
             emulators: Vec::new(),
             has_game_pass: false,
             game_pass_catalog: false,
+            check_for_updates: true,
+            skipped_update_version: None,
         }
     }
 }
@@ -543,6 +551,12 @@ impl AppConfig {
             },
             has_game_pass: self.has_game_pass,
             game_pass_catalog: self.game_pass_catalog,
+            check_for_updates: self.check_for_updates,
+            skipped_update_version: self
+                .skipped_update_version
+                .as_deref()
+                .and_then(crate::updater::AppVersion::parse)
+                .map(|v| v.to_string()),
             plugins: self
                 .plugins
                 .into_iter()
@@ -646,6 +660,8 @@ mod tests {
             track_playtime: false,
             has_game_pass: true,
             game_pass_catalog: true,
+            check_for_updates: false,
+            skipped_update_version: Some(" v0.3.0 ".to_string()),
             animations: " Lively ".to_string(),
             emulators: vec![
                 EmulatorSetting {
@@ -826,6 +842,10 @@ mod tests {
         let old = AppConfig::load_from_file(&cfg_path).expect("old config");
         assert_eq!(old.accessibility, AccessibilityConfig::default());
         assert!(old.track_playtime, "measuring play time is on unless switched off");
+        assert!(old.check_for_updates, "checking for updates is on unless switched off");
+        assert_eq!(old.skipped_update_version, None);
+        assert!(!saved.check_for_updates);
+        assert_eq!(saved.skipped_update_version.as_deref(), Some("0.3.0"));
         assert!(old.plugins.is_empty());
         let odd = AppConfig {
             accessibility: AccessibilityConfig {
@@ -833,11 +853,13 @@ mod tests {
                 readable_font: Some("comic sans".to_string()),
                 ..AccessibilityConfig::default()
             },
+            skipped_update_version: Some("not-a-version".to_string()),
             ..old
         }
         .sanitized();
         assert_eq!(odd.accessibility.text_scale, 80);
         assert_eq!(odd.accessibility.readable_font, None);
+        assert_eq!(odd.skipped_update_version, None);
     }
     #[test]
     fn the_cover_tells_the_usual_three_things_until_the_user_chooses() {

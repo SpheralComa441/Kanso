@@ -2,6 +2,13 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
+## Unreleased
+
+- **In-app updates.** Kanso checks GitHub Releases automatically at startup (can be toggled or
+  triggered manually in *Settings → General*) and proposes new versions in a dialog styled to
+  match the active theme. Choosing *Update now* downloads the matching Windows installer
+  directly in-app, checks its SHA-256 sum, runs the upgrade and restarts into the new version.
+
 ## 0.2.3
 
 - **Emulated games in Favorites.** Emulated games marked with the star are now counted in

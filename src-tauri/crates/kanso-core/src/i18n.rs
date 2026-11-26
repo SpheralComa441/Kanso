@@ -162,6 +162,17 @@ pub enum T {
     AccountGamesLeftOut,
     TrayOpen,
     TrayQuit,
+    UpdateCheckFailed,
+    UpdateRateLimited,
+    UpdateDownloadFailed,
+    UpdateChecksumMismatch,
+    UpdateNoChecksum,
+    UpdateNoInstaller,
+    UpdateInstallFailed,
+    UpdateCancelled,
+    UpdateInProgress,
+    UpdateVersionMismatch,
+    UpdateWindowsOnly,
 }
 
 impl T {
@@ -456,6 +467,72 @@ impl T {
             ],
             T::TrayOpen => ["Apri Kanso", "Open Kanso", "Abrir Kanso", "Открыть Kanso"],
             T::TrayQuit => ["Esci", "Quit", "Salir", "Выход"],
+            T::UpdateCheckFailed => [
+                "Impossibile verificare gli aggiornamenti",
+                "Could not check for updates",
+                "No se pudo comprobar si hay actualizaciones",
+                "Не удалось проверить обновления",
+            ],
+            T::UpdateRateLimited => [
+                "GitHub ha limitato temporaneamente le richieste: riprova tra qualche minuto",
+                "GitHub temporarily rate-limited requests: try again in a few minutes",
+                "GitHub ha limitado temporalmente las solicitudes: inténtalo de nuevo en unos minutos",
+                "GitHub временно ограничил число запросов: повторите попытку через несколько минут",
+            ],
+            T::UpdateDownloadFailed => [
+                "Download dell'aggiornamento non riuscito",
+                "Update download failed",
+                "Error al descargar la actualización",
+                "Не удалось загрузить обновление",
+            ],
+            T::UpdateChecksumMismatch => [
+                "Il file scaricato non corrisponde all'impronta SHA-256 pubblicata ed è stato eliminato",
+                "The downloaded file does not match the published SHA-256 checksum and was deleted",
+                "El archivo descargado no coincide con la suma SHA-256 publicada y se ha eliminado",
+                "Загруженный файл не совпадает с опубликованной контрольной суммой SHA-256 и был удалён",
+            ],
+            T::UpdateNoChecksum => [
+                "Questa versione non include un'impronta SHA-256 verificabile: impossibile installarla automaticamente",
+                "This release has no verifiable SHA-256 checksum: cannot install it automatically",
+                "Esta versión no incluye una suma SHA-256 verificable: no se puede instalar automáticamente",
+                "У этого выпуска нет проверяемой контрольной суммы SHA-256: автоматическая установка невозможна",
+            ],
+            T::UpdateNoInstaller => [
+                "Nessun programma di installazione compatibile trovato in questa versione",
+                "No compatible installer found in this release",
+                "No se encontró un instalador compatible en esta versión",
+                "В этом выпуске не найден подходящий установщик",
+            ],
+            T::UpdateInstallFailed => [
+                "Impossibile avviare il programma di installazione",
+                "Could not start the installer",
+                "No se pudo iniciar el instalador",
+                "Не удалось запустить установщик",
+            ],
+            T::UpdateCancelled => [
+                "Aggiornamento annullato",
+                "Update cancelled",
+                "Actualización cancelada",
+                "Обновление отменено",
+            ],
+            T::UpdateInProgress => [
+                "Un aggiornamento è già in corso",
+                "An update is already in progress",
+                "Ya hay una actualización en curso",
+                "Обновление уже выполняется",
+            ],
+            T::UpdateVersionMismatch => [
+                "Nessun aggiornamento verificato corrisponde alla versione richiesta: riprova la verifica",
+                "No verified update matches the requested version: check for updates again",
+                "Ninguna actualización verificada coincide con la versión solicitada: vuelve a comprobar",
+                "Нет проверенного обновления для запрошенной версии: проверьте обновления ещё раз",
+            ],
+            T::UpdateWindowsOnly => [
+                "L'installazione automatica degli aggiornamenti è disponibile solo su Windows",
+                "Automatic update installation is only available on Windows",
+                "La instalación automática de actualizaciones solo está disponible en Windows",
+                "Автоматическая установка обновлений доступна только в Windows",
+            ],
         }
     }
 
