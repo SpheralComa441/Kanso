@@ -2,7 +2,7 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
-## Unreleased
+## 0.3.2
 
 - **Translated user categories with no cross-language duplicates.** Genres added by hand from a
   game's sheet or edited manually in *Edit game* now follow interface language switches across
