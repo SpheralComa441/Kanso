@@ -22,6 +22,7 @@ import { likedEndingSoon, StoreView } from "./components/StoreView";
 import { StatsView } from "./components/StatsView";
 import { STATUS_LABEL_KEYS, StatusIcon } from "./components/StatusIcon";
 import { ThemeEditor } from "./components/ThemeEditor";
+import { TopNav } from "./components/TopNav";
 import { UpdateModal } from "./components/UpdateModal";
 import {
   I18nProvider,
@@ -1222,6 +1223,32 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
     [installedOnly, isNarrowed, scope, libraryPool, filters, searchQuery, filteredGames.length]
   );
 
+  const pagesPosition = activeTheme.nav.pagesPosition;
+  const pageTabs =
+    navPages.length > 0 ? (
+      <TopNav
+        view={mainView}
+        pages={navPages}
+        nav={activeTheme.nav}
+        onOpenHome={() => showView("home")}
+        onOpenStore={() => showView("store")}
+        onOpenNews={() => showView("news")}
+        storeAlerts={likedEndingSoon(config.store.liked).length}
+        onOpenStats={() => showView("stats")}
+        onOpenEmulators={() => {
+          // The entry always leads to the wall of emulators, also from an emulator's page
+          setOpenEmulatorId(null);
+          setSearchQuery("");
+          showView("emulators");
+        }}
+        emulatorCount={emulators.length}
+      />
+    ) : null;
+  const sidebarPagesPosition =
+    pagesPosition === "sidebarTop" || pagesPosition === "sidebarBottom"
+      ? pagesPosition
+      : undefined;
+
   return (
     <div className="flex h-full flex-col text-zinc-100">
       <Header
@@ -1259,6 +1286,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         onRunPluginCommand={(command) => void startCommand(command)}
       />
 
+      {pagesPosition === "top" && pageTabs}
+
       {settingsLoaded && !hasApiKey && !bannerDismissed && (
         <ApiKeyBanner
           onConfigure={() => openSettings("library")}
@@ -1270,18 +1299,6 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
         <Sidebar
           isOpen={isSidebarOpen}
           view={mainView}
-          onOpenHome={() => showView("home")}
-          onOpenStore={() => showView("store")}
-          onOpenNews={() => showView("news")}
-          storeAlerts={likedEndingSoon(config.store.liked).length}
-          onOpenStats={() => showView("stats")}
-          onOpenEmulators={() => {
-            // The entry always leads to the wall of emulators, also from an emulator's page
-            setOpenEmulatorId(null);
-            setSearchQuery("");
-            showView("emulators");
-          }}
-          emulatorCount={emulators.length}
           onOpenOverview={(kind) => {
             if (kind === "tags" && filters.platform === "emulator") {
               setFilters((current) => ({ ...current, platform: null }));
@@ -1297,8 +1314,9 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           genres={genres}
           tags={tags}
           nav={activeTheme.nav}
-          pages={navPages}
           hidden={config.hiddenSections}
+          pagesSlot={sidebarPagesPosition ? pageTabs : undefined}
+          pagesPosition={sidebarPagesPosition}
         />
 
         <main className="app-main scroll-area fade-top min-w-0 flex-1 space-y-4 overflow-y-auto">
@@ -1505,6 +1523,8 @@ function Shell({ config, onConfigChange, settingsLoaded }: ShellProps) {
           </div>
         </main>
       </div>
+
+      {pagesPosition === "bottom" && pageTabs}
 
       <GameDetail
         game={detailGame}

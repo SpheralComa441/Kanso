@@ -28,6 +28,21 @@
   /* What the side panel colors its headings and its pages with: two of the colors above */
   --nav-heading-color: var(--accent-color);
   --nav-page-color: var(--accent-secondary);
+  /* Page navigation tabs: defaults match Kanso's soft wave frame; themes override in `nav` */
+  --tab-frame-color: var(--nav-page-color);
+  --tab-frame-accent: var(--accent-color);
+  --tab-color: color-mix(in srgb, var(--tab-frame-color) 32%, var(--text-faint));
+  --tab-hover-color: var(--tab-frame-color);
+  --tab-active-color: color-mix(in srgb, var(--tab-frame-color) 52%, var(--text-muted));
+  --tab-active-bg: color-mix(in srgb, var(--tab-frame-color) 7%, var(--bg-surface));
+  --tab-radius: var(--radius-control);
+  --tab-border-width: 1.5px;
+  --tab-pad-x: 14px;
+  --tab-pad-y: 6px;
+  --tab-gap: 6px;
+  --tab-anim-speed: 5.5s;
+  --tab-glow: 0.78;
+  --tab-transition-ms: 380ms;
   /* The titles of a game's sheet: what it shows first, and its other cards */
   --detail-key-title: var(--accent-color);
   --detail-card-title: var(--accent-secondary);

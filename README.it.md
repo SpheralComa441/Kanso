@@ -11,7 +11,7 @@
 
 <p align="center"><a href="README.md">English</a></p>
 
-![La Home di Kanso: i giochi da riprendere, i prossimi da giocare e i più giocati](docs/screenshots/home.webp)
+![La Home di Kanso con la barra di navigazione in alto: i giochi da riprendere, i prossimi da giocare e i più giocati](docs/screenshots/home.webp)
 
 ## Che cosa fa
 
@@ -23,8 +23,9 @@
   tutto quello che Kanso sa lo legge dai file che i client degli store tengono già sul PC.
   Accedere a uno store è facoltativo e avviene sulla pagina dello store stesso.
 - **Da ridisegnare.** Un tema è un solo file `.json` che cambia colori, font, forme e
-  animazioni, e riordina il pannello laterale e le pagine Home, Store e News. Non contiene
-  codice: importare il tema di uno sconosciuto è sicuro.
+  animazioni, e ridisegna il pannello laterale, le schede di navigazione (posizione, stile,
+  colori e animazioni) e le pagine Home, Store e News. Non contiene codice: importare il tema
+  di uno sconosciuto è sicuro.
 - **Da estendere.** I plugin aggiungono sezioni alla scheda di un gioco, etichette alle
   copertine, comandi, parti della Home e intere librerie di giochi di altri servizi. Girano
   in una sandbox e raggiungono solo i siti che dichiarano.
@@ -36,15 +37,22 @@
 | ![La libreria come griglia di copertine; la copertina sotto il puntatore mostra generi, ore e ultima sessione](docs/screenshots/library.webp) | ![La scheda di un gioco: ore, ultima sessione, descrizione e attività](docs/screenshots/game.webp) |
 | ![Statistiche: ore per settimana, giochi più giocati, ore per piattaforma](docs/screenshots/statistics.webp) | ![La stessa libreria con quattro dei temi inclusi](docs/screenshots/themes.webp) |
 
+![Passaggio tra Home, Store, News, Statistiche ed Emulatori dalla barra di navigazione in alto, con tinta al passaggio del mouse, riquadro ad onda soft e transizioni fade](docs/screenshots/navigation-demo.gif)
+
 Le schermate sono in inglese; l'interfaccia è anche in italiano, spagnolo e russo.
 
 ## Funzioni
 
+- **Navigazione**: barra superiore per **Home**, **Store**, **News**, **Statistiche** ed
+  **Emulatori**, con schede opache in tinta col tema che si illuminano al passaggio del mouse,
+  riquadro ad onda soft sulla scheda selezionata e transizioni fade — ogni dettaglio
+  personalizzabile nei file di tema.
 - **Libreria**: griglia di copertine o elenco compatto, ricerca immediata e filtri che si
-  combinano: preferiti, giocati di recente, non installati, piattaforma, stato, generi e tag
-  di Steam. Generi e tag si aprono anche come pareti di copertine, contate su tutte le
-  piattaforme o su quella che scegli. *Solo installati* lascia fuori tutto il resto in un colpo. I giochi che ti arrivano
-  dalla condivisione familiare di Steam sono contrassegnati, installati o no.
+  combinano: preferiti (inclusi i giochi emulati preferiti), giocati di recente, non
+  installati, piattaforma, stato, generi e tag di Steam. Generi e tag si aprono anche come
+  pareti di copertine, contate su tutte le piattaforme o su quella che scegli. *Solo
+  installati* lascia fuori tutto il resto in un colpo. I giochi che ti arrivano dalla
+  condivisione familiare di Steam sono contrassegnati, installati o no.
 - **Copertine e dettagli** da [SteamGridDB](https://www.steamgriddb.com) (con la tua chiave
   gratuita) e dallo store di Steam, nella tua lingua. I giochi di Steam hanno la copertina
   anche senza chiave.
@@ -64,9 +72,13 @@ Le schermate sono in inglese; l'interfaccia è anche in italiano, spagnolo e rus
 - **DLSS**: la scheda di un gioco mostra le versioni di DLSS che contiene. Su richiesta Kanso
   le aggiorna, conservando gli originali e accettando solo librerie firmate da NVIDIA.
   Vedi [docs/DLSS.md](docs/DLSS.md).
+- **Aggiornamenti in app**: controlla automaticamente le release su GitHub all'avvio (o su
+  richiesta in *Impostazioni → Generale*) e propone le nuove versioni in una finestra
+  coordinata con il tema attivo, con download diretto e verifica SHA-256.
 - **Accessibilità**: dimensione del testo, alto contrasto, meno movimento, font ad alta
   leggibilità e fuoco da tastiera più evidente, sopra qualunque tema.
-- **Quattro lingue**: italiano, inglese, spagnolo e russo.
+- **Quattro lingue**: italiano, inglese, spagnolo e russo — inclusa la traduzione automatica
+  e la rimozione dei doppioni per generi e categorie personalizzate al cambio lingua.
 
 ## Scaricare
 
@@ -85,19 +97,25 @@ sia quello costruito qui. La firma è in arrivo: vedi la
 
 Una volta installato, Kanso controlla automaticamente le nuove versioni su GitHub all'avvio
 (disattivabile in *Impostazioni → Generale*) e propone di scaricare, verificare tramite
-SHA-256 e installare gli aggiornamenti direttamente in app.
+SHA-256 e installare gli aggiornamenti direttamente in app, con una finestra in linea con il
+tema attivo.
+
+![La finestra di aggiornamento in app coordinata con il tema attivo, con note di rilascio e verifica SHA-256](docs/screenshots/updater.webp)
 
 ## Temi e plugin
 
 - **Temi**: otto sono inclusi, e *Impostazioni → Aspetto* ha un editor di colori e font con
-  anteprima dal vivo. Per tutto il resto si scrive o si importa un file di tema:
-  [docs/THEMES.md](docs/THEMES.md), con esempi in [docs/themes/](docs/themes/).
+  anteprima dal vivo. Per tutto il resto — forme delle card, layout, icone, font incorporati
+  e personalizzazione completa delle schede di navigazione (posizione in alto, in basso o nel
+  pannello laterale, stile, sfondo barra, colori, animazioni e transizioni) — si scrive o si
+  importa un file di tema: [docs/THEMES.md](docs/THEMES.md), con esempi in
+  [docs/themes/](docs/themes/).
 - **Plugin**: nove ufficiali sono inclusi (quanto dura un gioco, recensioni e notizie di
   Steam, PCGamingWiki, Nexus Mods, storico dei prezzi, cosa giocare stasera, il gioco di
   oggi, la libreria di un account itch.io). Quelli che contattano un sito diverso da Steam
   sono spenti finché non li accendi. Per scriverne uno: [docs/PLUGINS.md](docs/PLUGINS.md).
 
-![La stessa Home con otto temi: cinque inclusi, tre importati da un file di tema](docs/screenshots/themes-demo.webp)
+![La stessa Home con otto temi: cinque inclusi e tre importati da file di tema, inclusi barra in basso, stile underline e schede nel pannello laterale](docs/screenshots/themes-demo.gif)
 
 Temi e plugin parlano con Kanso solo attraverso i formati descritti in quelle guide. Sono
 lavoro tuo: pubblicali dove vuoi, con la licenza che scegli.
@@ -128,9 +146,9 @@ Il quadro completo, e come segnalare un problema in privato: [SECURITY.md](SECUR
 
 ## Stato
 
-Kanso è giovane. La versione 0.1 è la prima pubblica; è stata costruita da pochissime persone
-e provata su pochissimi PC. I test automatici coprono i lettori dei file, il validatore dei
-temi e ogni plugin ufficiale, ma molto di ciò che parla con un vero client o con un vero
+Kanso è giovane ed è in sviluppo attivo (0.3.x); è stato costruito da pochissime persone e
+provato su pochissimi PC. I test automatici coprono i lettori dei file, l'updater, il validatore
+dei temi e ogni plugin ufficiale, ma molto di ciò che parla con un vero client o con un vero
 servizio web è stato provato solo su dati registrati o costruiti. Quello che nessuno ha ancora
 visto funzionare è elencato, riga per riga, in [docs/MANUAL-TESTS.md](docs/MANUAL-TESTS.md). Se
 qualcosa non funziona sul tuo PC, [apri una segnalazione](https://github.com/SpheralComa441/Kanso/issues):

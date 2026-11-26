@@ -586,14 +586,78 @@ export type NavPage = "home" | "store" | "news" | "stats" | "emulators";
 /** A group of entries of the side panel. */
 export type NavGroup = "library" | "status" | "platform" | "genres" | "tags";
 
-/** The side panel as a theme arranges it. */
+/** Where the main page tabs (Home, Store, News, Statistics, Emulators) live. */
+export type PagesPosition = "top" | "bottom" | "sidebarTop" | "sidebarBottom";
+
+/** Horizontal alignment of the page tabs in a top or bottom bar. */
+export type PagesAlign = "left" | "center" | "right";
+
+/** Visual framing of the page tabs. */
+export type TabStyle = "frame" | "pill" | "underline" | "filled" | "minimal";
+
+/** Backdrop of the horizontal navigation bar (`top` / `bottom`). */
+export type TabBarBackground = "none" | "surface" | "glass" | "pill";
+
+/** Continuous highlight animation on the selected page tab. */
+export type TabAnimation = "wave" | "pulse" | "shimmer" | "none";
+
+/** Selection/deselection transition played when switching page tabs. */
+export type TabTransition = "fade" | "slide" | "none";
+
+/** Navigation layout and page-tab styling as a theme arranges it. */
 export interface ThemeNav {
   /** The pages listed, in order; a page not named is not offered. */
   pages: NavPage[];
-  /** The groups listed, in order; one not named is not shown. The library is always there. */
+  /** The groups listed in the side panel, in order; one not named is not shown. The library is always there. */
   groups: NavGroup[];
-  /** The pages above the groups, or below them. */
-  pagesPosition: "top" | "bottom";
+  /** Where the page tabs sit: top bar, bottom bar, or top/bottom of the side panel. */
+  pagesPosition: PagesPosition;
+  /** Horizontal alignment of the tabs when `pagesPosition` is `top` or `bottom`. */
+  pagesAlign: PagesAlign;
+  /** Visual style of the active tab. */
+  tabStyle: TabStyle;
+  /** Corner radius in px; `null` follows `shapes.controlRadius` (ignored by `pill`). */
+  tabRadius: number | null;
+  /** Thickness of the active border or underline, in px. */
+  tabBorderWidth: number;
+  /** Horizontal inner padding of each tab, in px. */
+  tabPaddingX: number;
+  /** Vertical inner padding of each tab, in px. */
+  tabPaddingY: number;
+  /** Spacing between tabs, in px. */
+  tabGap: number;
+  /** Whether tabs display their icon. */
+  tabIcons: boolean;
+  /** Whether tabs display their text label. */
+  tabLabels: boolean;
+  /** Whether tabs display counts (e.g. emulator count). */
+  tabCounts: boolean;
+  /** Background style of the horizontal tab bar. */
+  tabBarBackground: TabBarBackground;
+  /** Custom hex color for resting unselected tabs (`null` = muted theme tint). */
+  tabColor: string | null;
+  /** Custom hex color on pointer hover / focus (`null` = theme `layout.navPages`). */
+  tabHoverColor: string | null;
+  /** Custom hex color for the selected tab when not hovered (`null` = soft theme tint). */
+  tabActiveColor: string | null;
+  /** Primary hex color of the active frame/underline/fill (`null` = theme `layout.navPages`). */
+  tabFrameColor: string | null;
+  /** Secondary hex color blended into the wave/shimmer (`null` = theme `colors.accent`). */
+  tabFrameAccent: string | null;
+  /** Custom hex background tint for the selected tab (`null` = subtle auto wash). */
+  tabActiveBackground: string | null;
+  /** Tint strength (0–1) of the theme color on resting tabs when `tabColor` is `null`. */
+  tabRestOpacity: number;
+  /** Continuous highlight animation on the selected tab. */
+  tabAnimation: TabAnimation;
+  /** Cycle duration of the continuous tab animation, in seconds. */
+  tabAnimationSpeed: number;
+  /** Intensity (0–1) of the soft ambient glow around the selected tab. */
+  tabGlow: number;
+  /** Transition played when switching selection between tabs. */
+  tabTransition: TabTransition;
+  /** Duration of the tab selection transition, in milliseconds. */
+  tabTransitionMs: number;
 }
 
 /** The walls of tiles of the genres and of the tags, as a theme arranges them. */

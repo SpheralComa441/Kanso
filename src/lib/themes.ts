@@ -93,6 +93,29 @@ export const DEFAULT_NAV: ThemeNav = {
   pages: ["home", "store", "news", "stats", "emulators"],
   groups: ["library", "status", "platform", "genres", "tags"],
   pagesPosition: "top",
+  pagesAlign: "center",
+  tabStyle: "frame",
+  tabRadius: null,
+  tabBorderWidth: 1.5,
+  tabPaddingX: 14,
+  tabPaddingY: 6,
+  tabGap: 6,
+  tabIcons: true,
+  tabLabels: true,
+  tabCounts: true,
+  tabBarBackground: "none",
+  tabColor: null,
+  tabHoverColor: null,
+  tabActiveColor: null,
+  tabFrameColor: null,
+  tabFrameAccent: null,
+  tabActiveBackground: null,
+  tabRestOpacity: 0.32,
+  tabAnimation: "wave",
+  tabAnimationSpeed: 5.5,
+  tabGlow: 0.78,
+  tabTransition: "fade",
+  tabTransitionMs: 380,
 };
 export const DEFAULT_CATEGORIES: ThemeCategories = { platforms: true };
 export const DEFAULT_STORE: ThemeStore = {
@@ -141,6 +164,7 @@ export function withThemeDefaults(input: ThemeInput): Theme {
   }
   const nav = { ...DEFAULT_NAV, ...input.nav } as ThemeNav;
   if (!nav.groups.includes("library")) nav.groups = ["library", ...nav.groups];
+  if (!nav.tabIcons && !nav.tabLabels) nav.tabLabels = true;
   const store = { ...DEFAULT_STORE, ...input.store } as ThemeStore;
   if (store.tabs.length === 0) store.tabs = DEFAULT_STORE.tabs;
   return {
@@ -583,6 +607,49 @@ export function applyTheme(
   // Names from a closed list, each standing for one of the theme's own colors
   set("--nav-heading-color", NAV_COLORS[layout.navHeadings] ?? NAV_COLORS.accent);
   set("--nav-page-color", NAV_COLORS[layout.navPages] ?? NAV_COLORS.secondary);
+
+  // Page navigation tabs (`nav`): position, alignment, colors, graphics, and animations
+  const { nav } = theme;
+  const frameColor = nav.tabFrameColor ?? "var(--nav-page-color)";
+  const frameAccent = nav.tabFrameAccent ?? "var(--accent-color)";
+  const restPct = Math.round(Math.min(1, Math.max(0, nav.tabRestOpacity)) * 100);
+  set("--tab-frame-color", frameColor);
+  set("--tab-frame-accent", frameAccent);
+  set(
+    "--tab-color",
+    nav.tabColor ?? `color-mix(in srgb, ${frameColor} ${restPct}%, var(--text-faint))`
+  );
+  set("--tab-hover-color", nav.tabHoverColor ?? frameColor);
+  set(
+    "--tab-active-color",
+    nav.tabActiveColor ?? `color-mix(in srgb, ${frameColor} 52%, var(--text-muted))`
+  );
+  const defaultActiveBg =
+    nav.tabStyle === "filled"
+      ? `color-mix(in srgb, ${frameColor} 18%, var(--bg-elevated))`
+      : nav.tabStyle === "underline" || nav.tabStyle === "minimal"
+        ? "transparent"
+        : `color-mix(in srgb, ${frameColor} 7%, var(--bg-surface))`;
+  set("--tab-active-bg", nav.tabActiveBackground ?? defaultActiveBg);
+  set(
+    "--tab-radius",
+    nav.tabStyle === "pill" ? "9999px" : px(nav.tabRadius ?? shapes.controlRadius)
+  );
+  set("--tab-border-width", `${nav.tabBorderWidth}px`);
+  set("--tab-pad-x", px(nav.tabPaddingX));
+  set("--tab-pad-y", px(nav.tabPaddingY));
+  set("--tab-gap", px(nav.tabGap));
+  set("--tab-anim-speed", `${nav.tabAnimationSpeed}s`);
+  set("--tab-glow", String(nav.tabGlow));
+  set(
+    "--tab-transition-ms",
+    nav.tabTransition === "none" ? "0ms" : `${nav.tabTransitionMs}ms`
+  );
+  root.dataset.tabStyle = nav.tabStyle;
+  root.dataset.tabBar = nav.tabBarBackground;
+  root.dataset.tabAnim = nav.tabAnimation;
+  root.dataset.tabTransition = nav.tabTransition;
+  root.dataset.pagesAlign = nav.pagesAlign;
 
   // Cards
   const restShadow = CARD_SHADOWS[cards.shadow];

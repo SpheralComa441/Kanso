@@ -2,6 +2,16 @@
 
 What changes from one release of Kanso to the next, most recent first.
 
+## Unreleased
+
+- **Customizable page navigation tabs.** *Home*, *Store*, *News*, *Statistics* and *Emulators*
+  now sit by default in a horizontal top bar with muted theme-tinted tabs that light up on hover
+  and cross-fade in and out with a soft wave-illuminated frame. Every aspect is customizable in
+  `.kanso-theme.json` under `nav`: placement (`top`, `bottom`, `sidebarTop`, `sidebarBottom`) and
+  alignment, graphics (`tabStyle`, radius, border width, padding, spacing, bar backdrop,
+  icon/label/count toggles), custom colors and resting tint, plus highlight animations (`wave`,
+  `pulse`, `shimmer`, `none`), speed, glow, and selection transitions (`fade`, `slide`, `none`).
+
 ## 0.3.2
 
 - **Translated user categories with no cross-language duplicates.** Genres added by hand from a

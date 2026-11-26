@@ -12,6 +12,25 @@
   initial-value: transparent;
 }
 
+/* Smooth phase angle, fade progress, and soft pulse for the selected top-nav tab's wave frame. */
+@property --top-nav-wave {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 135deg;
+}
+
+@property --top-nav-active {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@property --top-nav-halo-pulse {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0.8;
+}
+
 @layer base {
   html {
     /* Everything sized in rem follows a theme's interface scale */
@@ -101,13 +120,17 @@
   transform: none !important;
 }
 
-/* The strips of the category tiles stand still, on their first covers */
-:root[data-reduce-motion] .category-strip {
+/* The strips of the category tiles and the active top-nav wave frame stand still */
+:root[data-reduce-motion] .category-strip,
+:root[data-reduce-motion] .top-nav-tab::before,
+:root[data-reduce-motion] .top-nav-tab::after {
   animation: none !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .category-strip {
+  .category-strip,
+  .top-nav-tab::before,
+  .top-nav-tab::after {
     animation: none !important;
   }
 }
@@ -213,17 +236,132 @@
     scrollbar-gutter: stable;
   }
 
-  /* The pages of the side panel when a theme puts them at the bottom: under the groups,
-     which scroll above them, on the same margins */
+  /* Navigation bar for the main pages (`pagesPosition: top | bottom`) and sidebar page slot. */
+  .app-top-nav {
+    position: relative;
+    isolation: isolate;
+    border-bottom: var(--divider-width) solid var(--border-subtle);
+  }
+
+  .app-top-nav[data-position="bottom"] {
+    border-bottom: 0;
+    border-top: var(--divider-width) solid var(--border-subtle);
+  }
+
+  .app-top-nav-list {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    /* Vertical clearance keeps the selected tab's soft wave halo unclipped while scrolling */
+    padding: 0.5rem 1rem 0.625rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .app-top-nav[data-position="bottom"] .app-top-nav-list {
+    padding: 0.625rem 1rem 0.5rem;
+  }
+
+  :root[data-pages-align="left"] .app-top-nav-list {
+    justify-content: flex-start;
+  }
+
+  :root[data-pages-align="right"] .app-top-nav-list {
+    justify-content: flex-end;
+  }
+
+  .app-top-nav-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .app-top-nav-group {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--tab-gap);
+  }
+
+  /* Bar backdrop modes (`nav.tabBarBackground`) */
+  :root[data-tab-bar="surface"] .app-top-nav {
+    background-color: var(--bg-surface);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  :root[data-tab-bar="surface"] .app-top-nav[data-position="bottom"] {
+    border-bottom: 0;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  :root[data-tab-bar="glass"] .app-top-nav {
+    background-color: color-mix(in srgb, var(--bg-surface) 64%, transparent);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid color-mix(in srgb, var(--border-subtle) 65%, transparent);
+  }
+
+  :root[data-tab-bar="glass"] .app-top-nav[data-position="bottom"] {
+    border-bottom: 0;
+    border-top: 1px solid color-mix(in srgb, var(--border-subtle) 65%, transparent);
+  }
+
+  :root[data-tab-bar="pill"] .app-top-nav-group {
+    padding: 4px;
+    border-radius: calc(var(--tab-radius) + 5px);
+    background-color: color-mix(in srgb, var(--bg-surface) 84%, transparent);
+    border: 1px solid var(--border-subtle);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  :root[data-tab-bar="pill"][data-tab-style="pill"] .app-top-nav-group {
+    border-radius: 9999px;
+  }
+
+  /* Sidebar placement for pages (`pagesPosition: sidebarTop | sidebarBottom`) */
   .app-sidebar-pages {
     width: var(--sidebar-width);
     padding: 0.625rem 10px 1rem;
     border-top: var(--divider-width) solid var(--border-subtle);
-    /* Never the whole panel: in a small window with large text the pages scroll in their
-       own space, and the groups above keep theirs */
     flex-shrink: 0;
     max-height: 60%;
     overflow-y: auto;
+  }
+
+  .app-sidebar-page-list {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    gap: var(--tab-gap);
+  }
+
+  :root[data-tab-bar="surface"] .app-sidebar-page-list {
+    padding: 5px;
+    border-radius: calc(min(var(--tab-radius), 14px) + 4px);
+    background-color: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+  }
+
+  :root[data-tab-bar="glass"] .app-sidebar-page-list {
+    padding: 5px;
+    border-radius: calc(min(var(--tab-radius), 14px) + 4px);
+    background-color: color-mix(in srgb, var(--bg-surface) 64%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid color-mix(in srgb, var(--border-subtle) 65%, transparent);
+  }
+
+  :root[data-tab-bar="pill"] .app-sidebar-page-list {
+    padding: 5px;
+    border-radius: calc(min(var(--tab-radius), 14px) + 6px);
+    background-color: color-mix(in srgb, var(--bg-surface) 84%, transparent);
+    border: 1px solid var(--border-subtle);
+  }
+
+  .app-sidebar-page-list .top-nav-tab {
+    width: 100%;
+    justify-content: flex-start;
+    text-align: left;
+    font-size: 0.75rem;
   }
 
   .app-main {
@@ -502,18 +640,357 @@
     color: color-mix(in srgb, var(--nav-heading-color) 70%, var(--text-primary));
   }
 
-  /* The pages beside the library (Home, Statistics, Emulators) have a color of their own */
-  .nav-page {
-    color: color-mix(in srgb, var(--nav-page-color) 82%, var(--text-secondary));
+  /*
+   * Navigation page tabs (Home, Store, News, Statistics, Emulators):
+   * Driven by `--tab-*` tokens and `data-tab-*` attributes set from `theme.nav`.
+   * - Unselected & resting: `--tab-color` (defaults to a matte tint of the active theme).
+   * - Hover (any tab): smoothly shifts to `--tab-hover-color`.
+   * - Selected: smoothly transitions in (`fade` / `slide` / `none`) the chosen `tabStyle`
+   *   (`frame`, `pill`, `underline`, `filled`, `minimal`) with `tabAnimation` (`wave`,
+   *   `pulse`, `shimmer`, `none`) and soft ambient halo scaled by `--tab-glow`.
+   */
+  .top-nav-tab {
+    --tab-halo-scheme: 1;
+    --tab-frame-opacity: 1;
+    position: relative;
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.45rem;
+    padding: var(--tab-pad-y) var(--tab-pad-x);
+    border-radius: var(--tab-radius);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    line-height: 1.25;
+    white-space: nowrap;
+    color: var(--tab-color);
+    background-color: transparent;
+    transition:
+      color var(--tab-transition-ms) ease,
+      background-color var(--tab-transition-ms) ease;
   }
 
-  .nav-page:hover,
-  .nav-page[aria-pressed="true"] {
-    color: var(--nav-page-color);
+  .top-nav-tab:hover,
+  .top-nav-tab:focus-visible {
+    color: var(--tab-hover-color);
+    background-color: color-mix(in srgb, var(--tab-frame-color) 8%, transparent);
   }
 
-  .nav-page.nav-item::before {
-    background-color: var(--nav-page-color);
+  .top-nav-tab[aria-current="page"] {
+    color: var(--tab-active-color);
+    background-color: var(--tab-active-bg);
+  }
+
+  .top-nav-tab[aria-current="page"]:hover,
+  .top-nav-tab[aria-current="page"]:focus-visible {
+    color: var(--tab-hover-color);
+    background-color: color-mix(in srgb, var(--tab-frame-color) 8%, var(--tab-active-bg));
+  }
+
+  /* Illuminated border frame (`frame` & `pill` default): smoothly fades out/in while wave pauses/resumes */
+  .top-nav-tab::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    border-radius: inherit;
+    padding: var(--tab-border-width);
+    pointer-events: none;
+    --top-nav-active: 0;
+    opacity: calc(var(--top-nav-active) * var(--tab-frame-opacity));
+    transform: scale(calc(0.95 + 0.05 * var(--top-nav-active)));
+    background: conic-gradient(
+      from var(--top-nav-wave),
+      color-mix(in srgb, var(--tab-frame-color) 20%, transparent) 0deg,
+      color-mix(in srgb, var(--tab-frame-color) 54%, transparent) 55deg,
+      color-mix(in srgb, var(--tab-frame-color) 86%, var(--tab-frame-accent)) 110deg,
+      color-mix(in srgb, var(--tab-frame-color) 80%, var(--text-primary)) 145deg,
+      color-mix(in srgb, var(--tab-frame-accent) 72%, var(--tab-frame-color)) 190deg,
+      color-mix(in srgb, var(--tab-frame-color) 32%, transparent) 250deg,
+      color-mix(in srgb, var(--tab-frame-color) 20%, transparent) 360deg
+    );
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    animation: top-nav-wave-flow var(--tab-anim-speed) linear infinite;
+    animation-play-state: paused;
+    transition: --top-nav-active var(--tab-transition-ms) cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .top-nav-tab[aria-current="page"]::before {
+    --top-nav-active: 1;
+    animation-play-state: running;
+  }
+
+  /* Soft diffused ambient halo gliding behind the selected tab */
+  .top-nav-tab::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    --top-nav-active: 0;
+    opacity: calc(
+      var(--top-nav-active) * var(--tab-glow) * var(--tab-halo-scheme) * var(--top-nav-halo-pulse)
+    );
+    transform: scale(calc(0.92 + 0.08 * var(--top-nav-active)));
+    background: conic-gradient(
+      from var(--top-nav-wave),
+      transparent 0deg,
+      color-mix(in srgb, var(--tab-frame-color) 14%, transparent) 65deg,
+      color-mix(in srgb, var(--tab-frame-color) 36%, transparent) 130deg,
+      color-mix(in srgb, var(--tab-frame-accent) 26%, transparent) 185deg,
+      transparent 260deg,
+      transparent 360deg
+    );
+    filter: blur(7px);
+    animation:
+      top-nav-wave-flow var(--tab-anim-speed) linear infinite,
+      top-nav-wave-breathe var(--tab-anim-speed) ease-in-out infinite;
+    animation-play-state: paused;
+    transition: --top-nav-active var(--tab-transition-ms) cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .top-nav-tab[aria-current="page"]::after {
+    --top-nav-active: 1;
+    animation-play-state: running;
+  }
+
+  :root[data-scheme="light"] .top-nav-tab {
+    --tab-halo-scheme: 0.55;
+  }
+
+  :root[data-scheme="light"] .top-nav-tab::before {
+    background: conic-gradient(
+      from var(--top-nav-wave),
+      color-mix(in srgb, var(--tab-frame-color) 22%, transparent) 0deg,
+      color-mix(in srgb, var(--tab-frame-color) 55%, transparent) 55deg,
+      var(--tab-frame-color) 125deg,
+      color-mix(in srgb, var(--tab-frame-accent) 65%, var(--tab-frame-color)) 180deg,
+      color-mix(in srgb, var(--tab-frame-color) 32%, transparent) 245deg,
+      color-mix(in srgb, var(--tab-frame-color) 22%, transparent) 360deg
+    );
+  }
+
+  /* ---- Tab style variants (`nav.tabStyle`) ---- */
+
+  :root[data-tab-style="underline"] .top-nav-tab::before {
+    inset: auto 10% 0 10%;
+    height: max(2px, var(--tab-border-width));
+    padding: 0;
+    border-radius: 9999px;
+    -webkit-mask: none;
+    mask: none;
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--tab-frame-color) 40%, transparent),
+      var(--tab-frame-color),
+      var(--tab-frame-accent),
+      var(--tab-frame-color),
+      color-mix(in srgb, var(--tab-frame-color) 40%, transparent)
+    );
+    background-size: 240% 100%;
+    animation: top-nav-shimmer var(--tab-anim-speed) ease-in-out infinite;
+    animation-play-state: paused;
+  }
+
+  :root[data-tab-style="underline"] .top-nav-tab[aria-current="page"]::before {
+    animation-play-state: running;
+  }
+
+  :root[data-tab-style="underline"] .top-nav-tab::after {
+    inset: auto 12% -2px 12%;
+    height: 6px;
+    border-radius: 9999px;
+    filter: blur(6px);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, var(--tab-frame-color) 60%, transparent),
+      color-mix(in srgb, var(--tab-frame-accent) 50%, transparent),
+      transparent
+    );
+  }
+
+  /* Inside the side panel, `underline` becomes a crisp left indicator bar */
+  :root[data-tab-style="underline"] .app-sidebar-page-list .top-nav-tab::before {
+    inset: 18% auto 18% 0;
+    width: max(2.5px, var(--tab-border-width));
+    height: auto;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--tab-frame-color) 40%, transparent),
+      var(--tab-frame-color),
+      var(--tab-frame-accent),
+      var(--tab-frame-color)
+    );
+    background-size: 100% 240%;
+  }
+
+  :root[data-tab-style="underline"] .app-sidebar-page-list .top-nav-tab::after {
+    inset: 20% auto 20% -2px;
+    width: 6px;
+    height: auto;
+  }
+
+  :root[data-tab-style="filled"] .top-nav-tab {
+    --tab-frame-opacity: 0.65;
+  }
+
+  :root[data-tab-style="minimal"] .top-nav-tab::before {
+    display: none;
+  }
+
+  :root[data-tab-style="minimal"] .top-nav-tab::after {
+    filter: blur(10px);
+    opacity: calc(
+      var(--top-nav-active) * var(--tab-glow) * var(--tab-halo-scheme) * 0.45 * var(--top-nav-halo-pulse)
+    );
+  }
+
+  /* ---- Continuous animation variants (`nav.tabAnimation`) ---- */
+
+  :root[data-tab-anim="pulse"] .top-nav-tab::before {
+    background: linear-gradient(
+      135deg,
+      var(--tab-frame-color),
+      color-mix(in srgb, var(--tab-frame-accent) 75%, var(--tab-frame-color))
+    );
+    opacity: calc(var(--top-nav-active) * var(--tab-frame-opacity) * var(--top-nav-halo-pulse));
+    animation: top-nav-wave-breathe var(--tab-anim-speed) ease-in-out infinite;
+    animation-play-state: paused;
+  }
+
+  :root[data-tab-anim="pulse"] .top-nav-tab[aria-current="page"]::before {
+    animation-play-state: running;
+  }
+
+  :root[data-tab-anim="pulse"] .top-nav-tab::after {
+    background: linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--tab-frame-color) 42%, transparent),
+      color-mix(in srgb, var(--tab-frame-accent) 34%, transparent)
+    );
+    animation: top-nav-wave-breathe var(--tab-anim-speed) ease-in-out infinite;
+    animation-play-state: paused;
+  }
+
+  :root[data-tab-anim="pulse"] .top-nav-tab[aria-current="page"]::after {
+    animation-play-state: running;
+  }
+
+  :root[data-tab-anim="shimmer"] .top-nav-tab::before {
+    background: linear-gradient(
+      115deg,
+      color-mix(in srgb, var(--tab-frame-color) 28%, transparent) 10%,
+      var(--tab-frame-color) 42%,
+      color-mix(in srgb, var(--tab-frame-accent) 70%, var(--text-primary)) 52%,
+      var(--tab-frame-color) 64%,
+      color-mix(in srgb, var(--tab-frame-color) 28%, transparent) 90%
+    );
+    background-size: 260% 260%;
+    animation: top-nav-shimmer var(--tab-anim-speed) ease-in-out infinite;
+    animation-play-state: paused;
+  }
+
+  :root[data-tab-anim="shimmer"] .top-nav-tab[aria-current="page"]::before {
+    animation-play-state: running;
+  }
+
+  :root[data-tab-anim="shimmer"] .top-nav-tab::after {
+    background: linear-gradient(
+      115deg,
+      transparent 15%,
+      color-mix(in srgb, var(--tab-frame-color) 38%, transparent) 48%,
+      color-mix(in srgb, var(--tab-frame-accent) 32%, transparent) 60%,
+      transparent 88%
+    );
+    background-size: 260% 260%;
+    animation: top-nav-shimmer var(--tab-anim-speed) ease-in-out infinite;
+    animation-play-state: paused;
+  }
+
+  :root[data-tab-anim="shimmer"] .top-nav-tab[aria-current="page"]::after {
+    animation-play-state: running;
+  }
+
+  :root[data-tab-anim="none"] .top-nav-tab::before,
+  :root[data-tab-anim="none"] .top-nav-tab::after,
+  :root[data-tab-anim="none"] .top-nav-tab[aria-current="page"]::before,
+  :root[data-tab-anim="none"] .top-nav-tab[aria-current="page"]::after {
+    animation: none;
+  }
+
+  /* ---- Selection transition variants (`nav.tabTransition`) ---- */
+
+  :root[data-tab-transition="slide"] .top-nav-tab::before,
+  :root[data-tab-transition="slide"] .top-nav-tab::after {
+    transform: translateY(calc((1 - var(--top-nav-active)) * 4px));
+  }
+
+  :root[data-tab-transition="slide"] .app-sidebar-page-list .top-nav-tab::before,
+  :root[data-tab-transition="slide"] .app-sidebar-page-list .top-nav-tab::after {
+    transform: translateX(calc((1 - var(--top-nav-active)) * -4px));
+  }
+
+  :root[data-tab-transition="none"] .top-nav-tab::before,
+  :root[data-tab-transition="none"] .top-nav-tab::after {
+    transform: none;
+    transition: none;
+  }
+
+  .top-nav-count {
+    font-size: 0.6875rem;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+    border-radius: 9999px;
+    background-color: color-mix(in srgb, currentColor 13%, transparent);
+    opacity: 0.85;
+    transition:
+      background-color var(--tab-transition-ms) ease,
+      opacity var(--tab-transition-ms) ease;
+  }
+
+  .top-nav-tab:hover .top-nav-count,
+  .top-nav-tab[aria-current="page"] .top-nav-count {
+    opacity: 1;
+  }
+
+  @keyframes top-nav-wave-flow {
+    from {
+      --top-nav-wave: 0deg;
+    }
+    to {
+      --top-nav-wave: 360deg;
+    }
+  }
+
+  @keyframes top-nav-wave-breathe {
+    0%,
+    100% {
+      --top-nav-halo-pulse: 0.54;
+    }
+    50% {
+      --top-nav-halo-pulse: 1;
+    }
+  }
+
+  @keyframes top-nav-shimmer {
+    0% {
+      background-position: 0% 0%;
+    }
+    50% {
+      background-position: 100% 100%;
+    }
+    100% {
+      background-position: 0% 0%;
+    }
   }
 
   @keyframes motion-fade {

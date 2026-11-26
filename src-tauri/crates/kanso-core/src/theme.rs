@@ -417,34 +417,186 @@ pub enum NavGroup {
     Tags,
 }
 
-/// Where the pages of the side panel are, with respect to its groups.
+/// Where the main page tabs (Home, Store, News, Statistics, Emulators) are placed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "camelCase")]
 pub enum PagesPosition {
+    /// Horizontal bar at the top of the window, right under the title bar.
     #[default]
     Top,
+    /// Horizontal bar docked at the bottom of the window.
     Bottom,
+    /// Vertical list at the top of the side panel, above the library groups.
+    SidebarTop,
+    /// Vertical list pinned at the bottom of the side panel, below the library groups.
+    SidebarBottom,
 }
 
-/// The side panel: which pages and which groups it lists, and in which order. The user can
-/// still hide Home, Store, News and the tags in Settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Horizontal alignment of the page tabs when placed in the top or bottom bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PagesAlign {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+/// Visual shape and active-state framing of the page tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabStyle {
+    /// Small rounded frame around the selected tab.
+    #[default]
+    Frame,
+    /// Full capsule pill around the selected tab.
+    Pill,
+    /// Minimal indicator line under the selected tab (or beside it in the sidebar).
+    Underline,
+    /// Filled tinted surface for the selected tab.
+    Filled,
+    /// Typographic/icon highlight without a border box.
+    Minimal,
+}
+
+/// Backdrop of the horizontal navigation bar (`pagesPosition: top | bottom`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabBarBackground {
+    #[default]
+    None,
+    Surface,
+    Glass,
+    /// Floating pill dock tightly wrapping the tabs.
+    Pill,
+}
+
+/// Continuous highlight animation on the selected page tab.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabAnimation {
+    /// Soft light wave traveling smoothly along the perimeter.
+    #[default]
+    Wave,
+    /// Calm uniform luminous breathing.
+    Pulse,
+    /// Soft diagonal sheen sweeping gently across the tab.
+    Shimmer,
+    /// Static highlight without continuous motion.
+    #[serde(rename = "none")]
+    Off,
+}
+
+/// Transition played when switching selection between page tabs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TabTransition {
+    /// Smooth fade-out and fade-in with a subtle scale breath.
+    #[default]
+    Fade,
+    /// Smooth fade paired with a gentle directional slide.
+    Slide,
+    /// Instant switch.
+    #[serde(rename = "none")]
+    Off,
+}
+
+/// Navigation layout and page-tab styling: which pages and library groups are shown, where
+/// the page tabs sit, and their colors, graphics and animations. The user can still hide
+/// Home, Store, News and the tags in Settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ThemeNav {
     /// The pages listed, in order. A page not named is not offered.
     pub pages: Vec<NavPage>,
-    /// The groups listed, in order. A group not named is not shown, except the library:
-    /// a theme cannot take that away.
+    /// The groups listed in the side panel, in order. A group not named is not shown, except
+    /// the library: a theme cannot take that away.
     pub groups: Vec<NavGroup>,
     pub pages_position: PagesPosition,
+    pub pages_align: PagesAlign,
+    pub tab_style: TabStyle,
+    /// Corner radius of page tabs in pixels; `None` follows `shapes.controlRadius` (ignored by `pill`).
+    pub tab_radius: Option<u32>,
+    /// Thickness of the illuminated border or underline, in pixels.
+    pub tab_border_width: f64,
+    /// Horizontal inner padding of each page tab, in pixels.
+    pub tab_padding_x: u32,
+    /// Vertical inner padding of each page tab, in pixels.
+    pub tab_padding_y: u32,
+    /// Gap between adjacent page tabs, in pixels.
+    pub tab_gap: u32,
+    /// Whether page tabs show their icons.
+    pub tab_icons: bool,
+    /// Whether page tabs show their text labels.
+    pub tab_labels: bool,
+    /// Whether page tabs show counts (such as the number of emulators).
+    pub tab_counts: bool,
+    pub tab_bar_background: TabBarBackground,
+    /// Custom hex color for unselected resting tabs; `None` derives a muted tint from `layout.navPages`.
+    pub tab_color: Option<String>,
+    /// Custom hex color on pointer hover / focus; `None` uses `layout.navPages`.
+    pub tab_hover_color: Option<String>,
+    /// Custom hex color for the selected tab when not hovered; `None` blends `layout.navPages` softly.
+    pub tab_active_color: Option<String>,
+    /// Primary hex color of the selected tab's frame/underline/fill; `None` uses `layout.navPages`.
+    pub tab_frame_color: Option<String>,
+    /// Secondary hex color blended into the wave/shimmer highlight; `None` uses `colors.accent`.
+    pub tab_frame_accent: Option<String>,
+    /// Custom hex background tint for the selected tab; `None` derives a subtle wash automatically.
+    pub tab_active_background: Option<String>,
+    /// Tint strength (0–1) of the theme color on resting unselected tabs when `tabColor` is `null`.
+    pub tab_rest_opacity: f64,
+    pub tab_animation: TabAnimation,
+    /// Cycle duration of the continuous tab animation, in seconds.
+    pub tab_animation_speed: f64,
+    /// Intensity (0–1) of the soft ambient glow halo around the selected tab.
+    pub tab_glow: f64,
+    pub tab_transition: TabTransition,
+    /// Duration of the tab selection fade/slide transition, in milliseconds.
+    pub tab_transition_ms: u32,
 }
 
 impl Default for ThemeNav {
     fn default() -> Self {
         Self {
-            pages: vec![NavPage::Home, NavPage::Store, NavPage::News, NavPage::Stats, NavPage::Emulators],
-            groups: vec![NavGroup::Library, NavGroup::Status, NavGroup::Platform, NavGroup::Genres, NavGroup::Tags],
+            pages: vec![
+                NavPage::Home,
+                NavPage::Store,
+                NavPage::News,
+                NavPage::Stats,
+                NavPage::Emulators,
+            ],
+            groups: vec![
+                NavGroup::Library,
+                NavGroup::Status,
+                NavGroup::Platform,
+                NavGroup::Genres,
+                NavGroup::Tags,
+            ],
             pages_position: PagesPosition::Top,
+            pages_align: PagesAlign::Center,
+            tab_style: TabStyle::Frame,
+            tab_radius: None,
+            tab_border_width: 1.5,
+            tab_padding_x: 14,
+            tab_padding_y: 6,
+            tab_gap: 6,
+            tab_icons: true,
+            tab_labels: true,
+            tab_counts: true,
+            tab_bar_background: TabBarBackground::None,
+            tab_color: None,
+            tab_hover_color: None,
+            tab_active_color: None,
+            tab_frame_color: None,
+            tab_frame_accent: None,
+            tab_active_background: None,
+            tab_rest_opacity: 0.32,
+            tab_animation: TabAnimation::Wave,
+            tab_animation_speed: 5.5,
+            tab_glow: 0.78,
+            tab_transition: TabTransition::Fade,
+            tab_transition_ms: 380,
         }
     }
 }
@@ -1347,6 +1499,8 @@ impl Theme {
 
         let n = Fields::section(&root, "nav")?;
         let d = ThemeNav::default();
+        let tab_icons = n.flag("tabIcons", d.tab_icons)?;
+        let tab_labels = n.flag("tabLabels", d.tab_labels)?;
         let nav = ThemeNav {
             pages: n.names("pages")?.unwrap_or(d.pages),
             groups: match n.names::<NavGroup>("groups")? {
@@ -1360,6 +1514,33 @@ impl Theme {
                 }
             },
             pages_position: n.choice("pagesPosition", d.pages_position)?,
+            pages_align: n.choice("pagesAlign", d.pages_align)?,
+            tab_style: n.choice("tabStyle", d.tab_style)?,
+            tab_radius: match n.get("tabRadius") {
+                None => None,
+                Some(_) => Some(n.int("tabRadius", 8, 0, 24)?),
+            },
+            tab_border_width: n.decimal("tabBorderWidth", d.tab_border_width, 0.0, 3.0)?,
+            tab_padding_x: n.int("tabPaddingX", d.tab_padding_x, 6, 28)?,
+            tab_padding_y: n.int("tabPaddingY", d.tab_padding_y, 2, 14)?,
+            tab_gap: n.int("tabGap", d.tab_gap, 0, 24)?,
+            tab_icons,
+            // Never allow completely invisible blank tabs: fall back to showing labels
+            tab_labels: tab_labels || !tab_icons,
+            tab_counts: n.flag("tabCounts", d.tab_counts)?,
+            tab_bar_background: n.choice("tabBarBackground", d.tab_bar_background)?,
+            tab_color: n.color("tabColor")?,
+            tab_hover_color: n.color("tabHoverColor")?,
+            tab_active_color: n.color("tabActiveColor")?,
+            tab_frame_color: n.color("tabFrameColor")?,
+            tab_frame_accent: n.color("tabFrameAccent")?,
+            tab_active_background: n.color("tabActiveBackground")?,
+            tab_rest_opacity: n.decimal("tabRestOpacity", d.tab_rest_opacity, 0.0, 1.0)?,
+            tab_animation: n.choice("tabAnimation", d.tab_animation)?,
+            tab_animation_speed: n.decimal("tabAnimationSpeed", d.tab_animation_speed, 1.5, 15.0)?,
+            tab_glow: n.decimal("tabGlow", d.tab_glow, 0.0, 1.0)?,
+            tab_transition: n.choice("tabTransition", d.tab_transition)?,
+            tab_transition_ms: n.int("tabTransitionMs", d.tab_transition_ms, 0, 1000)?,
         };
 
         let c = Fields::section(&root, "categories")?;
@@ -1980,6 +2161,120 @@ mod tests {
             (r##"{"name":"X","colors":{},"nav":{"pagesPosition":"left"}}"##, "nav.pagesPosition"),
             (r##"{"name":"X","colors":{},"nav":{"pagesPosition":true}}"##, "nav.pagesPosition"),
             (r##"{"name":"X","colors":{},"nav":["home"]}"##, "nav"),
+        ] {
+            let err = Theme::from_json(raw).expect_err(raw);
+            assert!(err.contains(expected), "{raw} -> {err}");
+        }
+    }
+
+    #[test]
+    fn a_theme_customizes_page_tabs_position_colors_graphics_and_animations() {
+        let custom = Theme::from_json(
+            r##"{
+                "kansoTheme": 3,
+                "name": "Custom Tabs",
+                "colors": {},
+                "nav": {
+                    "pagesPosition": "sidebarTop",
+                    "pagesAlign": "right",
+                    "tabStyle": "pill",
+                    "tabRadius": 12,
+                    "tabBorderWidth": 2.25,
+                    "tabPaddingX": 20,
+                    "tabPaddingY": 10,
+                    "tabGap": 12,
+                    "tabIcons": true,
+                    "tabLabels": false,
+                    "tabCounts": false,
+                    "tabBarBackground": "glass",
+                    "tabColor": "#8899aa",
+                    "tabHoverColor": "#ffaa00",
+                    "tabActiveColor": "#ffffff",
+                    "tabFrameColor": "#00e5ff",
+                    "tabFrameAccent": "#ff3d9a",
+                    "tabActiveBackground": "#1a2233cc",
+                    "tabRestOpacity": 0.45,
+                    "tabAnimation": "shimmer",
+                    "tabAnimationSpeed": 3.5,
+                    "tabGlow": 0.5,
+                    "tabTransition": "slide",
+                    "tabTransitionMs": 260
+                }
+            }"##,
+        )
+        .unwrap();
+
+        assert_eq!(custom.nav.pages_position, PagesPosition::SidebarTop);
+        assert_eq!(custom.nav.pages_align, PagesAlign::Right);
+        assert_eq!(custom.nav.tab_style, TabStyle::Pill);
+        assert_eq!(custom.nav.tab_radius, Some(12));
+        assert_eq!(custom.nav.tab_border_width, 2.25);
+        assert_eq!((custom.nav.tab_padding_x, custom.nav.tab_padding_y, custom.nav.tab_gap), (20, 10, 12));
+        assert_eq!((custom.nav.tab_icons, custom.nav.tab_labels, custom.nav.tab_counts), (true, false, false));
+        assert_eq!(custom.nav.tab_bar_background, TabBarBackground::Glass);
+        assert_eq!(custom.nav.tab_color.as_deref(), Some("#8899aa"));
+        assert_eq!(custom.nav.tab_hover_color.as_deref(), Some("#ffaa00"));
+        assert_eq!(custom.nav.tab_active_color.as_deref(), Some("#ffffff"));
+        assert_eq!(custom.nav.tab_frame_color.as_deref(), Some("#00e5ff"));
+        assert_eq!(custom.nav.tab_frame_accent.as_deref(), Some("#ff3d9a"));
+        assert_eq!(custom.nav.tab_active_background.as_deref(), Some("#1a2233cc"));
+        assert_eq!(custom.nav.tab_rest_opacity, 0.45);
+        assert_eq!(custom.nav.tab_animation, TabAnimation::Shimmer);
+        assert_eq!(custom.nav.tab_animation_speed, 3.5);
+        assert_eq!(custom.nav.tab_glow, 0.5);
+        assert_eq!(custom.nav.tab_transition, TabTransition::Slide);
+        assert_eq!(custom.nav.tab_transition_ms, 260);
+
+        let exported = custom.to_json();
+        assert_eq!(Theme::from_json(&exported).unwrap(), custom);
+
+        // Clamping out-of-range numbers and preventing completely blank (iconless + labelless) tabs
+        let clamped = Theme::from_json(
+            r##"{
+                "name": "Clamped",
+                "colors": {},
+                "nav": {
+                    "pagesPosition": "sidebarBottom",
+                    "tabRadius": 999,
+                    "tabBorderWidth": 10,
+                    "tabPaddingX": 1,
+                    "tabPaddingY": 99,
+                    "tabGap": 500,
+                    "tabIcons": false,
+                    "tabLabels": false,
+                    "tabRestOpacity": 4.2,
+                    "tabAnimationSpeed": 0.1,
+                    "tabGlow": -3,
+                    "tabTransitionMs": 5000
+                }
+            }"##,
+        )
+        .unwrap();
+        assert_eq!(clamped.nav.pages_position, PagesPosition::SidebarBottom);
+        assert_eq!(clamped.nav.tab_radius, Some(24));
+        assert_eq!(clamped.nav.tab_border_width, 3.0);
+        assert_eq!((clamped.nav.tab_padding_x, clamped.nav.tab_padding_y, clamped.nav.tab_gap), (6, 14, 24));
+        assert!(!clamped.nav.tab_icons && clamped.nav.tab_labels, "labels stay on if icons are off");
+        assert_eq!(clamped.nav.tab_rest_opacity, 1.0);
+        assert_eq!(clamped.nav.tab_animation_speed, 1.5);
+        assert_eq!(clamped.nav.tab_glow, 0.0);
+        assert_eq!(clamped.nav.tab_transition_ms, 1000);
+
+        // Invalid enum values, colors, and wrong types are rejected with the field name
+        for (raw, expected) in [
+            (r##"{"name":"X","colors":{},"nav":{"pagesAlign":"justify"}}"##, "nav.pagesAlign"),
+            (r##"{"name":"X","colors":{},"nav":{"tabStyle":"neon"}}"##, "nav.tabStyle"),
+            (r##"{"name":"X","colors":{},"nav":{"tabBarBackground":"blur"}}"##, "nav.tabBarBackground"),
+            (r##"{"name":"X","colors":{},"nav":{"tabAnimation":"bounce"}}"##, "nav.tabAnimation"),
+            (r##"{"name":"X","colors":{},"nav":{"tabTransition":"flip"}}"##, "nav.tabTransition"),
+            (r##"{"name":"X","colors":{},"nav":{"tabColor":"red"}}"##, "nav.tabColor"),
+            (r##"{"name":"X","colors":{},"nav":{"tabHoverColor":"url(x)"}}"##, "nav.tabHoverColor"),
+            (r##"{"name":"X","colors":{},"nav":{"tabActiveColor":"rgb(0,0,0)"}}"##, "nav.tabActiveColor"),
+            (r##"{"name":"X","colors":{},"nav":{"tabFrameColor":"nope"}}"##, "nav.tabFrameColor"),
+            (r##"{"name":"X","colors":{},"nav":{"tabFrameAccent":123}}"##, "nav.tabFrameAccent"),
+            (r##"{"name":"X","colors":{},"nav":{"tabActiveBackground":"blue"}}"##, "nav.tabActiveBackground"),
+            (r##"{"name":"X","colors":{},"nav":{"tabRadius":"round"}}"##, "nav.tabRadius"),
+            (r##"{"name":"X","colors":{},"nav":{"tabIcons":"yes"}}"##, "nav.tabIcons"),
         ] {
             let err = Theme::from_json(raw).expect_err(raw);
             assert!(err.contains(expected), "{raw} -> {err}");

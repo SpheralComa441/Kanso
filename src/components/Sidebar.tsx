@@ -1,17 +1,12 @@
 import {
-  ChartNoAxesColumn,
   ChevronDown,
   CloudDownload,
   EyeOff,
   HardDrive,
   History,
-  Home,
-  Joystick,
   LayoutGrid,
   Library,
-  Newspaper,
   Star,
-  Tag,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
@@ -33,7 +28,6 @@ import type {
   GameStatus,
   HideableSection,
   NavGroup,
-  NavPage,
   ThemeNav,
 } from "../types/game";
 import type { CategoryKind } from "./CategoryGrid";
@@ -50,16 +44,6 @@ const SECTION_PREF_KEYS: Record<CategoryKind, string> = {
 interface SidebarProps {
   isOpen: boolean;
   view: MainView;
-  onOpenHome: () => void;
-  onOpenStore: () => void;
-  onOpenNews: () => void;
-  /** Liked deals about to end: the Store entry wears their number. */
-  storeAlerts: number;
-  onOpenStats: () => void;
-  /** Shows the emulators of this PC. */
-  onOpenEmulators: () => void;
-  /** How many emulators there are: the entry says so. */
-  emulatorCount: number;
   /** Shows the tiles of the genres or of the tags. */
   onOpenOverview: (kind: CategoryKind) => void;
   filters: LibraryFilters;
@@ -74,12 +58,13 @@ interface SidebarProps {
   genres: GenreSummary[];
   /** Steam community tags found in the library, most common first. */
   tags: GenreSummary[];
-  /** What the active theme puts in the panel: which groups, in which order, and where the pages go. */
+  /** What the active theme puts in the panel: which groups and in which order. */
   nav: ThemeNav;
-  /** The pages on offer, in order: the theme's and the user's word, worked out once for the whole app. */
-  pages: readonly NavPage[];
   /** The parts of the panel the user chose to leave out, whatever the theme says. */
   hidden: readonly HideableSection[];
+  /** Rendered page tabs when a theme places them inside the side panel. */
+  pagesSlot?: ReactNode;
+  pagesPosition?: "sidebarTop" | "sidebarBottom";
 }
 
 /** Tags shown before "show all": the list can run to a hundred entries. */
@@ -89,16 +74,12 @@ interface NavRowProps {
   id: string;
   label: string;
   count?: number;
-  /** What the count is, when it is not a number of games: said to who cannot see it. */
-  countLabel?: string;
   active: boolean;
   icon?: ReactNode;
-  /** One of the pages beside the library: it wears the color the theme gives to those. */
-  page?: boolean;
   onClick: () => void;
 }
 
-function NavRow({ id, label, count, countLabel, active, icon, page = false, onClick }: NavRowProps) {
+function NavRow({ id, label, count, active, icon, onClick }: NavRowProps) {
   return (
     <button
       id={id}
@@ -106,35 +87,24 @@ function NavRow({ id, label, count, countLabel, active, icon, page = false, onCl
       onClick={onClick}
       aria-pressed={active}
       className={`nav-item flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs ${
-        page
-          ? `nav-page font-medium ${active ? "bg-oled-elevated" : "hover:bg-oled-surface"}`
-          : active
-            ? "bg-oled-elevated font-medium text-zinc-100"
-            : "text-zinc-400 hover:bg-oled-surface hover:text-zinc-200"
+        active
+          ? "bg-oled-elevated font-medium text-zinc-100"
+          : "text-zinc-400 hover:bg-oled-surface hover:text-zinc-200"
       }`}
     >
       {icon}
       <span className="min-w-0 flex-1 truncate" title={label}>
         {label}
       </span>
-      {count !== undefined &&
-        (countLabel ? (
-          <span
-            className="nav-alert shrink-0 rounded-full bg-amber-400 px-1.5 text-2xs font-semibold tabular-nums text-zinc-950"
-            title={countLabel}
-            aria-label={countLabel}
-          >
-            {count}
-          </span>
-        ) : (
-          <span
-            className={`shrink-0 tabular-nums ${
-              page ? "opacity-80" : active ? "text-accent" : "text-zinc-500"
-            }`}
-          >
-            {count}
-          </span>
-        ))}
+      {count !== undefined && (
+        <span
+          className={`shrink-0 tabular-nums ${
+            active ? "text-accent" : "text-zinc-500"
+          }`}
+        >
+          {count}
+        </span>
+      )}
     </button>
   );
 }
@@ -241,19 +211,13 @@ function SwitchRow({ id, label, hint, checked, onChange }: SwitchRowProps) {
 }
 
 /**
- * Collapsible side panel: the pages beside the library (Home, Store, News, Statistics,
- * Emulators) and the groups of the library (its collections, statuses, platforms, genres,
- * tags). The active theme says which pages and groups there are, in which order, and
- * whether the pages come before or after the groups; the user can hide some in Settings.
- * Library filters combine; clicking an active one switches it off.
+ * Collapsible side panel: the groups of the library (its collections, statuses, platforms,
+ * genres, tags). The active theme says which groups there are and in which order; the user
+ * can hide some in Settings. Library filters combine; clicking an active one switches it off.
  */
 export function Sidebar({
   isOpen,
   view,
-  onOpenHome,
-  onOpenStats,
-  onOpenEmulators,
-  emulatorCount,
   onOpenOverview,
   filters,
   onFiltersChange,
@@ -264,11 +228,9 @@ export function Sidebar({
   genres,
   tags,
   nav,
-  pages,
   hidden,
-  onOpenStore,
-  onOpenNews,
-  storeAlerts,
+  pagesSlot,
+  pagesPosition,
 }: SidebarProps) {
   const { t } = useI18n();
   const [showAllTags, setShowAllTags] = useState(false);
@@ -335,68 +297,6 @@ export function Sidebar({
 
   // The stores, then the libraries the plugins brought, each under its own name
   const platformsWithGames = offeredPlatforms(counts.byPlatform, filters.platform, t);
-
-  // The pages, each with its entry; the theme picks among them and orders them
-  const pageRows: Record<NavPage, ReactNode> = {
-    home: (
-      <NavRow
-        key="home"
-        id="nav-home"
-        page
-        label={t("sidebar.home")}
-        active={view === "home"}
-        icon={<Home className="h-3.5 w-3.5 shrink-0" />}
-        onClick={onOpenHome}
-      />
-    ),
-    store: (
-      <NavRow
-        key="store"
-        id="nav-store"
-        page
-        label={t("sidebar.store")}
-        count={storeAlerts > 0 ? storeAlerts : undefined}
-        countLabel={t("store.endingSoon")}
-        active={view === "store"}
-        icon={<Tag className="h-3.5 w-3.5 shrink-0" />}
-        onClick={onOpenStore}
-      />
-    ),
-    news: (
-      <NavRow
-        key="news"
-        id="nav-news"
-        page
-        label={t("sidebar.news")}
-        active={view === "news"}
-        icon={<Newspaper className="h-3.5 w-3.5 shrink-0" />}
-        onClick={onOpenNews}
-      />
-    ),
-    stats: (
-      <NavRow
-        key="stats"
-        id="nav-stats"
-        page
-        label={t("sidebar.stats")}
-        active={view === "stats"}
-        icon={<ChartNoAxesColumn className="h-3.5 w-3.5 shrink-0" />}
-        onClick={onOpenStats}
-      />
-    ),
-    emulators: (
-      <NavRow
-        key="emulators"
-        id="nav-emulators"
-        page
-        label={t("sidebar.emulators")}
-        count={emulatorCount > 0 ? emulatorCount : undefined}
-        active={view === "emulators"}
-        icon={<Joystick className="h-3.5 w-3.5 shrink-0" />}
-        onClick={onOpenEmulators}
-      />
-    ),
-  };
 
   const statusRow = (status: GameStatus) => {
     const active = inLibrary && filters.status === status;
@@ -636,12 +536,6 @@ export function Sidebar({
     selectedOnly.push(["tags", t("sidebar.tags"), tagRow(activeTag)]);
   }
 
-  const pagesAtBottom = nav.pagesPosition === "bottom";
-  const pageList = pages.length > 0 && (
-    <div id="sidebar-pages" className="space-y-0.5">
-      {pages.map((page) => pageRows[page])}
-    </div>
-  );
   const groupList = (
     <>
       {offeredGroups(nav, hidden).map((group) => groupSections[group])}
@@ -654,26 +548,27 @@ export function Sidebar({
     </>
   );
 
+  const pagesAtBottom = Boolean(pagesSlot) && pagesPosition === "sidebarBottom";
+
   return (
     <aside
       id="library-sidebar"
       aria-label={t("sidebar.label")}
-      data-pages={nav.pagesPosition}
+      data-pages={pagesPosition}
       className={`h-full shrink-0 overflow-hidden transition-[width,visibility] duration-200 ease-out ${
         isOpen ? "app-sidebar visible w-[var(--sidebar-width)]" : "invisible w-0"
       }`}
     >
       {pagesAtBottom ? (
-        // The groups scroll; the pages stay within reach under them
         <nav className="flex h-full flex-col">
           <div className="app-sidebar-nav scroll-area fade-ends flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto">
             {groupList}
           </div>
-          {pageList && <div className="app-sidebar-pages scroll-area">{pageList}</div>}
+          <div className="app-sidebar-pages scroll-area">{pagesSlot}</div>
         </nav>
       ) : (
         <nav className="app-sidebar-nav scroll-area fade-top flex h-full flex-col gap-5 overflow-y-auto">
-          {pageList}
+          {pagesSlot}
           {groupList}
         </nav>
       )}

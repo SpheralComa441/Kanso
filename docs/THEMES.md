@@ -183,7 +183,30 @@ they had before. The one difference between versions is about `home.sections`, e
   "nav": {
     "pages": ["home", "store", "news", "stats", "emulators"],
     "groups": ["library", "status", "platform", "genres", "tags"],
-    "pagesPosition": "top"
+    "pagesPosition": "top",
+    "pagesAlign": "center",
+    "tabStyle": "frame",
+    "tabRadius": null,
+    "tabBorderWidth": 1.5,
+    "tabPaddingX": 14,
+    "tabPaddingY": 6,
+    "tabGap": 6,
+    "tabIcons": true,
+    "tabLabels": true,
+    "tabCounts": true,
+    "tabBarBackground": "none",
+    "tabColor": null,
+    "tabHoverColor": null,
+    "tabActiveColor": null,
+    "tabFrameColor": null,
+    "tabFrameAccent": null,
+    "tabActiveBackground": null,
+    "tabRestOpacity": 0.32,
+    "tabAnimation": "wave",
+    "tabAnimationSpeed": 5.5,
+    "tabGlow": 0.78,
+    "tabTransition": "fade",
+    "tabTransitionMs": 380
   },
   "categories": { "platforms": true },
   "store": {
@@ -401,16 +424,41 @@ spegnere lo sfondo, da *Impostazioni → Home*. Lo sfondo prende i suoi colori d
 accento, secondo colore) e non si disegna con le animazioni spente. Un tema non può indicare
 immagini, video o indirizzi per lo sfondo: sceglie solo tra i due nomi.
 
-### `nav` — Il pannello laterale
+### `nav` — Navigazione, schede delle pagine e pannello laterale
 
-Quali pagine e quali gruppi elenca il pannello laterale, in che ordine, e dove stanno le pagine.
-*Which pages and which groups the side panel lists, in which order, and where the pages are.*
+Quali pagine e quali gruppi sono offerti, dove stanno le schede delle pagine (barra superiore,
+barra inferiore o pannello laterale), e i loro colori, grafica e animazioni.
+*Which pages and groups are offered, where the page tabs sit (top bar, bottom bar, or side panel),
+and their colors, graphics and animations.*
 
 | Chiave / Key | Valori / Values | Significato / Meaning |
 | --- | --- | --- |
 | `pages` | elenco di `home`, `store`, `news`, `stats`, `emulators` | Le pagine accanto alla libreria, nell'ordine scritto: Home, Store, News, Statistiche, Emulatori. Ogni nome una volta sola. Una pagina non nominata non è offerta: non ha la sua voce e nessun collegamento porta lì (per esempio «Vedi tutto nello Store» dalla Home). Fa eccezione `emulators` quando l'utente ha emulatori o giochi emulati (vedi sotto). `[]` lascia la sola libreria, più gli Emulatori per chi ne ha |
-| `groups` | elenco di `library`, `status`, `platform`, `genres`, `tags` | I gruppi di voci, nell'ordine scritto: Libreria (tutti i giochi, preferiti, recenti, non installati, nascosti), Stato, Piattaforma, Generi, Tag. Un gruppo non nominato non viene mostrato, **tranne `library`**: se il tema non la nomina, Kanso la mette per prima |
-| `pagesPosition` | `top`, `bottom` | Le pagine sopra i gruppi, oppure sotto: in quel caso restano ferme in fondo al pannello mentre i gruppi scorrono. In una finestra piccola con il testo ingrandito le pagine non prendono mai più di una parte del pannello: scorrono nel loro spazio, e i gruppi tengono il proprio |
+| `groups` | elenco di `library`, `status`, `platform`, `genres`, `tags` | I gruppi del pannello laterale, nell'ordine scritto: Libreria (tutti i giochi, preferiti, recenti, non installati, nascosti), Stato, Piattaforma, Generi, Tag. Un gruppo non nominato non viene mostrato, **tranne `library`**: se il tema non la nomina, Kanso la mette per prima |
+| `pagesPosition` | `top`, `bottom`, `sidebarTop`, `sidebarBottom` | Dove stanno le schede delle pagine: barra orizzontale in alto sotto il titolo (`top`, predefinito), barra orizzontale in fondo alla finestra (`bottom`), elenco verticale in cima al pannello laterale sopra i gruppi (`sidebarTop`), oppure fissato in fondo al pannello laterale sotto i gruppi (`sidebarBottom`) |
+| `pagesAlign` | `left`, `center`, `right` | Allineamento orizzontale delle schede quando `pagesPosition` è `top` o `bottom` |
+| `tabStyle` | `frame`, `pill`, `underline`, `filled`, `minimal` | Aspetto della scheda attiva: piccolo riquadro arrotondato (`frame`), capsula (`pill`), linea luminosa sotto o di lato (`underline`), sfondo pieno sfumato (`filled`), oppure solo colore testo/icona senza riquadro (`minimal`) |
+| `tabRadius` | `null` o 0 – 24 | Raggio degli angoli delle schede in pixel; `null` segue `shapes.controlRadius` (ignorato da `pill`) |
+| `tabBorderWidth` | 0 – 3 | Spessore del riquadro o della linea luminosa, in pixel (predefinito `1.5`) |
+| `tabPaddingX` | 6 – 28 | Spazio interno orizzontale di ciascuna scheda, in pixel |
+| `tabPaddingY` | 2 – 14 | Spazio interno verticale di ciascuna scheda, in pixel |
+| `tabGap` | 0 – 24 | Spazio tra una scheda e l'altra, in pixel |
+| `tabIcons` | `true` / `false` | Mostra le icone sulle schede delle pagine |
+| `tabLabels` | `true` / `false` | Mostra le etichette di testo sulle schede (con `tabIcons: true` e `tabLabels: false` si ottengono schede con sola icona e tooltip; se entrambi sono `false`, il testo resta visibile) |
+| `tabCounts` | `true` / `false` | Mostra i contatori sulle schede (per esempio il numero di emulatori) |
+| `tabBarBackground` | `none`, `surface`, `glass`, `pill` | Sfondo della barra orizzontale (`top` / `bottom`): trasparente (`none`), superficie piena (`surface`), vetro traslucido sfocato (`glass`), oppure contenitore a capsula attorno alle schede (`pill`) |
+| `tabColor` | `null` o `#hex` | Colore a riposo delle schede non selezionate; `null` ricava un tono opaco dal colore del tema (`layout.navPages`) |
+| `tabHoverColor` | `null` o `#hex` | Colore al passaggio del mouse o con il fuoco da tastiera; `null` usa il colore pieno `layout.navPages` |
+| `tabActiveColor` | `null` o `#hex` | Colore della scheda selezionata quando il mouse non è sopra; `null` usa una tonalità morbida di `layout.navPages` |
+| `tabFrameColor` | `null` o `#hex` | Colore principale del riquadro, della linea o del riempimento attivo; `null` usa `layout.navPages` |
+| `tabFrameAccent` | `null` o `#hex` | Secondo colore sfumato nell'onda o nel riflesso; `null` usa `colors.accent` |
+| `tabActiveBackground` | `null` o `#hex` | Sfondo della scheda attiva (`#rrggbb` o `#rrggbbaa`); `null` applica una leggera velatura automatica |
+| `tabRestOpacity` | 0 – 1 | Intensità del colore del tema sulle schede a riposo quando `tabColor` è `null` (predefinito `0.32`) |
+| `tabAnimation` | `wave`, `pulse`, `shimmer`, `none` | Animazione continua sulla scheda selezionata: onda luminosa morbida lungo il perimetro (`wave`), respiro uniforme (`pulse`), riflesso diagonale (`shimmer`), oppure statica (`none`) |
+| `tabAnimationSpeed` | 1.5 – 15 | Durata di un ciclo dell'animazione in secondi (predefinito `5.5` per un movimento morbido) |
+| `tabGlow` | 0 – 1 | Intensità dell'alone luminoso soffuso attorno alla scheda selezionata (`0` = nessun alone) |
+| `tabTransition` | `fade`, `slide`, `none` | Animazione al cambio scheda: dissolvenza in uscita/entrata (`fade`), dissolvenza con leggero scorrimento (`slide`), oppure cambio istantaneo (`none`) |
+| `tabTransitionMs` | 0 – 1000 | Durata della transizione al cambio scheda, in millisecondi (predefinito `380`) |
 
 - La libreria c'è sempre: un tema non può togliere all'utente la strada verso i suoi giochi.
   *The library is always there: a theme cannot lock the user out of their games.*

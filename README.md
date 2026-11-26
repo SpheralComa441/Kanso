@@ -17,7 +17,7 @@
 
 <p align="center"><a href="README.it.md">Italiano</a></p>
 
-![The Home page of Kanso: what to pick up again, what to play next and the most played games](docs/screenshots/home.webp)
+![The Home page of Kanso with the top navigation bar: what to pick up again, what to play next and the most played games](docs/screenshots/home.webp)
 
 ## What it does
 
@@ -29,8 +29,9 @@
   what Kanso knows it reads from the files the store clients already keep on your PC. Signing
   in to a store is optional, and happens on the store's own page.
 - **Yours to restyle.** A theme is a single `.json` file that changes colours, fonts, shapes
-  and motion, and rearranges the side panel and the Home, Store and News pages. It carries no
-  code, so a theme from a stranger is safe to import.
+  and motion, and rearranges the side panel, the navigation tabs (position, style, colours and
+  animations) and the Home, Store and News pages. It carries no code, so a theme from a
+  stranger is safe to import.
 - **Yours to extend.** Plugins add sections to a game's sheet, labels to the covers, commands,
   parts of the Home page, and whole libraries of games from other services. They run in a
   sandbox and reach only the sites they declare.
@@ -42,13 +43,19 @@
 | ![The library as a grid of covers; the cover under the pointer shows genres, play time and last session](docs/screenshots/library.webp) | ![A game's sheet: play time, last session, description and activity](docs/screenshots/game.webp) |
 | ![Statistics: hours per week, most played games, hours by platform](docs/screenshots/statistics.webp) | ![The same library under four of the built-in themes](docs/screenshots/themes.webp) |
 
+![Switching between Home, Store, News, Statistics and Emulators from the top navigation bar, with hover tint, soft wave frame and fade transitions](docs/screenshots/navigation-demo.gif)
+
 ## Features
 
+- **Navigation**: a clean top bar for **Home**, **Store**, **News**, **Statistics** and
+  **Emulators**, with muted theme-tinted tabs that light up on hover, a soft wave-illuminated
+  frame around the active tab and smooth fade transitions — every aspect customizable in a
+  theme file.
 - **Library**: a grid of covers or a compact list, instant search, and filters that combine:
-  favourites, recently played, not installed, platform, status, genres and Steam tags.
-  Genres and tags also open as walls of covers, counted on every platform or on the one you
-  pick. *Installed only* leaves everything else out at once. Games that reach you through Steam
-  family sharing are marked, installed or not.
+  favourites (including favourited emulated games), recently played, not installed, platform,
+  status, genres and Steam tags. Genres and tags also open as walls of covers, counted on every
+  platform or on the one you pick. *Installed only* leaves everything else out at once. Games
+  that reach you through Steam family sharing are marked, installed or not.
 - **Covers and details** from [SteamGridDB](https://www.steamgriddb.com) (with your own free
   key) and the Steam store, in your language. Steam games get covers without a key.
 - **Play time and status**: Steam's counters are read from its local files; games from other
@@ -67,9 +74,13 @@
 - **DLSS**: a game's sheet shows the versions of DLSS it carries. On request Kanso updates
   them, keeping the originals and accepting only libraries signed by NVIDIA.
   See [docs/DLSS.md](docs/DLSS.md).
+- **In-app updates**: checks GitHub Releases automatically on startup (or manually in
+  *Settings → General*) and proposes new versions in a dialog matching your active theme, with
+  direct download and SHA-256 verification.
 - **Accessibility**: text size, high contrast, reduced motion, high-legibility fonts and a
   stronger keyboard focus, on top of any theme.
-- **Four languages**: English, Italian, Spanish and Russian.
+- **Four languages**: English, Italian, Spanish and Russian — including automatic translation
+  and deduplication of genres and custom categories when you switch language.
 
 ## Download
 
@@ -87,19 +98,23 @@ Signing is on its way: see the [code signing policy](#code-signing-policy).
 
 Once installed, Kanso checks GitHub Releases automatically on startup (configurable in
 *Settings → General*) and offers to download, SHA-256 verify and install new versions directly
-in the app.
+in the app, in a dialog styled to match your active theme.
+
+![The in-app update dialog styled to match the active theme, showing release notes and SHA-256 verification](docs/screenshots/updater.webp)
 
 ## Themes and plugins
 
 - **Themes**: eight are built in, and *Settings → Appearance* has an editor for colours and
-  fonts with a live preview. For everything else, write or import a theme file:
+  fonts with a live preview. For everything else — card shapes, layout, icons, embedded fonts,
+  and full customization of the page navigation tabs (top, bottom or sidebar placement, style,
+  bar backdrop, colours, continuous animations and transitions) — write or import a theme file:
   [docs/THEMES.md](docs/THEMES.md), with examples in [docs/themes/](docs/themes/).
 - **Plugins**: nine official ones ship with Kanso (how long a game takes, Steam reviews and
   news, PCGamingWiki, Nexus Mods, price history, what to play tonight, today's pick, the
   library of an itch.io account). Those that contact a site other than Steam are off until
   you switch them on. To write your own: [docs/PLUGINS.md](docs/PLUGINS.md).
 
-![The same Home page under eight themes: five built in, three imported from a theme file](docs/screenshots/themes-demo.webp)
+![The same Home page under eight themes: five built in and three imported from theme files, including bottom dock, underline and sidebar tab layouts](docs/screenshots/themes-demo.gif)
 
 Themes and plugins talk to Kanso only through the formats described in those guides. They are
 your own work: publish them wherever you like, under the licence you choose.
@@ -129,9 +144,9 @@ The whole picture, and how to report a problem privately: [SECURITY.md](SECURITY
 
 ## Status
 
-Kanso is young. Version 0.1 is the first public release; it has been built by very few people
-and tried on very few PCs. The automated tests cover the parsers, the theme validator and
-every official plugin, but much of what talks to a real store client or a real web service
+Kanso is young and in active development (0.3.x); it has been built by very few people and
+tried on very few PCs. The automated tests cover the parsers, the updater, the theme validator
+and every official plugin, but much of what talks to a real store client or a real web service
 has been tried only against recorded or constructed data. What nobody has seen working yet is
 listed, line by line, in [docs/MANUAL-TESTS.md](docs/MANUAL-TESTS.md). If something does not
 work on your PC, [open an issue](https://github.com/SpheralComa441/Kanso/issues): it is the
